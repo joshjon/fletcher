@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// ApprovalService is the human-in-the-loop surface for privileged
+// operations. Agents create pending approvals via MCP tools; humans
+// list / approve / deny them through this RPC.
+service ApprovalService {
+  rpc CreateApproval(CreateApprovalRequest) returns (CreateApprovalResponse) {}
+  rpc GetApproval(GetApprovalRequest) returns (GetApprovalResponse) {}
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse) {}
+  rpc ApproveApproval(ApproveApprovalRequest) returns (ApproveApprovalResponse) {}
+  rpc DenyApproval(DenyApprovalRequest) returns (DenyApprovalResponse) {}
+}
+
+enum ApprovalStatus {
+  APPROVAL_STATUS_UNSPECIFIED = 0;
+  APPROVAL_STATUS_PENDING = 1;
+  APPROVAL_STATUS_APPROVED = 2;
+  APPROVAL_STATUS_DENIED = 3;
+  APPROVAL_STATUS_EXPIRED = 4;
+}
+
+message Approval {
+  string id = 1;
+  ApprovalStatus status = 2;
+  string action = 3;
+  string justification = 4;
+  string requester = 5;
+  string decision_reason = 6;
+  int64 created_at = 7;
+  optional int64 decided_at = 8;
+  int64 expires_at = 9;
+}
+
+message CreateApprovalRequest {
+  string action = 1;
+  string justification = 2;
+  string requester = 3;
+  // ttl_seconds is optional; daemon default applies when zero.
+  int64 ttl_seconds = 4;
+}
+message CreateApprovalResponse {
+  Approval approval = 1;
+}
+
+message GetApprovalRequest {
+  string id = 1;
+}
+message GetApprovalResponse {
+  Approval approval = 1;
+}
+
+message ListApprovalsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  ApprovalStatus status_filter = 3;
+}
+message ListApprovalsResponse {
+  repeated Approval approvals = 1;
+}
+
+message ApproveApprovalRequest {
+  string id = 1;
+  string reason = 2;
+}
+message ApproveApprovalResponse {
+  bool decided = 1;
+  Approval approval = 2;
+}
+
+message DenyApprovalRequest {
+  string id = 1;
+  string reason = 2;
+}
+message DenyApprovalResponse {
+  bool decided = 1;
+  Approval approval = 2;
+}

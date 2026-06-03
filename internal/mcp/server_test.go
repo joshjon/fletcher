@@ -44,7 +44,7 @@ func newTestServerWithBuiltins(t *testing.T, upstream *httptest.Server, recorder
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := fletchermcp.NewServer("fletcher-test", "0.0.0", recorder, logger)
 	httpClient := upstream.Client()
-	fletchermcp.RegisterBuiltinTools(srv, time.Now(), httpClient)
+	fletchermcp.RegisterBuiltinTools(srv, time.Now(), httpClient, nil)
 	return srv
 }
 

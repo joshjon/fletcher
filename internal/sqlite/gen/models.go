@@ -19,6 +19,18 @@ type Job struct {
 	ExitCode     *int64
 }
 
+type PendingApproval struct {
+	ID             string
+	Status         string
+	Action         string
+	Justification  string
+	Requester      string
+	DecisionReason *string
+	CreatedAt      int64
+	DecidedAt      *int64
+	ExpiresAt      int64
+}
+
 type Secret struct {
 	Name       string
 	Ciphertext []byte

@@ -21,6 +21,7 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/joshjon/fletcher/internal/api"
+	"github.com/joshjon/fletcher/internal/approval"
 	"github.com/joshjon/fletcher/internal/audit"
 	"github.com/joshjon/fletcher/internal/buildinfo"
 	"github.com/joshjon/fletcher/internal/gateway"
@@ -134,8 +135,10 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	if err != nil {
 		return nil, err
 	}
+	approvalSvc := approval.NewService(queries, approval.ServiceOptions{})
+
 	mcpServer := fletchermcp.NewServer("fletcher", buildinfo.Version, auditRecorder, logger)
-	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, &http.Client{Timeout: 30 * time.Second})
+	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, &http.Client{Timeout: 30 * time.Second}, approvalSvc)
 	logger.Info("mcp server ready", slog.String("base_url", mcpURL))
 
 	supervisor := job.NewSupervisor(queries, rtDriver, snapDriver, logger, job.SupervisorOptions{
@@ -149,7 +152,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	return &services{
 		cfg:            cfg,
 		supervisor:     supervisor,
-		connectSrv:     newHTTPServer(startedAt.Unix(), job.NewService(queries, supervisor), secretsStore, logger),
+		connectSrv:     newHTTPServer(startedAt.Unix(), job.NewService(queries, supervisor), secretsStore, approvalSvc, logger),
 		gatewaySrv:     newGatewayHTTPServer(gw),
 		mcpSrv:         newMCPHTTPServer(mcpServer),
 		connectLn:      connectLn,
@@ -204,7 +207,7 @@ func listenUnix(ctx context.Context, socketPath string) (net.Listener, error) {
 	return ln, nil
 }
 
-func newHTTPServer(startedAt int64, jobBackend api.JobsBackend, secretsBackend api.SecretsBackend, logger *slog.Logger) *http.Server {
+func newHTTPServer(startedAt int64, jobBackend api.JobsBackend, secretsBackend api.SecretsBackend, approvalsBackend api.ApprovalsBackend, logger *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	interceptors := connect.WithInterceptors(
@@ -226,6 +229,11 @@ func newHTTPServer(startedAt int64, jobBackend api.JobsBackend, secretsBackend a
 		api.NewSecretsService(secretsBackend), interceptors,
 	)
 	mux.Handle(secretsPath, secretsHandler)
+
+	approvalsPath, approvalsHandler := fletcherv1connect.NewApprovalServiceHandler(
+		api.NewApprovalsService(approvalsBackend), interceptors,
+	)
+	mux.Handle(approvalsPath, approvalsHandler)
 
 	return &http.Server{
 		Handler:           mux,

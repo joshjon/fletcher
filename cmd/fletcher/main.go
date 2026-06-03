@@ -40,6 +40,7 @@ func newApp() *cli.Command {
 			healthCmd(),
 			jobCmd(),
 			secretCmd(),
+			approvalCmd(),
 			versionCmd(),
 		},
 	}
