@@ -1,0 +1,12 @@
+{
+  "name": "fletcher-pi-extension",
+  "version": "0.1.0",
+  "description": "Fletcher daemon integration for the pi coding agent: pre-fetches the daemon's model catalog so pi can route to whatever providers the operator configured without per-job env-var fiddling.",
+  "type": "module",
+  "main": "./index.ts",
+  "private": true,
+  "fletcher": {
+    "phase": 14,
+    "design_ref": "DESIGN.md §13 Phase 14"
+  }
+}

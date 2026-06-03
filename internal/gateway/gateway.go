@@ -28,9 +28,10 @@ const SecretName = "anthropic_api_key" //nolint:gosec // identifier, not a crede
 
 // Gateway serves the gateway HTTP API on the daemon's local listener.
 type Gateway struct {
-	secrets  *secrets.Store
-	upstream Upstream
-	logger   *slog.Logger
+	secrets        *secrets.Store
+	upstream       Upstream
+	logger         *slog.Logger
+	gatewayBaseURL string
 }
 
 // Backend translates OpenAI-shaped Chat Completions requests into upstream
@@ -59,21 +60,29 @@ type Upstream interface {
 }
 
 // New constructs a Gateway. secrets and upstream must be non-nil; in
-// production the daemon wires AnthropicBackend as the Upstream.
-func New(secretsStore *secrets.Store, upstream Upstream, logger *slog.Logger) *Gateway {
+// production the daemon wires AnthropicBackend as the Upstream. The
+// gatewayBaseURL is what BuildCatalog embeds in provider entries so
+// agents know what to point at; it may be empty in tests.
+func New(secretsStore *secrets.Store, upstream Upstream, gatewayBaseURL string, logger *slog.Logger) *Gateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Gateway{secrets: secretsStore, upstream: upstream, logger: logger}
+	return &Gateway{
+		secrets:        secretsStore,
+		upstream:       upstream,
+		logger:         logger,
+		gatewayBaseURL: gatewayBaseURL,
+	}
 }
 
 // Handler returns the HTTP mux exposing the gateway's routes:
-// /v1/chat/completions (OpenAI-compatible) and /v1/messages
-// (Anthropic-native).
+// /v1/chat/completions (OpenAI-compatible), /v1/messages (Anthropic-
+// native), and /v1/catalog.json (the discovery surface).
 func (g *Gateway) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/chat/completions", g.chatCompletions)
 	mux.HandleFunc("POST /v1/messages", g.messages)
+	mux.HandleFunc("GET /v1/catalog.json", g.catalog)
 	return mux
 }
 

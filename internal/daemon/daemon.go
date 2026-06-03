@@ -151,11 +151,11 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		slog.String("snapshot", driverKind(cfg.SnapshotKind)),
 	)
 
-	gw := gateway.New(secretsStore, gateway.NewAnthropicBackend(), logger)
 	gatewayLn, gatewayURL, err := listenTCP(ctx, cfg.GatewayListenAddr, "gateway")
 	if err != nil {
 		return nil, err
 	}
+	gw := gateway.New(secretsStore, gateway.NewAnthropicBackend(), gatewayURL, logger)
 	logger.Info("model gateway ready", slog.String("base_url", gatewayURL))
 
 	startedAt := time.Now()
@@ -182,6 +182,9 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 			"ANTHROPIC_BASE_URL=" + gatewayURL,
 			"ANTHROPIC_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
 			"FLETCHER_MCP_URL=" + mcpURL,
+			// Model catalog (Phase 14) — pi-extension and other agents fetch
+			// this on startup to discover providers without per-job config.
+			"FLETCHER_CATALOG_URL=" + gatewayURL + "/v1/catalog.json",
 		},
 		CredentialsRoot: cfg.CredentialsDir,
 	})
@@ -192,6 +195,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		approvals: approvalSvc,
 		peers:     peerSvc,
 		serverKey: wgKeyProvider,
+		models:    gatewayCatalog{baseURL: gatewayURL},
 	}
 	return &services{
 		cfg:            cfg,
@@ -216,7 +220,16 @@ type connectDeps struct {
 	approvals api.ApprovalsBackend
 	peers     api.PeersBackend
 	serverKey api.ServerKeyProvider
+	models    api.CatalogBuilder
 }
+
+// gatewayCatalog adapts the gateway-base-URL closure into the
+// api.CatalogBuilder interface. The base URL is captured at daemon start
+// (after the listener binds) so random-port (":0") setups are handled.
+type gatewayCatalog struct{ baseURL string }
+
+// Catalog returns the current catalog snapshot.
+func (g gatewayCatalog) Catalog() gateway.Catalog { return gateway.BuildCatalog(g.baseURL) }
 
 func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	var g run.Group
@@ -294,6 +307,11 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		api.NewPeersService(deps.peers, deps.serverKey), interceptors,
 	)
 	mux.Handle(peersPath, peersHandler)
+
+	modelsPath, modelsHandler := fletcherv1connect.NewModelServiceHandler(
+		api.NewModelsService(deps.models), interceptors,
+	)
+	mux.Handle(modelsPath, modelsHandler)
 
 	return &http.Server{
 		Handler:           mux,

@@ -31,3 +31,7 @@ func newAdminClient(socket string) fletcherv1connect.AdminServiceClient {
 func newJobsClient(socket string) fletcherv1connect.JobServiceClient {
 	return fletcherv1connect.NewJobServiceClient(unixHTTPClient(socket), unixBaseURL)
 }
+
+func newModelsClient(socket string) fletcherv1connect.ModelServiceClient {
+	return fletcherv1connect.NewModelServiceClient(unixHTTPClient(socket), unixBaseURL)
+}

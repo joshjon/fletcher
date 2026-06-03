@@ -75,7 +75,7 @@ func TestGatewayForwardsToBackendWithSecret(t *testing.T) {
 			Usage:   gateway.OpenAIUsage{PromptTokens: 4, CompletionTokens: 1, TotalTokens: 5},
 		},
 	}
-	gw := gateway.New(store, backend, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	gw := gateway.New(store, backend, "http://test.local", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv := httptest.NewServer(gw.Handler())
 	t.Cleanup(srv.Close)
 
@@ -106,7 +106,7 @@ func TestGatewayReturnsUnauthorizedWhenNoSecret(t *testing.T) {
 	store, err := secrets.Open(sqliteq.New(db), filepath.Join(dir, "age.key"))
 	require.NoError(t, err)
 
-	gw := gateway.New(store, &captureBackend{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	gw := gateway.New(store, &captureBackend{}, "http://test.local", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv := httptest.NewServer(gw.Handler())
 	t.Cleanup(srv.Close)
 
@@ -125,7 +125,7 @@ func TestGatewayReturnsUnauthorizedWhenNoSecret(t *testing.T) {
 
 func TestGatewayRejectsMalformedRequest(t *testing.T) {
 	store := newSecrets(t, "sk")
-	gw := gateway.New(store, &captureBackend{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	gw := gateway.New(store, &captureBackend{}, "http://test.local", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv := httptest.NewServer(gw.Handler())
 	t.Cleanup(srv.Close)
 
@@ -144,7 +144,7 @@ func TestGatewayMessagesPassesBodyThroughWithSecretStamped(t *testing.T) {
 			Body:       io.NopCloser(strings.NewReader(`{"id":"msg_1","content":[{"type":"text","text":"hi"}]}`)),
 		},
 	}
-	gw := gateway.New(store, backend, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	gw := gateway.New(store, backend, "http://test.local", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv := httptest.NewServer(gw.Handler())
 	t.Cleanup(srv.Close)
 
@@ -170,7 +170,7 @@ func TestGatewayMessagesReturnsUnauthorizedWhenNoSecret(t *testing.T) {
 	store, err := secrets.Open(sqliteq.New(db), filepath.Join(dir, "age.key"))
 	require.NoError(t, err)
 
-	gw := gateway.New(store, &captureBackend{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	gw := gateway.New(store, &captureBackend{}, "http://test.local", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv := httptest.NewServer(gw.Handler())
 	t.Cleanup(srv.Close)
 
@@ -178,6 +178,44 @@ func TestGatewayMessagesReturnsUnauthorizedWhenNoSecret(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestGatewayCatalogJSONShape(t *testing.T) {
+	store := newSecrets(t, "sk")
+	gw := gateway.New(store, &captureBackend{}, "http://gateway.local:11500", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv := httptest.NewServer(gw.Handler())
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/v1/catalog.json")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var got gateway.Catalog
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+	require.Equal(t, gateway.CatalogSchemaVersion, got.SchemaVersion)
+
+	// Endpoints carry the env-var convention each SDK family expects:
+	// ANTHROPIC_BASE_URL is the bare host (SDK appends /v1/messages);
+	// OPENAI_BASE_URL ends in /v1 (SDK appends /chat/completions).
+	wantEndpoints := map[string]gateway.Endpoint{
+		"anthropic-messages":      {Kind: "anthropic-messages", URL: "http://gateway.local:11500", EnvVar: "ANTHROPIC_BASE_URL"},
+		"openai-chat-completions": {Kind: "openai-chat-completions", URL: "http://gateway.local:11500/v1", EnvVar: "OPENAI_BASE_URL"},
+	}
+	require.Len(t, got.Endpoints, len(wantEndpoints))
+	for _, ep := range got.Endpoints {
+		want, ok := wantEndpoints[ep.Kind]
+		require.True(t, ok, "unexpected endpoint kind %q", ep.Kind)
+		require.Equal(t, want, ep)
+	}
+
+	// Models are a flat list (not duplicated per endpoint).
+	require.NotEmpty(t, got.Models)
+	for _, m := range got.Models {
+		require.NotEmpty(t, m.ID)
+		require.NotEmpty(t, m.Label)
+		require.Equal(t, "anthropic", m.Upstream)
+	}
 }
 
 func TestAnthropicBackendForwardMessagesPassesBodyAndKey(t *testing.T) {

@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// ModelService exposes the daemon's model catalog: which endpoints
+// agents should point at and which models the gateway can route to.
+// Same data is served raw at GET /v1/catalog.json on the gateway
+// listener for extension-capable agents (pi).
+//
+// The catalog is split into two lists because they answer two different
+// questions: "where do I point my agent?" (endpoints) and "what model
+// name do I use in my request?" (models). Earlier shapes nested models
+// under providers, which duplicated model rows and made the OpenAI-vs-
+// Anthropic wire-format distinction read as if there were two upstreams.
+// There is one upstream — Anthropic — exposed via two wire formats.
+service ModelService {
+  // ListModels returns the catalog.
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse) {}
+}
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  // schema_version is bumped when the wire shape changes incompatibly.
+  // Consumers should ignore unknown fields and tolerate newer minor
+  // versions. Current version: 2.
+  int32 schema_version = 1;
+  // endpoints describes where to point each kind of agent.
+  repeated Endpoint endpoints = 2;
+  // models lists every model name the gateway accepts in a request
+  // body, regardless of which endpoint shape the request uses.
+  repeated Model models = 3;
+}
+
+// Endpoint is one base URL an agent can be configured against, paired
+// with the env-var convention the matching SDK family expects. The
+// daemon's per-job env injection sets each env_var to its url so agents
+// running inside forks need no per-job configuration; humans use the
+// same data to wire up agents running outside a fork.
+message Endpoint {
+  // kind is the wire format the endpoint speaks
+  // ("anthropic-messages" or "openai-chat-completions").
+  string kind = 1;
+  // url is the exact value to set as env_var. Anthropic SDKs expect
+  // the bare host (no /v1) and append /v1/messages themselves; OpenAI
+  // SDKs expect a URL that already ends in /v1 and append
+  // /chat/completions. The catalog reflects each SDK's convention so
+  // the value is copy-pastable.
+  string url = 2;
+  // env_var is the environment variable name SDKs in this family read
+  // (ANTHROPIC_BASE_URL or OPENAI_BASE_URL).
+  string env_var = 3;
+}
+
+message Model {
+  // id is the wire identifier passed in the request body (e.g.
+  // "claude-opus-4-7").
+  string id = 1;
+  // label is the human-friendly display name.
+  string label = 2;
+  // upstream is the provider that actually serves this model
+  // ("anthropic"). Future multi-provider routing populates this per row.
+  string upstream = 3;
+}

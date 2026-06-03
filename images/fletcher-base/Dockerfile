@@ -125,6 +125,11 @@ RUN ln -sf /home/fletcher/.local/bin/claude /usr/local/bin/claude && \
     ln -sf /home/fletcher/.local/bin/codex /usr/local/bin/codex && \
     ln -sf /home/fletcher/.local/bin/pi /usr/local/bin/pi
 
+# Fletcher pi-extension (Phase 14): fetches the daemon's model catalog on
+# pi startup so users see provider/model lists without per-job env-var
+# fiddling. Pattern mirrors exe.dev's `exe-dev` pi-extension.
+COPY --chown=fletcher:fletcher pi-extension/ /home/fletcher/.pi/agent/extensions/fletcher/
+
 # Daemon contract baked into env defaults. The daemon overrides these
 # per-job at runtime with the actual listen addresses; values here are
 # sensible fallbacks so an agent invoked directly inside the image
@@ -134,6 +139,7 @@ ENV ANTHROPIC_BASE_URL="http://daemon-gateway.fletcher.internal/v1" \
     OPENAI_BASE_URL="http://daemon-gateway.fletcher.internal/v1" \
     OPENAI_API_KEY="fletcher-gateway" \
     FLETCHER_MCP_URL="http://daemon-mcp.fletcher.internal" \
+    FLETCHER_CATALOG_URL="http://daemon-gateway.fletcher.internal/v1/catalog.json" \
     FLETCHER_WORKSPACE="/workspace" \
     FLETCHER_BASE=1
 
