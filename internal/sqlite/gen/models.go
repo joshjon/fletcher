@@ -19,6 +19,15 @@ type Job struct {
 	ExitCode     *int64
 }
 
+type Peer struct {
+	ID         string
+	Name       string
+	PublicKey  string
+	AllowedIps string
+	CreatedAt  int64
+	UpdatedAt  int64
+}
+
 type PendingApproval struct {
 	ID             string
 	Status         string

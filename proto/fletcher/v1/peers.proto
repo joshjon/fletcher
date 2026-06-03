@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// PeerService manages WireGuard peers and emits the wg-quick configs
+// operators install on either side of the tunnel. Private keys are
+// returned to the client exactly once at creation time — the daemon
+// retains only the public half.
+service PeerService {
+  // CreatePeer mints a new keypair for the peer, persists the public
+  // half, and returns the rendered client wg-quick config (which
+  // contains the one-time private key).
+  rpc CreatePeer(CreatePeerRequest) returns (CreatePeerResponse) {}
+  rpc GetPeer(GetPeerRequest) returns (GetPeerResponse) {}
+  rpc ListPeers(ListPeersRequest) returns (ListPeersResponse) {}
+  rpc DeletePeer(DeletePeerRequest) returns (DeletePeerResponse) {}
+  // ServerConfig renders the wg-quick config for the daemon-side
+  // WireGuard interface, including every registered peer.
+  rpc ServerConfig(ServerConfigRequest) returns (ServerConfigResponse) {}
+}
+
+message Peer {
+  string id = 1;
+  string name = 2;
+  string public_key = 3;
+  repeated string allowed_ips = 4;
+  int64 created_at = 5;
+  int64 updated_at = 6;
+}
+
+message CreatePeerRequest {
+  string name = 1;
+  repeated string allowed_ips = 2;
+  // Optional render fields: when present, the response includes a
+  // wg-quick config ready to drop on the client device.
+  string client_address = 3;       // e.g., "10.99.0.2/32"
+  repeated string client_dns = 4;
+  string server_endpoint = 5;      // host:port
+  string server_public_key = 6;    // override; daemon supplies if empty
+  repeated string client_allowed_ips = 7;
+}
+message CreatePeerResponse {
+  Peer peer = 1;
+  // ClientConfig is the wg-quick body. Empty when client_address was not
+  // supplied; in that case the caller can call ServerConfig later to
+  // render with full context.
+  string client_config = 2;
+  // PrivateKey is the peer's WireGuard private key, returned exactly
+  // once. Callers must hand it to the client device immediately and not
+  // log it.
+  string private_key = 3;
+}
+
+message GetPeerRequest { string id = 1; }
+message GetPeerResponse { Peer peer = 1; }
+
+message ListPeersRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+message ListPeersResponse { repeated Peer peers = 1; }
+
+message DeletePeerRequest { string id = 1; }
+message DeletePeerResponse { bool existed = 1; }
+
+message ServerConfigRequest {
+  string address = 1;      // e.g., "10.99.0.1/24"
+  int32 listen_port = 2;   // e.g., 51820
+}
+message ServerConfigResponse {
+  // Config is the rendered wg-quick body, with the daemon's server
+  // private key interpolated in.
+  string config = 1;
+  // PublicKey is the daemon's server public key (safe to share).
+  string public_key = 2;
+}

@@ -28,6 +28,7 @@ import (
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/job"
 	fletchermcp "github.com/joshjon/fletcher/internal/mcp"
+	"github.com/joshjon/fletcher/internal/peer"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver"
 	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
@@ -159,6 +160,8 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		return nil, err
 	}
 	approvalSvc := approval.NewService(queries, approval.ServiceOptions{})
+	peerSvc := peer.NewService(queries)
+	wgKeyProvider := newServerKeyProvider(secretsStore)
 
 	mcpServer := fletchermcp.NewServer("fletcher", buildinfo.Version, auditRecorder, logger)
 	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, &http.Client{Timeout: 30 * time.Second}, approvalSvc)
@@ -172,10 +175,17 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		},
 	})
 
+	connectDeps := connectDeps{
+		jobs:      job.NewService(queries, supervisor),
+		secrets:   secretsStore,
+		approvals: approvalSvc,
+		peers:     peerSvc,
+		serverKey: wgKeyProvider,
+	}
 	return &services{
 		cfg:            cfg,
 		supervisor:     supervisor,
-		connectSrv:     newHTTPServer(startedAt.Unix(), job.NewService(queries, supervisor), secretsStore, approvalSvc, logger),
+		connectSrv:     newHTTPServer(startedAt.Unix(), connectDeps, logger),
 		gatewaySrv:     newGatewayHTTPServer(gw),
 		mcpSrv:         newMCPHTTPServer(mcpServer),
 		connectLn:      connectLn,
@@ -184,6 +194,17 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		gatewayBaseURL: gatewayURL,
 		mcpBaseURL:     mcpURL,
 	}, nil
+}
+
+// connectDeps bundles the backends newHTTPServer wires onto the Connect
+// mux. Grouping them in a struct keeps newHTTPServer's signature tight
+// as more services land.
+type connectDeps struct {
+	jobs      api.JobsBackend
+	secrets   api.SecretsBackend
+	approvals api.ApprovalsBackend
+	peers     api.PeersBackend
+	serverKey api.ServerKeyProvider
 }
 
 func (s *services) run(ctx context.Context, logger *slog.Logger) error {
@@ -230,7 +251,7 @@ func listenUnix(ctx context.Context, socketPath string) (net.Listener, error) {
 	return ln, nil
 }
 
-func newHTTPServer(startedAt int64, jobBackend api.JobsBackend, secretsBackend api.SecretsBackend, approvalsBackend api.ApprovalsBackend, logger *slog.Logger) *http.Server {
+func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	interceptors := connect.WithInterceptors(
@@ -244,19 +265,24 @@ func newHTTPServer(startedAt int64, jobBackend api.JobsBackend, secretsBackend a
 	mux.Handle(adminPath, adminHandler)
 
 	jobsPath, jobsHandler := fletcherv1connect.NewJobServiceHandler(
-		api.NewJobsService(jobBackend), interceptors,
+		api.NewJobsService(deps.jobs), interceptors,
 	)
 	mux.Handle(jobsPath, jobsHandler)
 
 	secretsPath, secretsHandler := fletcherv1connect.NewSecretServiceHandler(
-		api.NewSecretsService(secretsBackend), interceptors,
+		api.NewSecretsService(deps.secrets), interceptors,
 	)
 	mux.Handle(secretsPath, secretsHandler)
 
 	approvalsPath, approvalsHandler := fletcherv1connect.NewApprovalServiceHandler(
-		api.NewApprovalsService(approvalsBackend), interceptors,
+		api.NewApprovalsService(deps.approvals), interceptors,
 	)
 	mux.Handle(approvalsPath, approvalsHandler)
+
+	peersPath, peersHandler := fletcherv1connect.NewPeerServiceHandler(
+		api.NewPeersService(deps.peers, deps.serverKey), interceptors,
+	)
+	mux.Handle(peersPath, peersHandler)
 
 	return &http.Server{
 		Handler:           mux,

@@ -1,0 +1,177 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"connectrpc.com/connect"
+
+	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
+	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
+	"github.com/joshjon/fletcher/internal/network/wireguard"
+	"github.com/joshjon/fletcher/internal/peer"
+)
+
+// PeersBackend is the consumer-defined interface the PeersService handler
+// needs.
+type PeersBackend interface {
+	Create(ctx context.Context, p peer.CreateParams) (peer.Created, error)
+	Get(ctx context.Context, id string) (peer.Peer, error)
+	List(ctx context.Context, limit, offset int32) ([]peer.Peer, error)
+	Delete(ctx context.Context, id string) (bool, error)
+}
+
+// ServerKeyProvider exposes the daemon's WireGuard server identity. It is
+// supplied by the daemon (which loads the private half from the secrets
+// store at startup).
+type ServerKeyProvider interface {
+	ServerPrivateKey(ctx context.Context) (wireguard.Key, error)
+	ServerPublicKey(ctx context.Context) (wireguard.Key, error)
+}
+
+// PeersService implements fletcherv1connect.PeerServiceHandler.
+type PeersService struct {
+	fletcherv1connect.UnimplementedPeerServiceHandler
+	peers     PeersBackend
+	serverKey ServerKeyProvider
+}
+
+// NewPeersService wires a PeersService.
+func NewPeersService(peers PeersBackend, serverKey ServerKeyProvider) *PeersService {
+	return &PeersService{peers: peers, serverKey: serverKey}
+}
+
+// CreatePeer mints a peer, returns its public-half record + (optionally)
+// a rendered client wg-quick config that includes the one-time private key.
+func (s *PeersService) CreatePeer(ctx context.Context, req *connect.Request[fletcherv1.CreatePeerRequest]) (*connect.Response[fletcherv1.CreatePeerResponse], error) {
+	m := req.Msg
+	created, err := s.peers.Create(ctx, peer.CreateParams{
+		Name:       m.GetName(),
+		AllowedIPs: m.GetAllowedIps(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &fletcherv1.CreatePeerResponse{
+		Peer:       peerToProto(created.Peer),
+		PrivateKey: string(created.PrivateKey),
+	}
+	// Optionally render the client wg-quick config. We render when the
+	// caller supplied enough info; otherwise the peer row is created and
+	// the caller is expected to render later.
+	if m.GetClientAddress() != "" && m.GetServerEndpoint() != "" {
+		serverPub, err := s.resolveServerPublicKey(ctx, wireguard.Key(m.GetServerPublicKey()))
+		if err != nil {
+			return nil, err
+		}
+		allowed := m.GetClientAllowedIps()
+		if len(allowed) == 0 {
+			allowed = []string{"10.99.0.0/24"}
+		}
+		resp.ClientConfig = wireguard.RenderClient(wireguard.ClientConfig{
+			PrivateKey:          created.PrivateKey,
+			Address:             m.GetClientAddress(),
+			DNS:                 m.GetClientDns(),
+			ServerPublicKey:     serverPub,
+			Endpoint:            m.GetServerEndpoint(),
+			AllowedIPs:          allowed,
+			PersistentKeepalive: 25,
+		})
+	}
+	return connect.NewResponse(resp), nil
+}
+
+// GetPeer returns a peer by id.
+func (s *PeersService) GetPeer(ctx context.Context, req *connect.Request[fletcherv1.GetPeerRequest]) (*connect.Response[fletcherv1.GetPeerResponse], error) {
+	got, err := s.peers.Get(ctx, req.Msg.GetId())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.GetPeerResponse{Peer: peerToProto(got)}), nil
+}
+
+// ListPeers returns peers newest-first.
+func (s *PeersService) ListPeers(ctx context.Context, req *connect.Request[fletcherv1.ListPeersRequest]) (*connect.Response[fletcherv1.ListPeersResponse], error) {
+	got, err := s.peers.List(ctx, req.Msg.GetLimit(), req.Msg.GetOffset())
+	if err != nil {
+		return nil, err
+	}
+	protos := make([]*fletcherv1.Peer, len(got))
+	for i, p := range got {
+		protos[i] = peerToProto(p)
+	}
+	return connect.NewResponse(&fletcherv1.ListPeersResponse{Peers: protos}), nil
+}
+
+// DeletePeer removes a peer. Missing IDs return existed=false rather
+// than an error.
+func (s *PeersService) DeletePeer(ctx context.Context, req *connect.Request[fletcherv1.DeletePeerRequest]) (*connect.Response[fletcherv1.DeletePeerResponse], error) {
+	existed, err := s.peers.Delete(ctx, req.Msg.GetId())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.DeletePeerResponse{Existed: existed}), nil
+}
+
+// ServerConfig renders the daemon-side wg-quick config aggregating every
+// registered peer. The response contains the server private key inline,
+// so callers should treat it as sensitive (same trust model as a file at
+// /etc/wireguard/fletcher.conf).
+func (s *PeersService) ServerConfig(ctx context.Context, req *connect.Request[fletcherv1.ServerConfigRequest]) (*connect.Response[fletcherv1.ServerConfigResponse], error) {
+	if s.serverKey == nil {
+		return nil, errors.New("server key provider not configured")
+	}
+	priv, err := s.serverKey.ServerPrivateKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load server key: %w", err)
+	}
+	pub, err := wireguard.PublicFromPrivate(priv)
+	if err != nil {
+		return nil, fmt.Errorf("derive public key: %w", err)
+	}
+	allPeers, err := s.peers.List(ctx, 1000, 0)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]wireguard.PeerEntry, len(allPeers))
+	for i, p := range allPeers {
+		entries[i] = wireguard.PeerEntry{
+			Name:       p.Name,
+			PublicKey:  p.PublicKey,
+			AllowedIPs: p.AllowedIPs,
+		}
+	}
+	cfg := wireguard.RenderServer(wireguard.ServerConfig{
+		PrivateKey: priv,
+		Address:    req.Msg.GetAddress(),
+		ListenPort: int(req.Msg.GetListenPort()),
+		Peers:      entries,
+	})
+	return connect.NewResponse(&fletcherv1.ServerConfigResponse{
+		Config:    cfg,
+		PublicKey: string(pub),
+	}), nil
+}
+
+func (s *PeersService) resolveServerPublicKey(ctx context.Context, override wireguard.Key) (wireguard.Key, error) {
+	if override != "" {
+		return override, nil
+	}
+	if s.serverKey == nil {
+		return "", errors.New("server key provider not configured")
+	}
+	return s.serverKey.ServerPublicKey(ctx)
+}
+
+func peerToProto(p peer.Peer) *fletcherv1.Peer {
+	return &fletcherv1.Peer{
+		Id:         p.ID,
+		Name:       p.Name,
+		PublicKey:  string(p.PublicKey),
+		AllowedIps: append([]string(nil), p.AllowedIPs...),
+		CreatedAt:  p.CreatedAt.Unix(),
+		UpdatedAt:  p.UpdatedAt.Unix(),
+	}
+}

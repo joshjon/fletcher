@@ -41,6 +41,7 @@ func newApp() *cli.Command {
 			jobCmd(),
 			secretCmd(),
 			approvalCmd(),
+			peerCmd(),
 			versionCmd(),
 		},
 	}
