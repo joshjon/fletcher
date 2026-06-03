@@ -28,8 +28,13 @@ import (
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/job"
 	fletchermcp "github.com/joshjon/fletcher/internal/mcp"
+	"github.com/joshjon/fletcher/internal/runtime"
+	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver"
 	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
+	"github.com/joshjon/fletcher/internal/runtime/runcdriver"
 	"github.com/joshjon/fletcher/internal/secrets"
+	"github.com/joshjon/fletcher/internal/snapshot"
+	"github.com/joshjon/fletcher/internal/snapshot/btrfsdriver"
 	snapmock "github.com/joshjon/fletcher/internal/snapshot/mockdriver"
 	"github.com/joshjon/fletcher/internal/sqlite"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
@@ -48,6 +53,18 @@ type Config struct {
 	GatewayListenAddr string
 	MCPListenAddr     string
 	AgeIdentityPath   string
+
+	// RuntimeKind selects the runtime.Driver: "mock" (default), "runc",
+	// or "firecracker". Non-mock drivers are Linux-only.
+	RuntimeKind string
+	// SnapshotKind selects the snapshot.Driver: "mock" (default) or
+	// "btrfs". Non-mock drivers are Linux-only.
+	SnapshotKind string
+	// BtrfsRoot is the on-disk root for btrfs subvolumes; required when
+	// SnapshotKind=btrfs.
+	BtrfsRoot string
+	// RuncBinary overrides the runc executable path when RuntimeKind=runc.
+	RuncBinary string
 }
 
 // shutdownTimeout caps how long the daemon waits for in-flight work before
@@ -116,12 +133,18 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		return nil, fmt.Errorf("open secrets store: %w", err)
 	}
 
-	snapRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
-	snapDriver, err := snapmock.New(snapRoot)
+	snapDriver, err := buildSnapshotDriver(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("init snapshot driver: %w", err)
 	}
-	rtDriver := runtimemock.New()
+	rtDriver, err := buildRuntimeDriver(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("init runtime driver: %w", err)
+	}
+	logger.Info("drivers selected",
+		slog.String("runtime", driverKind(cfg.RuntimeKind)),
+		slog.String("snapshot", driverKind(cfg.SnapshotKind)),
+	)
 
 	gw := gateway.New(secretsStore, gateway.NewAnthropicBackend(), logger)
 	gatewayLn, gatewayURL, err := listenTCP(ctx, cfg.GatewayListenAddr, "gateway")
@@ -346,6 +369,58 @@ func signalActor(ctx context.Context) (func() error, func(error)) {
 	}
 	interrupt := func(_ error) { close(cancelCh) }
 	return execute, interrupt
+}
+
+// defaultDriverKind is the fallback when neither config nor flag selects
+// one. "mock" everywhere so an unconfigured daemon still boots on macOS.
+const defaultDriverKind = "mock"
+
+// buildSnapshotDriver constructs the snapshot.Driver chosen by cfg. The
+// btrfs driver is only meaningful on Linux; on darwin it constructs to a
+// shim whose New returns "not supported on darwin".
+func buildSnapshotDriver(cfg Config) (snapshot.Driver, error) {
+	kind := cfg.SnapshotKind
+	if kind == "" {
+		kind = defaultDriverKind
+	}
+	switch kind {
+	case "mock":
+		snapRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
+		return snapmock.New(snapRoot)
+	case "btrfs":
+		root := cfg.BtrfsRoot
+		if root == "" {
+			root = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
+		}
+		return btrfsdriver.New(btrfsdriver.Options{RootDir: root})
+	default:
+		return nil, fmt.Errorf("unknown snapshot kind %q", cfg.SnapshotKind)
+	}
+}
+
+// buildRuntimeDriver constructs the runtime.Driver chosen by cfg.
+func buildRuntimeDriver(cfg Config) (runtime.Driver, error) {
+	kind := cfg.RuntimeKind
+	if kind == "" {
+		kind = defaultDriverKind
+	}
+	switch kind {
+	case "mock":
+		return runtimemock.New(), nil
+	case "runc":
+		return runcdriver.New(runcdriver.Options{Binary: cfg.RuncBinary})
+	case "firecracker":
+		return firecrackerdriver.New(firecrackerdriver.Options{})
+	default:
+		return nil, fmt.Errorf("unknown runtime kind %q", cfg.RuntimeKind)
+	}
+}
+
+func driverKind(v string) string {
+	if v == "" {
+		return defaultDriverKind
+	}
+	return v
 }
 
 func newLogger(level string) *slog.Logger {

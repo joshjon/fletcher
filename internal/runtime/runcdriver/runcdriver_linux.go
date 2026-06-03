@@ -1,0 +1,169 @@
+//go:build linux
+
+// Package runcdriver is the Linux runc-backed runtime driver. It writes
+// a minimal OCI bundle (config.json plus a rootfs pointer to the
+// snapshot path) into a working directory and invokes the runc binary
+// to execute the job's command inside Linux namespaces.
+//
+// Real isolation depends on the operator's runc + kernel config:
+// rootless-runc with user namespaces gives meaningful isolation on a
+// home server; running as root unlocks the full set of capabilities
+// the OCI spec supports. The driver is deliberately conservative — it
+// drops all capabilities and disables the network namespace by default.
+//
+// This package compiles only on Linux; runcdriver_other.go provides a
+// "not supported" stub for cross-compilation.
+package runcdriver
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync/atomic"
+	"time"
+
+	"github.com/joshjon/fletcher/internal/runtime"
+)
+
+// Driver is a runtime.Driver that runs jobs as OCI containers via runc.
+type Driver struct {
+	binary    string
+	bundleDir string
+	counter   atomic.Uint64
+}
+
+// Options configures a Driver.
+type Options struct {
+	// Binary is the path to the runc executable; defaults to "runc"
+	// (resolved via $PATH).
+	Binary string
+	// BundleDir is the directory under which transient OCI bundles are
+	// materialised before each run. Defaults to a fresh subdir of os.TempDir.
+	BundleDir string
+}
+
+// New constructs a Driver. Returns an error if the runc binary is not
+// reachable.
+func New(opts Options) (*Driver, error) {
+	binary := opts.Binary
+	if binary == "" {
+		binary = "runc"
+	}
+	if _, err := exec.LookPath(binary); err != nil {
+		return nil, fmt.Errorf("runc: %s not found in PATH: %w", binary, err)
+	}
+	bundleDir := opts.BundleDir
+	if bundleDir == "" {
+		var err error
+		bundleDir, err = os.MkdirTemp("", "fletcher-runc-")
+		if err != nil {
+			return nil, fmt.Errorf("create bundle dir: %w", err)
+		}
+	}
+	if err := os.MkdirAll(bundleDir, 0o700); err != nil {
+		return nil, fmt.Errorf("ensure bundle dir: %w", err)
+	}
+	return &Driver{binary: binary, bundleDir: bundleDir}, nil
+}
+
+// Run materialises a bundle for spec, executes 'runc run', and returns
+// the process exit code.
+func (d *Driver) Run(ctx context.Context, spec runtime.Spec, stdout, stderr io.Writer) (runtime.Result, error) {
+	id := fmt.Sprintf("fletcher-%d-%d", time.Now().UnixNano(), d.counter.Add(1))
+	bundle := filepath.Join(d.bundleDir, id)
+	if err := os.MkdirAll(bundle, 0o700); err != nil {
+		return runtime.Result{}, fmt.Errorf("create bundle: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(bundle) }()
+
+	if err := writeOCIConfig(bundle, spec); err != nil {
+		return runtime.Result{}, fmt.Errorf("write config: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, d.binary, "run", "--bundle", bundle, id)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if ctx.Err() != nil {
+			return runtime.Result{}, fmt.Errorf("job cancelled: %w", ctx.Err())
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			//nolint:gosec // POSIX exit codes fit in int32
+			return runtime.Result{ExitCode: int32(exitErr.ExitCode())}, nil
+		}
+		return runtime.Result{}, fmt.Errorf("runc run: %w", err)
+	}
+	return runtime.Result{ExitCode: 0}, nil
+}
+
+// writeOCIConfig produces a minimal-but-valid config.json inside bundle
+// that runs spec.Command via /bin/sh -c inside spec.WorkDir as rootfs.
+func writeOCIConfig(bundle string, spec runtime.Spec) error {
+	if spec.WorkDir == "" {
+		return errors.New("spec.WorkDir is required (must point at the snapshot rootfs)")
+	}
+	cfg := minimalOCIConfig(spec)
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(bundle, "config.json"), b, 0o600)
+}
+
+// minimalOCIConfig builds a small but valid OCI runtime spec for runc.
+// We drop the network namespace and all capabilities by default — jobs
+// reach out via the daemon-mediated MCP/gateway, not directly.
+func minimalOCIConfig(spec runtime.Spec) map[string]any {
+	env := append([]string{
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		"HOME=/root",
+	}, spec.Env...)
+
+	return map[string]any{
+		"ociVersion": "1.0.2",
+		"process": map[string]any{
+			"terminal": false,
+			"user":     map[string]any{"uid": 0, "gid": 0},
+			"args":     []string{"/bin/sh", "-c", spec.Command},
+			"env":      env,
+			"cwd":      "/",
+			"capabilities": map[string]any{
+				"bounding":  []string{},
+				"effective": []string{},
+				"permitted": []string{},
+				"ambient":   []string{},
+			},
+			"noNewPrivileges": true,
+		},
+		"root": map[string]any{
+			"path":     spec.WorkDir,
+			"readonly": false,
+		},
+		"hostname": "fletcher-job",
+		"mounts": []map[string]any{
+			{"destination": "/proc", "type": "proc", "source": "proc"},
+			{"destination": "/dev", "type": "tmpfs", "source": "tmpfs", "options": []string{"nosuid", "strictatime", "mode=755", "size=65536k"}},
+			{"destination": "/dev/pts", "type": "devpts", "source": "devpts", "options": []string{"nosuid", "noexec", "newinstance", "ptmxmode=0666", "mode=0620"}},
+			{"destination": "/dev/shm", "type": "tmpfs", "source": "shm", "options": []string{"nosuid", "noexec", "nodev", "mode=1777", "size=65536k"}},
+			{"destination": "/dev/mqueue", "type": "mqueue", "source": "mqueue", "options": []string{"nosuid", "noexec", "nodev"}},
+			{"destination": "/sys", "type": "sysfs", "source": "sysfs", "options": []string{"nosuid", "noexec", "nodev", "ro"}},
+		},
+		"linux": map[string]any{
+			"namespaces": []map[string]any{
+				{"type": "pid"},
+				{"type": "ipc"},
+				{"type": "uts"},
+				{"type": "mount"},
+				{"type": "network"},
+			},
+		},
+	}
+}

@@ -44,6 +44,28 @@ func serveCmd() *cli.Command {
 				Sources: cli.EnvVars("FLETCHER_AGE_KEY"),
 				Value:   defaultAgeIdentityPath(),
 			},
+			&cli.StringFlag{
+				Name:    "runtime",
+				Usage:   "runtime driver: mock, runc, firecracker (non-mock require Linux)",
+				Sources: cli.EnvVars("FLETCHER_RUNTIME"),
+				Value:   "mock",
+			},
+			&cli.StringFlag{
+				Name:    "snapshot",
+				Usage:   "snapshot driver: mock, btrfs (btrfs requires Linux)",
+				Sources: cli.EnvVars("FLETCHER_SNAPSHOT"),
+				Value:   "mock",
+			},
+			&cli.StringFlag{
+				Name:    "btrfs-root",
+				Usage:   "root directory for btrfs snapshots (must be on a btrfs FS)",
+				Sources: cli.EnvVars("FLETCHER_BTRFS_ROOT"),
+			},
+			&cli.StringFlag{
+				Name:    "runc-binary",
+				Usage:   "path to the runc executable (defaults to $PATH lookup)",
+				Sources: cli.EnvVars("FLETCHER_RUNC_BINARY"),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return daemon.Run(ctx, daemon.Config{
@@ -53,6 +75,10 @@ func serveCmd() *cli.Command {
 				GatewayListenAddr: cmd.String("gateway-listen"),
 				MCPListenAddr:     cmd.String("mcp-listen"),
 				AgeIdentityPath:   cmd.String("age-key"),
+				RuntimeKind:       cmd.String("runtime"),
+				SnapshotKind:      cmd.String("snapshot"),
+				BtrfsRoot:         cmd.String("btrfs-root"),
+				RuncBinary:        cmd.String("runc-binary"),
 			})
 		},
 	}
