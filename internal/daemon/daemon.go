@@ -173,8 +173,14 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 
 	supervisor := job.NewSupervisor(queries, rtDriver, snapDriver, logger, job.SupervisorOptions{
 		JobEnv: []string{
+			// OpenAI-compatible path (Codex, Aider, OpenHands, pi). The
+			// gateway's /v1/chat/completions handler translates to Anthropic.
 			"OPENAI_BASE_URL=" + gatewayURL + "/v1",
 			"OPENAI_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
+			// Anthropic-native path (Claude Code). The gateway's /v1/messages
+			// handler proxies the raw Messages request to api.anthropic.com.
+			"ANTHROPIC_BASE_URL=" + gatewayURL,
+			"ANTHROPIC_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
 			"FLETCHER_MCP_URL=" + mcpURL,
 		},
 		CredentialsRoot: cfg.CredentialsDir,

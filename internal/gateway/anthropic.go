@@ -36,6 +36,29 @@ func (a *AnthropicBackend) Complete(req OpenAIRequest, apiKey string) (OpenAIRes
 	return a.CompleteContext(context.Background(), req, apiKey)
 }
 
+// ForwardMessages proxies a raw Anthropic Messages request body to the
+// upstream endpoint, stamping the x-api-key header from the secrets
+// store. The returned response is the raw upstream response — including
+// streaming SSE bodies — and is the caller's responsibility to close.
+func (a *AnthropicBackend) ForwardMessages(ctx context.Context, body []byte, apiKey string) (*http.Response, error) {
+	// gosec flags this as SSRF because the body is user-controlled. The
+	// endpoint URL (a.Endpoint) is operator-configured at daemon start, not
+	// user-controlled — forwarding agent requests to a fixed upstream is
+	// the gateway's purpose (DESIGN.md §6).
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.Endpoint, bytes.NewReader(body)) //nolint:gosec // fixed upstream URL, not user-controlled
+	if err != nil {
+		return nil, fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", a.APIVersion)
+	resp, err := a.HTTPClient.Do(req) //nolint:gosec // see above; fixed upstream
+	if err != nil {
+		return nil, fmt.Errorf("call anthropic: %w", err)
+	}
+	return resp, nil
+}
+
 // CompleteContext is the ctx-aware variant of Complete. Most callers go
 // through the Backend interface (Complete) which uses Background; the
 // gateway handler uses CompleteContext directly when available.
