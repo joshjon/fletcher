@@ -9,9 +9,15 @@ option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;
 // returned to the client exactly once at creation time - the daemon
 // retains only the public half.
 service PeerService {
-  // CreatePeer mints a new keypair for the peer, persists the public
-  // half, and returns the rendered client wg-quick config (which
-  // contains the one-time private key).
+  // PairPeer is the one-line peer-onboarding path. The daemon auto-
+  // allocates a tunnel IP from its configured subnet and uses its
+  // stored public_endpoint; the caller supplies only a name. Returns
+  // a fully-rendered client wg-quick config ready to drop on the
+  // device. Fails clearly if the daemon has no public_endpoint set.
+  rpc PairPeer(PairPeerRequest) returns (PairPeerResponse) {}
+  // CreatePeer is the power-user path: the caller supplies the
+  // tunnel address and server endpoint explicitly. Use PairPeer for
+  // the common case.
   rpc CreatePeer(CreatePeerRequest) returns (CreatePeerResponse) {}
   rpc GetPeer(GetPeerRequest) returns (GetPeerResponse) {}
   rpc ListPeers(ListPeersRequest) returns (ListPeersResponse) {}
@@ -64,6 +70,26 @@ message ListPeersResponse { repeated Peer peers = 1; }
 
 message DeletePeerRequest { string id = 1; }
 message DeletePeerResponse { bool existed = 1; }
+
+message PairPeerRequest {
+  // name is the only required input; everything else is daemon-resolved.
+  string name = 1;
+}
+message PairPeerResponse {
+  Peer peer = 1;
+  // client_config is the rendered wg-quick body, ready to drop on the
+  // peer device or scan as a QR code.
+  string client_config = 2;
+  // private_key is the peer's WireGuard private key, returned exactly
+  // once. Callers must hand it to the client device immediately and not
+  // log it.
+  string private_key = 3;
+  // address is the tunnel /32 the daemon allocated for this peer.
+  string address = 4;
+  // endpoint is the host:port the peer's device will dial; copied from
+  // the daemon's configured public_endpoint.
+  string endpoint = 5;
+}
 
 message ServerConfigRequest {
   string address = 1;      // e.g. "10.99.0.1/24"

@@ -72,6 +72,11 @@ func serveCmd() *cli.Command {
 				Sources: cli.EnvVars("FLETCHER_CREDENTIALS_DIR"),
 				Value:   defaultCredentialsDir(),
 			},
+			&cli.StringFlag{
+				Name:    "public-endpoint",
+				Usage:   "host:port peers dial to reach this daemon from outside the LAN (e.g. home.example.com:51820); enables `fletcher peer pair`",
+				Sources: cli.EnvVars("FLETCHER_PUBLIC_ENDPOINT"),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return daemon.Run(ctx, daemon.Config{
@@ -86,6 +91,7 @@ func serveCmd() *cli.Command {
 				BtrfsRoot:         cmd.String("btrfs-root"),
 				RuncBinary:        cmd.String("runc-binary"),
 				CredentialsDir:    cmd.String("credentials-dir"),
+				PublicEndpoint:    cmd.String("public-endpoint"),
 			})
 		},
 	}

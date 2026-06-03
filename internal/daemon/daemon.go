@@ -70,6 +70,12 @@ type Config struct {
 	// mode (Phase 12) resolves each credential's HostRelPath. Defaults to
 	// the operator's $HOME; empty disables credential mounting entirely.
 	CredentialsDir string
+	// PublicEndpoint is the host:port peers dial to reach this daemon
+	// over WireGuard from outside the LAN. Set once at install (e.g.
+	// "home.example.com:51820"); empty means peer pairing fails with a
+	// clear error pointing at how to set it. Operator-knowledge config:
+	// the daemon can't reliably auto-detect this in every NAT setup.
+	PublicEndpoint string
 }
 
 // shutdownTimeout caps how long the daemon waits for in-flight work before
@@ -164,7 +170,9 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		return nil, err
 	}
 	approvalSvc := approval.NewService(queries, approval.ServiceOptions{})
-	peerSvc := peer.NewService(queries)
+	peerSvc := peer.NewService(queries, peer.Options{
+		PublicEndpoint: cfg.PublicEndpoint,
+	})
 	wgKeyProvider := newServerKeyProvider(secretsStore)
 
 	mcpServer := fletchermcp.NewServer("fletcher", buildinfo.Version, auditRecorder, logger)

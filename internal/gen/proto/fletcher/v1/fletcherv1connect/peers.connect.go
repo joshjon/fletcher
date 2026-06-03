@@ -33,6 +33,8 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// PeerServicePairPeerProcedure is the fully-qualified name of the PeerService's PairPeer RPC.
+	PeerServicePairPeerProcedure = "/fletcher.v1.PeerService/PairPeer"
 	// PeerServiceCreatePeerProcedure is the fully-qualified name of the PeerService's CreatePeer RPC.
 	PeerServiceCreatePeerProcedure = "/fletcher.v1.PeerService/CreatePeer"
 	// PeerServiceGetPeerProcedure is the fully-qualified name of the PeerService's GetPeer RPC.
@@ -48,9 +50,15 @@ const (
 
 // PeerServiceClient is a client for the fletcher.v1.PeerService service.
 type PeerServiceClient interface {
-	// CreatePeer mints a new keypair for the peer, persists the public
-	// half, and returns the rendered client wg-quick config (which
-	// contains the one-time private key).
+	// PairPeer is the one-line peer-onboarding path. The daemon auto-
+	// allocates a tunnel IP from its configured subnet and uses its
+	// stored public_endpoint; the caller supplies only a name. Returns
+	// a fully-rendered client wg-quick config ready to drop on the
+	// device. Fails clearly if the daemon has no public_endpoint set.
+	PairPeer(context.Context, *connect.Request[v1.PairPeerRequest]) (*connect.Response[v1.PairPeerResponse], error)
+	// CreatePeer is the power-user path: the caller supplies the
+	// tunnel address and server endpoint explicitly. Use PairPeer for
+	// the common case.
 	CreatePeer(context.Context, *connect.Request[v1.CreatePeerRequest]) (*connect.Response[v1.CreatePeerResponse], error)
 	GetPeer(context.Context, *connect.Request[v1.GetPeerRequest]) (*connect.Response[v1.GetPeerResponse], error)
 	ListPeers(context.Context, *connect.Request[v1.ListPeersRequest]) (*connect.Response[v1.ListPeersResponse], error)
@@ -71,6 +79,12 @@ func NewPeerServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 	baseURL = strings.TrimRight(baseURL, "/")
 	peerServiceMethods := v1.File_fletcher_v1_peers_proto.Services().ByName("PeerService").Methods()
 	return &peerServiceClient{
+		pairPeer: connect.NewClient[v1.PairPeerRequest, v1.PairPeerResponse](
+			httpClient,
+			baseURL+PeerServicePairPeerProcedure,
+			connect.WithSchema(peerServiceMethods.ByName("PairPeer")),
+			connect.WithClientOptions(opts...),
+		),
 		createPeer: connect.NewClient[v1.CreatePeerRequest, v1.CreatePeerResponse](
 			httpClient,
 			baseURL+PeerServiceCreatePeerProcedure,
@@ -106,11 +120,17 @@ func NewPeerServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 
 // peerServiceClient implements PeerServiceClient.
 type peerServiceClient struct {
+	pairPeer     *connect.Client[v1.PairPeerRequest, v1.PairPeerResponse]
 	createPeer   *connect.Client[v1.CreatePeerRequest, v1.CreatePeerResponse]
 	getPeer      *connect.Client[v1.GetPeerRequest, v1.GetPeerResponse]
 	listPeers    *connect.Client[v1.ListPeersRequest, v1.ListPeersResponse]
 	deletePeer   *connect.Client[v1.DeletePeerRequest, v1.DeletePeerResponse]
 	serverConfig *connect.Client[v1.ServerConfigRequest, v1.ServerConfigResponse]
+}
+
+// PairPeer calls fletcher.v1.PeerService.PairPeer.
+func (c *peerServiceClient) PairPeer(ctx context.Context, req *connect.Request[v1.PairPeerRequest]) (*connect.Response[v1.PairPeerResponse], error) {
+	return c.pairPeer.CallUnary(ctx, req)
 }
 
 // CreatePeer calls fletcher.v1.PeerService.CreatePeer.
@@ -140,9 +160,15 @@ func (c *peerServiceClient) ServerConfig(ctx context.Context, req *connect.Reque
 
 // PeerServiceHandler is an implementation of the fletcher.v1.PeerService service.
 type PeerServiceHandler interface {
-	// CreatePeer mints a new keypair for the peer, persists the public
-	// half, and returns the rendered client wg-quick config (which
-	// contains the one-time private key).
+	// PairPeer is the one-line peer-onboarding path. The daemon auto-
+	// allocates a tunnel IP from its configured subnet and uses its
+	// stored public_endpoint; the caller supplies only a name. Returns
+	// a fully-rendered client wg-quick config ready to drop on the
+	// device. Fails clearly if the daemon has no public_endpoint set.
+	PairPeer(context.Context, *connect.Request[v1.PairPeerRequest]) (*connect.Response[v1.PairPeerResponse], error)
+	// CreatePeer is the power-user path: the caller supplies the
+	// tunnel address and server endpoint explicitly. Use PairPeer for
+	// the common case.
 	CreatePeer(context.Context, *connect.Request[v1.CreatePeerRequest]) (*connect.Response[v1.CreatePeerResponse], error)
 	GetPeer(context.Context, *connect.Request[v1.GetPeerRequest]) (*connect.Response[v1.GetPeerResponse], error)
 	ListPeers(context.Context, *connect.Request[v1.ListPeersRequest]) (*connect.Response[v1.ListPeersResponse], error)
@@ -159,6 +185,12 @@ type PeerServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewPeerServiceHandler(svc PeerServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	peerServiceMethods := v1.File_fletcher_v1_peers_proto.Services().ByName("PeerService").Methods()
+	peerServicePairPeerHandler := connect.NewUnaryHandler(
+		PeerServicePairPeerProcedure,
+		svc.PairPeer,
+		connect.WithSchema(peerServiceMethods.ByName("PairPeer")),
+		connect.WithHandlerOptions(opts...),
+	)
 	peerServiceCreatePeerHandler := connect.NewUnaryHandler(
 		PeerServiceCreatePeerProcedure,
 		svc.CreatePeer,
@@ -191,6 +223,8 @@ func NewPeerServiceHandler(svc PeerServiceHandler, opts ...connect.HandlerOption
 	)
 	return "/fletcher.v1.PeerService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case PeerServicePairPeerProcedure:
+			peerServicePairPeerHandler.ServeHTTP(w, r)
 		case PeerServiceCreatePeerProcedure:
 			peerServiceCreatePeerHandler.ServeHTTP(w, r)
 		case PeerServiceGetPeerProcedure:
@@ -209,6 +243,10 @@ func NewPeerServiceHandler(svc PeerServiceHandler, opts ...connect.HandlerOption
 
 // UnimplementedPeerServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedPeerServiceHandler struct{}
+
+func (UnimplementedPeerServiceHandler) PairPeer(context.Context, *connect.Request[v1.PairPeerRequest]) (*connect.Response[v1.PairPeerResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.PeerService.PairPeer is not implemented"))
+}
 
 func (UnimplementedPeerServiceHandler) CreatePeer(context.Context, *connect.Request[v1.CreatePeerRequest]) (*connect.Response[v1.CreatePeerResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.PeerService.CreatePeer is not implemented"))

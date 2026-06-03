@@ -7,6 +7,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/joshjon/fletcher/internal/errs"
 	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/network/wireguard"
@@ -20,6 +21,14 @@ type PeersBackend interface {
 	Get(ctx context.Context, id string) (peer.Peer, error)
 	List(ctx context.Context, limit, offset int32) ([]peer.Peer, error)
 	Delete(ctx context.Context, id string) (bool, error)
+	// NextAvailableAddress is the auto-allocator backing PairPeer.
+	NextAvailableAddress(ctx context.Context) (string, error)
+	// PublicEndpoint returns the operator-configured host:port for
+	// PairPeer; empty disables pairing with a clear error.
+	PublicEndpoint() string
+	// TunnelCIDR is the subnet the server side announces as AllowedIPs
+	// to peers (so they route only fletcher-network traffic through).
+	TunnelCIDR() string
 }
 
 // ServerKeyProvider exposes the daemon's WireGuard server identity. It is
@@ -40,6 +49,51 @@ type PeersService struct {
 // NewPeersService wires a PeersService.
 func NewPeersService(peers PeersBackend, serverKey ServerKeyProvider) *PeersService {
 	return &PeersService{peers: peers, serverKey: serverKey}
+}
+
+// PairPeer is the one-call pairing path: the daemon auto-allocates a
+// tunnel IP, uses its configured public_endpoint, and returns a fully-
+// rendered client wg-quick config. Fails clearly if public_endpoint
+// is unset.
+func (s *PeersService) PairPeer(ctx context.Context, req *connect.Request[fletcherv1.PairPeerRequest]) (*connect.Response[fletcherv1.PairPeerResponse], error) {
+	endpoint := s.peers.PublicEndpoint()
+	if endpoint == "" {
+		return nil, errs.New(errs.CategoryFailedPrecondition,
+			"daemon has no public-endpoint configured; restart with --public-endpoint <host:port> or set FLETCHER_PUBLIC_ENDPOINT")
+	}
+	if s.serverKey == nil {
+		return nil, errors.New("server key provider not configured")
+	}
+	address, err := s.peers.NextAvailableAddress(ctx)
+	if err != nil {
+		return nil, err
+	}
+	serverPub, err := s.serverKey.ServerPublicKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load server public key: %w", err)
+	}
+	created, err := s.peers.Create(ctx, peer.CreateParams{
+		Name:       req.Msg.GetName(),
+		AllowedIPs: []string{address},
+	})
+	if err != nil {
+		return nil, err
+	}
+	clientCfg := wireguard.RenderClient(wireguard.ClientConfig{
+		PrivateKey:          created.PrivateKey,
+		Address:             address,
+		ServerPublicKey:     serverPub,
+		Endpoint:            endpoint,
+		AllowedIPs:          []string{s.peers.TunnelCIDR()},
+		PersistentKeepalive: 25,
+	})
+	return connect.NewResponse(&fletcherv1.PairPeerResponse{
+		Peer:         peerToProto(created.Peer),
+		ClientConfig: clientCfg,
+		PrivateKey:   string(created.PrivateKey),
+		Address:      address,
+		Endpoint:     endpoint,
+	}), nil
 }
 
 // CreatePeer mints a peer, returns its public-half record + (optionally)

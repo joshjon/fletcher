@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -20,6 +21,12 @@ import (
 	"github.com/joshjon/fletcher/internal/network/wireguard"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
 )
+
+// DefaultTunnelCIDR is the WireGuard subnet new peers are allocated
+// from when `fletcher peer pair` is used without explicit addressing.
+// The .1 address is reserved for the server interface; peer pairing
+// hands out .2 through .254.
+const DefaultTunnelCIDR = "10.99.0.0/24"
 
 // ErrNotFound is returned when a peer ID does not exist.
 var ErrNotFound = errs.New(errs.CategoryNotFound, "peer not found")
@@ -58,11 +65,90 @@ type Created struct {
 
 // Service is the high-level peers API.
 type Service struct {
-	q sqliteq.Querier
+	q              sqliteq.Querier
+	tunnelCIDR     string
+	publicEndpoint string
 }
 
-// NewService wires a Service to a sqlc querier.
-func NewService(q sqliteq.Querier) *Service { return &Service{q: q} }
+// Options configures a Service's pair-time defaults.
+type Options struct {
+	// TunnelCIDR is the subnet `peer pair` allocates /32s from. Empty
+	// uses DefaultTunnelCIDR (10.99.0.0/24).
+	TunnelCIDR string
+	// PublicEndpoint is the host:port (e.g. "home.example.com:51820")
+	// that `peer pair` renders into client wg-quick configs. Empty
+	// causes PairPeer to fail with a clear error pointing at how to
+	// set it; CreatePeer with an explicit server_endpoint still works.
+	PublicEndpoint string
+}
+
+// NewService wires a Service to a sqlc querier with the given options.
+func NewService(q sqliteq.Querier, opts Options) *Service {
+	cidr := opts.TunnelCIDR
+	if cidr == "" {
+		cidr = DefaultTunnelCIDR
+	}
+	return &Service{q: q, tunnelCIDR: cidr, publicEndpoint: opts.PublicEndpoint}
+}
+
+// TunnelCIDR returns the subnet used for auto-allocation. The caller
+// renders this into the server-side AllowedIPs when needed.
+func (s *Service) TunnelCIDR() string { return s.tunnelCIDR }
+
+// PublicEndpoint returns the operator-configured host:port peers should
+// dial, or "" if unset. Returned for use in pair-time config rendering.
+func (s *Service) PublicEndpoint() string { return s.publicEndpoint }
+
+// NextAvailableAddress returns the next free /32 inside the service's
+// TunnelCIDR, suitable for assigning to a new peer. The .1 host address
+// is reserved for the server interface; allocation starts at .2 and
+// scans existing peers to skip ones already claimed. Returns a
+// CategoryConflict error if the subnet is exhausted.
+func (s *Service) NextAvailableAddress(ctx context.Context) (string, error) {
+	prefix, err := netip.ParsePrefix(s.tunnelCIDR)
+	if err != nil {
+		return "", fmt.Errorf("parse tunnel cidr %q: %w", s.tunnelCIDR, err)
+	}
+	taken, err := s.takenAddresses(ctx)
+	if err != nil {
+		return "", err
+	}
+	server := prefix.Addr().Next()
+	candidate := server.Next()
+	for prefix.Contains(candidate) && candidate.Next().IsValid() {
+		if !taken[candidate] && !candidate.IsMulticast() {
+			return candidate.String() + "/32", nil
+		}
+		candidate = candidate.Next()
+	}
+	return "", errs.Newf(errs.CategoryConflict, "tunnel subnet %s is exhausted", s.tunnelCIDR)
+}
+
+// takenAddresses returns the set of host addresses already claimed by
+// existing peers (parsing each peer's AllowedIPs).
+func (s *Service) takenAddresses(ctx context.Context) (map[netip.Addr]bool, error) {
+	rows, err := s.q.ListPeers(ctx, sqliteq.ListPeersParams{Limit: 1 << 30, Offset: 0})
+	if err != nil {
+		return nil, fmt.Errorf("list peers for allocation: %w", err)
+	}
+	taken := make(map[netip.Addr]bool, len(rows))
+	for _, r := range rows {
+		for _, raw := range strings.Split(r.AllowedIps, ",") {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
+			if p, perr := netip.ParsePrefix(raw); perr == nil {
+				taken[p.Addr()] = true
+				continue
+			}
+			if a, aerr := netip.ParseAddr(raw); aerr == nil {
+				taken[a] = true
+			}
+		}
+	}
+	return taken, nil
+}
 
 // Create generates a fresh keypair, persists the peer with the public
 // half, and returns both halves so the caller can hand the private key

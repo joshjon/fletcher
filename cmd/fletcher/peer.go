@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"connectrpc.com/connect"
+	"github.com/mdp/qrterminal/v3"
 	"github.com/urfave/cli/v3"
 
 	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
@@ -20,12 +21,87 @@ func peerCmd() *cli.Command {
 		Name:  "peer",
 		Usage: "manage WireGuard peers and emit wg-quick configs",
 		Commands: []*cli.Command{
+			peerPairCmd(),
 			peerAddCmd(),
 			peerListCmd(),
 			peerDeleteCmd(),
 			peerServerConfigCmd(),
 		},
 	}
+}
+
+func peerPairCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "pair",
+		Usage:     "add a new device (phone, laptop) to the tunnel with one command",
+		ArgsUsage: "<name>",
+		Description: `Auto-allocates a tunnel IP and renders the wg-quick config the
+device needs. The daemon must have been started with
+--public-endpoint (or FLETCHER_PUBLIC_ENDPOINT) set to the
+host:port your peers will dial; everything else is figured out
+for you.
+
+The rendered config is printed in full; if stdout is a terminal,
+a QR code is also rendered for scanning with the WireGuard mobile
+app. The private key is shown exactly once - paste it into the
+device immediately and don't log it elsewhere.`,
+		Flags: []cli.Flag{
+			socketFlag(),
+			&cli.BoolFlag{
+				Name:  "no-qr",
+				Usage: "skip the QR-code render (useful when copying the config to a non-mobile device)",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			name := cmd.Args().First()
+			if name == "" {
+				return errors.New("peer name is required")
+			}
+			client := newPeersClient(cmd.String("socket"))
+			resp, err := client.PairPeer(ctx, connect.NewRequest(&fletcherv1.PairPeerRequest{Name: name}))
+			if err != nil {
+				return err
+			}
+			renderPairResult(os.Stdout, resp.Msg, !cmd.Bool("no-qr"))
+			return nil
+		},
+	}
+}
+
+func renderPairResult(w io.Writer, resp *fletcherv1.PairPeerResponse, withQR bool) {
+	p := resp.GetPeer()
+	fmt.Fprintf(w, "paired %s\n", p.GetName())
+	fmt.Fprintf(w, "  id:       %s\n", p.GetId())
+	fmt.Fprintf(w, "  address:  %s\n", resp.GetAddress())
+	fmt.Fprintf(w, "  endpoint: %s\n", resp.GetEndpoint())
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "# ===== CLIENT CONFIG (private key shown exactly once) =====")
+	fmt.Fprint(w, resp.GetClientConfig())
+	if withQR && isTerminal(w) {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Scan with the WireGuard app (the QR encodes the config above):")
+		qrterminal.GenerateWithConfig(resp.GetClientConfig(), qrterminal.Config{
+			Level:     qrterminal.M,
+			Writer:    w,
+			BlackChar: qrterminal.BLACK,
+			WhiteChar: qrterminal.WHITE,
+			QuietZone: 1,
+		})
+	}
+}
+
+// isTerminal reports whether w is an os.File attached to a TTY. Used to
+// decide whether to render the QR (which looks like noise when piped).
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 func peerAddCmd() *cli.Command {

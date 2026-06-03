@@ -18,7 +18,37 @@ func newService(t *testing.T) *peer.Service {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
-	return peer.NewService(sqliteq.New(db))
+	return peer.NewService(sqliteq.New(db), peer.Options{})
+}
+
+func TestNextAvailableAddressStartsAtTwoAndSkipsTaken(t *testing.T) {
+	s := newService(t)
+	ctx := context.Background()
+
+	got, err := s.NextAvailableAddress(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "10.99.0.2/32", got, "fresh subnet allocates .2 first (.1 is reserved for the server)")
+
+	// Claim .2 and .3; next should be .4.
+	_, err = s.Create(ctx, peer.CreateParams{Name: "a", AllowedIPs: []string{"10.99.0.2/32"}})
+	require.NoError(t, err)
+	_, err = s.Create(ctx, peer.CreateParams{Name: "b", AllowedIPs: []string{"10.99.0.3/32"}})
+	require.NoError(t, err)
+
+	got, err = s.NextAvailableAddress(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "10.99.0.4/32", got)
+}
+
+func TestPublicEndpointPassThrough(t *testing.T) {
+	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "f.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, sqlite.Migrate(db))
+
+	s := peer.NewService(sqliteq.New(db), peer.Options{PublicEndpoint: "home.example.com:51820"})
+	require.Equal(t, "home.example.com:51820", s.PublicEndpoint())
+	require.Equal(t, peer.DefaultTunnelCIDR, s.TunnelCIDR())
 }
 
 func TestCreatePeerReturnsKeypairOnce(t *testing.T) {

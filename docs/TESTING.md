@@ -4,9 +4,9 @@ How to exercise Fletcher manually. Automated tests live alongside the
 code (`make test`); this file is for end-to-end checks against a
 running daemon.
 
-For now this doc focuses on **macOS development testing**. Linux server
-deployment gets its own section once the rough edges in the peer
-pairing flow are cleaned up - see [Known rough edges](#known-rough-edges).
+Two flows: **macOS for development** (no Linux, no networking knowledge
+required) and **Linux server for real deployment** (one-time setup of
+your public endpoint, then add devices with one command each).
 
 ## macOS (development)
 
@@ -210,34 +210,94 @@ every failure. The CLI surfaces errors prefixed with their category
 
 To start clean between runs: `rm -rf /tmp/fletcher-data`.
 
-## Linux server (deferred)
+## Linux server
 
-The Linux server flow - real Firecracker isolation, btrfs CoW
-snapshots, WireGuard peer access from your phone or laptop - is
-intentionally not documented here yet. Two reasons:
+This is where Fletcher actually does its job: real container isolation
+via runc, CoW snapshots via btrfs (once Phase 8 lands the Firecracker
+driver, that swaps in too), and your phone/laptop dialing in over
+WireGuard.
 
-1. **The Firecracker driver is a stub.** `internal/runtime/firecrackerdriver`
-   currently returns "not supported" from `New()`. Phase 8 wires the
-   real driver; the daemon will refuse to start with `--runtime=firecracker`
-   until then. Today the realistic Linux runtime is `--runtime=runc`
-   (degraded isolation, but works).
+### One-time setup
 
-2. **The peer-pairing CLI is too low-level** for the audience Fletcher
-   targets. See below.
+1. **Forward UDP 51820 to the Linux box** on your home router. The
+   exact UI varies by router model; look for a section called "Port
+   Forwarding", "Virtual Server", or "NAT/Gaming". What you need to
+   set:
+   - Protocol: UDP (not TCP)
+   - External port: 51820
+   - Internal port: 51820
+   - Destination: your Linux box's LAN IP (find it with `ip -4 addr`
+     on the server, typically something like 192.168.1.x)
 
-## Known rough edges
+   If port-forwarding isn't accessible (some ISP-provided routers
+   lock this down), your home network is behind CGNAT, or you're
+   testing inside a single LAN, this step can be skipped — peers
+   on the same network can still reach the daemon via its LAN IP.
 
-**Peer pairing.** Today's `fletcher peer add` asks for a tunnel CIDR
-(`--address 10.99.0.2/32`), a server endpoint (`--endpoint host:port`),
-and a listen port. A homelab user shouldn't need to know any of those
-to add a phone to their tunnel. The right shape is something like:
+2. **Pick a public address** peers can dial. Two options:
+   - **Static public IP**: use the IP directly (e.g. `203.0.113.5:51820`).
+   - **DDNS hostname**: if your ISP rotates your IP, sign up for a free
+     dynamic-DNS service (DuckDNS, no-ip) and use its hostname (e.g.
+     `myhome.duckdns.org:51820`).
+
+3. **Install Fletcher** and start the daemon with `--public-endpoint`
+   set to whatever you picked above. The systemd unit (Phase 10) is
+   the long-running form; for a quick first run:
+
+   ```sh
+   ./bin/fletcher serve \
+     --public-endpoint myhome.duckdns.org:51820
+   ```
+
+   That's the only piece of one-time setup. Everything from here is
+   one-command operations.
+
+### Add a device
 
 ```sh
-fletcher peer pair laptop      # daemon picks the next free tunnel IP,
-                               # uses its DDNS endpoint, returns a QR
-                               # code or a one-shot wg-quick conf
+./bin/fletcher peer pair phone
 ```
 
-That refactor is the only thing blocking the Linux flow from making it
-into this doc. Until it lands, the low-level commands in `fletcher
-peer --help` still work - they just shouldn't be the documented path.
+The daemon picks the next free tunnel IP (`10.99.0.2/32` for the first
+peer, `10.99.0.3/32` for the next, etc.), generates a keypair, prints
+the wg-quick config, and renders a QR code in the terminal. Scan it
+with the WireGuard mobile app; the phone is online in seconds.
+
+For a laptop, run the same command (`./bin/fletcher peer pair laptop`)
+and copy the printed `[Interface]` / `[Peer]` block into
+`/etc/wireguard/fletcher.conf`, then `sudo wg-quick up fletcher`.
+
+If you forgot to set `--public-endpoint`:
+
+```
+fletcher: failed_precondition: daemon has no public-endpoint configured;
+restart with --public-endpoint <host:port> or set FLETCHER_PUBLIC_ENDPOINT
+```
+
+Set it and try again.
+
+### Real container isolation
+
+Switch the runtime driver from the macOS default (`mock`) to `runc` on
+the Linux box. Once Phase 8 lands the Firecracker driver, swap to that
+for hardware-isolation; `runc` is the degraded-but-functional fallback.
+
+```sh
+./bin/fletcher serve \
+  --public-endpoint myhome.duckdns.org:51820 \
+  --runtime runc \
+  --snapshot btrfs \
+  --btrfs-root /srv/fletcher/snapshots
+```
+
+`--btrfs-root` must already be a btrfs filesystem (a subvolume on /srv
+is fine; `mkfs.btrfs` if needed). After that, every job runs inside a
+runc container against a fresh CoW snapshot, with WireGuard as the
+only path in.
+
+### Power-user CLI
+
+For atypical cases (custom tunnel IPs, split-tunnel allowed-IPs, etc.),
+`fletcher peer add` still exists with the same surface it always had.
+The pair command is the recommended path; add is for when you need to
+override defaults.
