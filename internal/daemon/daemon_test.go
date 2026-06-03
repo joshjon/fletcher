@@ -27,6 +27,7 @@ func TestDaemonServesHealthAndShutsDownCleanly(t *testing.T) {
 		DatabasePath:      filepath.Join(dataDir, "fletcher.db"),
 		LogLevel:          "warn",
 		GatewayListenAddr: "127.0.0.1:0", // random free port for the test
+		MCPListenAddr:     "127.0.0.1:0",
 		AgeIdentityPath:   filepath.Join(dataDir, "age.key"),
 	}
 

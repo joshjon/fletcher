@@ -18,11 +18,15 @@ import (
 
 	"connectrpc.com/connect"
 
+	mcpserver "github.com/mark3labs/mcp-go/server"
+
 	"github.com/joshjon/fletcher/internal/api"
 	"github.com/joshjon/fletcher/internal/audit"
+	"github.com/joshjon/fletcher/internal/buildinfo"
 	"github.com/joshjon/fletcher/internal/gateway"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/job"
+	fletchermcp "github.com/joshjon/fletcher/internal/mcp"
 	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
 	"github.com/joshjon/fletcher/internal/secrets"
 	snapmock "github.com/joshjon/fletcher/internal/snapshot/mockdriver"
@@ -41,6 +45,7 @@ type Config struct {
 	DatabasePath      string
 	LogLevel          string
 	GatewayListenAddr string
+	MCPListenAddr     string
 	AgeIdentityPath   string
 }
 
@@ -57,7 +62,6 @@ func Run(ctx context.Context, cfg Config) error {
 		slog.String("socket", cfg.SocketPath),
 		slog.String("database", cfg.DatabasePath),
 	)
-
 	if err := ensureDirs(cfg); err != nil {
 		return err
 	}
@@ -67,63 +71,108 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer func() { _ = db.Close() }()
-
 	if err := sqlite.Migrate(db); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
 	logger.Info("migrations up to date")
 
-	ln, err := listenUnix(ctx, cfg.SocketPath)
+	svcs, err := buildServices(ctx, cfg, sqliteq.New(db), logger)
 	if err != nil {
 		return err
 	}
 
-	queries := sqliteq.New(db)
+	if err := svcs.run(ctx, logger); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+	logger.Info("daemon stopped")
+	return nil
+}
+
+// services bundles everything Run needs to wire into the oklog/run group.
+// Splitting construction out keeps Run's funlen reasonable while still
+// surfacing every component in one place.
+type services struct {
+	cfg            Config
+	supervisor     *job.Supervisor
+	connectSrv     *http.Server
+	gatewaySrv     *http.Server
+	mcpSrv         *http.Server
+	connectLn      net.Listener
+	gatewayLn      net.Listener
+	mcpLn          net.Listener
+	gatewayBaseURL string
+	mcpBaseURL     string
+}
+
+func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, logger *slog.Logger) (*services, error) {
+	connectLn, err := listenUnix(ctx, cfg.SocketPath)
+	if err != nil {
+		return nil, err
+	}
 
 	secretsStore, err := secrets.Open(queries, cfg.AgeIdentityPath)
 	if err != nil {
-		return fmt.Errorf("open secrets store: %w", err)
+		return nil, fmt.Errorf("open secrets store: %w", err)
 	}
 
 	snapRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
 	snapDriver, err := snapmock.New(snapRoot)
 	if err != nil {
-		return fmt.Errorf("init snapshot driver: %w", err)
+		return nil, fmt.Errorf("init snapshot driver: %w", err)
 	}
 	rtDriver := runtimemock.New()
 
 	gw := gateway.New(secretsStore, gateway.NewAnthropicBackend(), logger)
-	gwListener, gwBaseURL, err := listenGateway(ctx, cfg.GatewayListenAddr)
+	gatewayLn, gatewayURL, err := listenTCP(ctx, cfg.GatewayListenAddr, "gateway")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	logger.Info("model gateway ready", slog.String("base_url", gwBaseURL))
+	logger.Info("model gateway ready", slog.String("base_url", gatewayURL))
+
+	startedAt := time.Now()
+	mcpLn, mcpURL, err := listenTCP(ctx, cfg.MCPListenAddr, "mcp")
+	if err != nil {
+		return nil, err
+	}
+	mcpServer := fletchermcp.NewServer("fletcher", buildinfo.Version, auditRecorder, logger)
+	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, &http.Client{Timeout: 30 * time.Second})
+	logger.Info("mcp server ready", slog.String("base_url", mcpURL))
 
 	supervisor := job.NewSupervisor(queries, rtDriver, snapDriver, logger, job.SupervisorOptions{
 		JobEnv: []string{
-			"OPENAI_BASE_URL=" + gwBaseURL + "/v1",
+			"OPENAI_BASE_URL=" + gatewayURL + "/v1",
 			"OPENAI_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
+			"FLETCHER_MCP_URL=" + mcpURL,
 		},
 	})
-	jobSvc := job.NewService(queries, supervisor)
-	srv := newHTTPServer(time.Now().Unix(), jobSvc, secretsStore, logger)
-	gwSrv := newGatewayHTTPServer(gw)
 
+	return &services{
+		cfg:            cfg,
+		supervisor:     supervisor,
+		connectSrv:     newHTTPServer(startedAt.Unix(), job.NewService(queries, supervisor), secretsStore, logger),
+		gatewaySrv:     newGatewayHTTPServer(gw),
+		mcpSrv:         newMCPHTTPServer(mcpServer),
+		connectLn:      connectLn,
+		gatewayLn:      gatewayLn,
+		mcpLn:          mcpLn,
+		gatewayBaseURL: gatewayURL,
+		mcpBaseURL:     mcpURL,
+	}, nil
+}
+
+func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	var g run.Group
 	// serveActor's interrupt path uses a fresh context for graceful shutdown
 	// because the parent ctx is already cancelled by the time interrupt fires.
 	//nolint:contextcheck // shutdown must outlive the cancelled parent ctx
-	g.Add(serveActor(logger, srv, ln, cfg.SocketPath))
+	g.Add(serveActor(logger, s.connectSrv, s.connectLn, s.cfg.SocketPath))
 	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
-	g.Add(gatewayServeActor(logger, gwSrv, gwListener, gwBaseURL))
-	g.Add(supervisorActor(ctx, supervisor))
+	g.Add(httpServeActor(logger, "gateway", s.gatewaySrv, s.gatewayLn, s.gatewayBaseURL))
+	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
+	g.Add(httpServeActor(logger, "mcp", s.mcpSrv, s.mcpLn, s.mcpBaseURL))
+	g.Add(supervisorActor(ctx, s.supervisor))
 	g.Add(signalActor(ctx))
-
-	if err := g.Run(); err != nil && !errors.Is(err, context.Canceled) {
-		return err
-	}
-	logger.Info("daemon stopped")
-	return nil
+	return g.Run()
 }
 
 func ensureDirs(cfg Config) error {
@@ -184,19 +233,19 @@ func newHTTPServer(startedAt int64, jobBackend api.JobsBackend, secretsBackend a
 	}
 }
 
-// listenGateway binds the model-gateway TCP listener and resolves the
-// base URL that jobs should target. Resolving here (rather than echoing
-// the config) means random-port (":0") setups produce a usable URL.
-func listenGateway(ctx context.Context, addr string) (net.Listener, string, error) {
+// listenTCP binds a TCP listener and resolves the base URL callers should
+// target. Resolving here (rather than echoing the config) means random-
+// port (":0") setups still produce a usable URL.
+func listenTCP(ctx context.Context, addr, role string) (net.Listener, string, error) {
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
-		return nil, "", fmt.Errorf("listen gateway %s: %w", addr, err)
+		return nil, "", fmt.Errorf("listen %s %s: %w", role, addr, err)
 	}
 	tcp, ok := ln.Addr().(*net.TCPAddr)
 	if !ok {
 		_ = ln.Close()
-		return nil, "", fmt.Errorf("gateway listener returned unexpected addr type %T", ln.Addr())
+		return nil, "", fmt.Errorf("%s listener returned unexpected addr type %T", role, ln.Addr())
 	}
 	host := tcp.IP.String()
 	if host == "<nil>" || host == "0.0.0.0" || host == "::" {
@@ -212,13 +261,23 @@ func newGatewayHTTPServer(gw *gateway.Gateway) *http.Server {
 	}
 }
 
-// gatewayServeActor is the run.Group actor that owns the gateway HTTP
-// listener. Pattern mirrors serveActor.
-func gatewayServeActor(logger *slog.Logger, srv *http.Server, ln net.Listener, baseURL string) (func() error, func(error)) {
+func newMCPHTTPServer(mcp *fletchermcp.Server) *http.Server {
+	streamable := mcpserver.NewStreamableHTTPServer(mcp.Inner())
+	return &http.Server{
+		Handler:           streamable,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+}
+
+// httpServeActor is a generic run.Group actor for HTTP servers behind a
+// TCP listener. Used for the gateway and MCP listeners; the Connect
+// surface (Unix socket) keeps its own actor because it removes the socket
+// file on shutdown.
+func httpServeActor(logger *slog.Logger, role string, srv *http.Server, ln net.Listener, baseURL string) (func() error, func(error)) {
 	execute := func() error {
-		logger.Info("gateway listening", slog.String("base_url", baseURL))
+		logger.Info(role+" listening", slog.String("base_url", baseURL))
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("gateway serve: %w", err)
+			return fmt.Errorf("%s serve: %w", role, err)
 		}
 		return nil
 	}
