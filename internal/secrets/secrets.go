@@ -1,5 +1,5 @@
 // Package secrets owns the daemon's age-encrypted secret store. Plaintext
-// values are decrypted only inside the daemon process (never in forks —
+// values are decrypted only inside the daemon process (never in forks -
 // see DESIGN.md §5/§6). The age identity itself lives on disk at a
 // configurable path; the daemon auto-generates it on first boot.
 package secrets

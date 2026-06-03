@@ -111,7 +111,7 @@ type CreatePeerRequest struct {
 	AllowedIps []string               `protobuf:"bytes,2,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
 	// Optional render fields: when present, the response includes a
 	// wg-quick config ready to drop on the client device.
-	ClientAddress    string   `protobuf:"bytes,3,opt,name=client_address,json=clientAddress,proto3" json:"client_address,omitempty"` // e.g., "10.99.0.2/32"
+	ClientAddress    string   `protobuf:"bytes,3,opt,name=client_address,json=clientAddress,proto3" json:"client_address,omitempty"` // e.g. "10.99.0.2/32"
 	ClientDns        []string `protobuf:"bytes,4,rep,name=client_dns,json=clientDns,proto3" json:"client_dns,omitempty"`
 	ServerEndpoint   string   `protobuf:"bytes,5,opt,name=server_endpoint,json=serverEndpoint,proto3" json:"server_endpoint,omitempty"`      // host:port
 	ServerPublicKey  string   `protobuf:"bytes,6,opt,name=server_public_key,json=serverPublicKey,proto3" json:"server_public_key,omitempty"` // override; daemon supplies if empty
@@ -539,8 +539,8 @@ func (x *DeletePeerResponse) GetExisted() bool {
 
 type ServerConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`                          // e.g., "10.99.0.1/24"
-	ListenPort    int32                  `protobuf:"varint,2,opt,name=listen_port,json=listenPort,proto3" json:"listen_port,omitempty"` // e.g., 51820
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`                          // e.g. "10.99.0.1/24"
+	ListenPort    int32                  `protobuf:"varint,2,opt,name=listen_port,json=listenPort,proto3" json:"listen_port,omitempty"` // e.g. 51820
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

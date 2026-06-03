@@ -1,6 +1,6 @@
 // Package gateway is the daemon's model gateway: a daemon-local HTTP
 // endpoint that speaks both the OpenAI Chat Completions wire format
-// (for OpenAI-compatible agent CLIs — Codex, Aider, OpenHands, pi) and
+// (for OpenAI-compatible agent CLIs - Codex, Aider, OpenHands, pi) and
 // the Anthropic Messages wire format (for Claude Code and other
 // Anthropic-native agents). It forwards each call to a real LLM
 // provider with the API key stamped from the secrets store; keys

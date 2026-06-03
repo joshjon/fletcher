@@ -1,7 +1,7 @@
 // Package mockdriver is the mock snapshot driver: it creates plain
 // directories under a root path instead of btrfs subvolumes. Per
-// DESIGN.md §10, this is a production-code citizen — what powers
-// Fletcher on macOS during dev — not a test hack.
+// DESIGN.md §10, this is a production-code citizen - what powers
+// Fletcher on macOS during dev - not a test hack.
 package mockdriver
 
 import (

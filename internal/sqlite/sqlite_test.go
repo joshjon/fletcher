@@ -23,7 +23,7 @@ func TestOpenAndMigrateRoundTrip(t *testing.T) {
 	// Migrate again to verify ErrNoChange is treated as success.
 	require.NoError(t, sqlite.Migrate(db))
 
-	// Pragmas should be applied — check journal_mode is WAL.
+	// Pragmas should be applied - check journal_mode is WAL.
 	var mode string
 	require.NoError(t, db.QueryRow("PRAGMA journal_mode").Scan(&mode))
 	require.Equal(t, "wal", mode)

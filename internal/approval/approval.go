@@ -74,7 +74,7 @@ type Service struct {
 	wakeCh chan struct{}
 
 	// pollInterval bounds wait latency in case the wake signal is missed
-	// (we only fire wakeCh from in-process Approve/Deny — external writes
+	// (we only fire wakeCh from in-process Approve/Deny - external writes
 	// would otherwise be invisible). Tests can override.
 	pollInterval time.Duration
 }

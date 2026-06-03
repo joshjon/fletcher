@@ -23,7 +23,7 @@ type ApprovalBackend interface {
 }
 
 // daemonHealthTool reports the daemon's build identity and uptime. Trivial,
-// no real privileged action — exists primarily to give MCP clients a
+// no real privileged action - exists primarily to give MCP clients a
 // "is the gateway alive?" probe that follows the same audit seam as the
 // privileged tools.
 func daemonHealthTool(startedAt time.Time) Tool {
@@ -45,7 +45,7 @@ func daemonHealthTool(startedAt time.Time) Tool {
 // httpGetTool is the daemon-mediated egress shim. Agents inside a job's
 // fork have no network egress (per DESIGN.md §5); this tool lets them ask
 // the daemon to perform a GET on their behalf. Real egress policy will be
-// layered on as approvals + allowlists land in later phases — for now any
+// layered on as approvals + allowlists land in later phases - for now any
 // http/https URL is allowed.
 func httpGetTool(httpClient *http.Client) Tool {
 	return Tool{
@@ -88,7 +88,7 @@ func httpGetTool(httpClient *http.Client) Tool {
 }
 
 // validateEgressURL rejects URLs we never want the gateway to fetch. For
-// phase 6 the bar is low — scheme must be http(s); future phases will
+// phase 6 the bar is low - scheme must be http(s); future phases will
 // likely refuse loopback / link-local / metadata endpoints to stop SSRF
 // against the daemon's own surface.
 func validateEgressURL(_ string) error {
@@ -150,7 +150,7 @@ func requestApprovalTool(approvals ApprovalBackend) Tool {
 			defer cancel()
 			final, err := approvals.Wait(waitCtx, created.ID)
 			if err != nil {
-				// Caller-side timeout shouldn't error the tool — return current state.
+				// Caller-side timeout shouldn't error the tool - return current state.
 				if errors.Is(err, context.DeadlineExceeded) {
 					current, gerr := approvals.Get(ctx, created.ID)
 					if gerr != nil {

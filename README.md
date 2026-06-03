@@ -4,12 +4,12 @@
 
 Fletcher is a single Go binary you install on one Linux box. From a native
 client (CLI today, mobile/desktop apps later) you spin up isolated jobs and
-run agents inside them — coding assistants, day-to-day tasks, recurring
-monitoring — with nothing leaving your network and no cloud account in the
+run agents inside them - coding assistants, day-to-day tasks, recurring
+monitoring - with nothing leaving your network and no cloud account in the
 loop.
 
 The pitch in one line: the model gateway, the credentials, the audit log,
-the snapshots — everything runs on metal you control.
+the snapshots - everything runs on metal you control.
 
 ## Status
 
@@ -46,9 +46,9 @@ the source of truth: `fletcher --help`, `fletcher job --help`, etc.
 
 ## Documentation
 
-- [`DESIGN.md`](./DESIGN.md) — positioning, architecture, the thinking
+- [`DESIGN.md`](./DESIGN.md) - positioning, architecture, the thinking
   behind the trust boundary and the job model. Read this first.
-- [`STANDARDS.md`](./STANDARDS.md) — repo conventions: layout, lint, test,
+- [`STANDARDS.md`](./STANDARDS.md) - repo conventions: layout, lint, test,
   error handling, logging, dependencies, release process.
 
 ## Building from source

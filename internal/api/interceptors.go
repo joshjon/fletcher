@@ -50,7 +50,7 @@ func RequestIDInterceptor() connect.UnaryInterceptorFunc {
 // Internal with a sanitised wire message.
 //
 // Every non-nil error is logged with the procedure, category, and full
-// chain — sanitisation only affects what the *client* sees.
+// chain - sanitisation only affects what the *client* sees.
 func ErrorInterceptor(logger *slog.Logger) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
@@ -77,7 +77,7 @@ func ErrorInterceptor(logger *slog.Logger) connect.UnaryInterceptorFunc {
 			)
 
 			if cat == errs.CategoryUnknown {
-				// Don't leak internals — client sees a generic message.
+				// Don't leak internals - client sees a generic message.
 				return nil, connect.NewError(connect.CodeInternal, errors.New("internal error"))
 			}
 			return nil, connect.NewError(categoryToCode(cat), err)

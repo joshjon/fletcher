@@ -316,8 +316,8 @@ func triggerLabel(t fletcherv1.JobTrigger) string {
 }
 
 // clampInt32 saturates a host-sized int (urfave/cli's IntFlag returns int)
-// to the int32 range so the proto wire types — designed for sensible page
-// sizes — can't overflow.
+// to the int32 range so the proto wire types - designed for sensible page
+// sizes - can't overflow.
 func clampInt32(v int) int32 {
 	const maxInt32 = 1<<31 - 1
 	const minInt32 = -1 << 31

@@ -2,7 +2,7 @@
 // seam: every tool registered here is invoked through a thin shim that
 // records an audit event before delegating to the user-supplied handler.
 // Tools registered directly on the inner *server.MCPServer would bypass
-// the seam — always go through Server.RegisterTool.
+// the seam - always go through Server.RegisterTool.
 package mcp
 
 import (
@@ -46,7 +46,7 @@ func NewServer(name, version string, recorder audit.Recorder, logger *slog.Logge
 }
 
 // Inner returns the underlying *mcpserver.MCPServer. Useful only for
-// constructing transports (StreamableHTTPServer, InProcessClient) — do
+// constructing transports (StreamableHTTPServer, InProcessClient) - do
 // not call AddTool on it directly; use Server.RegisterTool so audit fires.
 func (s *Server) Inner() *mcpserver.MCPServer { return s.inner }
 

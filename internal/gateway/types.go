@@ -1,7 +1,7 @@
 package gateway
 
 // OpenAIRequest is the subset of the Chat Completions request we accept.
-// Streaming, tools, and other extensions are deferred — keep this minimal
+// Streaming, tools, and other extensions are deferred - keep this minimal
 // and add fields as features actually need them.
 type OpenAIRequest struct {
 	Model       string          `json:"model"`

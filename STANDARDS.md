@@ -60,7 +60,7 @@ embed/         # firecracker binary + rootfs assets
 - Coverage reported via `make cover` (HTML). Not gated.
 - Build tag `//go:build integration` for tests needing real `/dev/kvm`, btrfs, or network.
 - SQLite tests are unit (in-memory via `modernc.org/sqlite`); no integration tag required.
-- Time-dependent tests use stdlib `testing/synctest`. No `Clock` abstraction in production code — production calls `time.Now()` / `time.Sleep` / `time.After` directly.
+- Time-dependent tests use stdlib `testing/synctest`. No `Clock` abstraction in production code - production calls `time.Now()` / `time.Sleep` / `time.After` directly.
 - Property/fuzz via stdlib `testing.F` on parsers, encoders, ID code.
 - End-to-end deferred until surface justifies it.
 
@@ -81,7 +81,7 @@ embed/         # firecracker binary + rootfs assets
 - Key naming: `snake_case` tokens, `.`-separated groupings via `slog.Group(...)`. Never pre-baked dotted string keys.
 - Standard fields: `time`, `level`, `msg`, `component`, plus `request_id` / `job_id` / `agent_id` when present.
 - Sensitive values use typed wrappers whose `LogValue()` returns `"<redacted>"`.
-- No always-on `caller` field — add on demand via `internal/fname`.
+- No always-on `caller` field - add on demand via `internal/fname`.
 
 ## Observability
 
@@ -103,11 +103,11 @@ embed/         # firecracker binary + rootfs assets
 
 - Generated code is committed. `make generate-check` regenerates and `git diff --exit-code`s in pre-push.
 - Proto layout: `proto/fletcher/v1/*.proto` → `internal/gen/proto/fletcher/v1/`.
-- sqlc layout: `internal/sqlite/queries/*.sql` → `internal/sqlite/gen/`. sqlc reads `internal/sqlite/schema.sql`, which is a generated mirror built by `make generate` by concatenating the `migrations/*.up.sql` files in order. The mirror is committed (so `go build` works on a fresh clone), but it is never hand-edited — migrations remain the source of truth.
+- sqlc layout: `internal/sqlite/queries/*.sql` → `internal/sqlite/gen/`. sqlc reads `internal/sqlite/schema.sql`, which is a generated mirror built by `make generate` by concatenating the `migrations/*.up.sql` files in order. The mirror is committed (so `go build` works on a fresh clone), but it is never hand-edited - migrations remain the source of truth.
 - Mocks: `internal/<pkg>/<pkg>mock/`.
 - Generated files carry `// Code generated <tool>. DO NOT EDIT.` header (golangci-lint auto-excludes).
 - sqlc options: `emit_interface: true`, `emit_pointers_for_null_types: true`, `emit_json_tags: false`.
-- No scattered `//go:generate` directives — single `make generate` drives every tool from its own config.
+- No scattered `//go:generate` directives - single `make generate` drives every tool from its own config.
 - `buf breaking` deferred until first release.
 
 ## Migrations & SQL
@@ -137,14 +137,14 @@ embed/         # firecracker binary + rootfs assets
 - Color auto on TTY; `NO_COLOR` respected.
 - Destructive ops prompt for confirmation; `-y` / `--yes` bypasses.
 - CLI ⇄ daemon over Unix socket by default. TCP only for remote (over WireGuard).
-- No man pages for v1 — `--help` suffices.
+- No man pages for v1 - `--help` suffices.
 
 ## Concurrency
 
 - `oklog/run.Group` owns top-level service lifecycle. SIGINT / SIGTERM → 30s graceful shutdown, then force-exit.
-- `internal/background.Go(ctx, fn)` for all goroutines. Auto-derives name from caller via `internal/fname`; recovers panics with structured log. Use `GoNamed(ctx, name, fn)` only when caller-derived name is ambiguous (e.g., a loop spawning N goroutines).
+- `internal/background.Go(ctx, fn)` for all goroutines. Auto-derives name from caller via `internal/fname`; recovers panics with structured log. Use `GoNamed(ctx, name, fn)` only when caller-derived name is ambiguous (e.g. a loop spawning N goroutines).
 - `golang.org/x/sync/errgroup` for scoped fan-out where parent waits and errors propagate.
-- `pond` added only when a real bounded-worker-pool need appears — not pre-emptively.
+- `pond` added only when a real bounded-worker-pool need appears - not pre-emptively.
 - Context-first arg convention. `context.Value` reserved for request-scoped data (request_id, job_id, agent_id). Dependencies are constructor-injected struct fields.
 - No bare `go func()` in production code.
 - Backoff: `cenkalti/backoff` with exponential + jitter. Defaults: base 200ms, max 30s, max-elapsed 5min. Idempotency keys on every retry per `DESIGN.md` §5.
@@ -153,11 +153,11 @@ embed/         # firecracker binary + rootfs assets
 ## Documentation
 
 - `README.md`: what / install / quickstart / link to `DESIGN.md`. Minimal.
-- No `CONTRIBUTING.md` / `SECURITY.md` for v1. No separate ADR system — `DESIGN.md` + conventional commits play that role.
+- No `CONTRIBUTING.md` / `SECURITY.md` for v1. No separate ADR system - `DESIGN.md` + conventional commits play that role.
 - `doc.go` per package: `// Package foo does X.` one paragraph.
 - One-line godoc on every exported identifier. Subject + verb, period.
 - No multi-paragraph godocs. If something needs that much explanation, the design is unclear.
-- `// TODO: <description>` plain. Single marker — no `// FIXME` / `// XXX`.
+- `// TODO: <description>` plain. Single marker - no `// FIXME` / `// XXX`.
 - `CHANGELOG.md` auto-generated by goreleaser at release time from conventional commits.
 
 ## Dependencies
@@ -186,13 +186,13 @@ embed/         # firecracker binary + rootfs assets
 - Validation: `bufbuild/protovalidate-go` via Connect interceptor; rules in `.proto`.
 - HTTP client: stdlib `net/http` + `cenkalti/backoff`. Default 60s timeout for LLM calls.
 - Atomic file writes: `google/renameio/v2`.
-- Subprocess: `internal/proc/` thin wrapper around stdlib `os/exec` — context-aware cancellation, structured-log streaming of stdout/stderr with correlation IDs, process-group setup so killing parent kills children.
+- Subprocess: `internal/proc/` thin wrapper around stdlib `os/exec` - context-aware cancellation, structured-log streaming of stdout/stderr with correlation IDs, process-group setup so killing parent kills children.
 - JSON: stdlib `encoding/json` (move to `v2` when stable).
 - FS: stdlib `io/fs.FS` for reads; `*os.Root` for write paths.
-- Clock: none — stdlib `testing/synctest` for time-dependent tests; production code calls `time` package directly.
+- Clock: none - stdlib `testing/synctest` for time-dependent tests; production code calls `time` package directly.
 
 ## Mac dev
 
 - The pure-Go bulk of the daemon (`CGO_ENABLED=0`, `modernc.org/sqlite`, `slog`, Connect, NATS) compiles and runs on macOS unchanged.
-- `runtime.MockDriver` and `snapshot.MockDriver` are required production-code citizens behind the `DESIGN.md` §10 seams — not test hacks. They let the daemon's coordination logic run end-to-end on macOS.
+- `runtime.MockDriver` and `snapshot.MockDriver` are required production-code citizens behind the `DESIGN.md` §10 seams - not test hacks. They let the daemon's coordination logic run end-to-end on macOS.
 - Real Firecracker / btrfs / WireGuard work: cross-compile (`make build-linux-arm64`) and run inside an arm64 Linux VM (UTM on M1).

@@ -4,7 +4,7 @@
 # (see DESIGN.md §6); the placeholders just keep agent CLIs happy when
 # they sanity-check that an API key env var is set.
 
-# fletcher-base — base image for Fletcher agent forks.
+# fletcher-base - base image for Fletcher agent forks.
 #
 # Ships the three first-class agent CLIs (`claude`, `codex`, `pi`) plus
 # the daemon contract (well-known env vars, /workspace mount point,
@@ -105,16 +105,16 @@ ENV HOME=/home/fletcher \
 
 RUN mkdir -p /home/fletcher/.local/bin
 
-# claude (Anthropic) — recommended for users on a Claude Max subscription
+# claude (Anthropic) - recommended for users on a Claude Max subscription
 # (combine with Phase 12 trusted-credential mode).
 RUN curl -fsSL https://claude.ai/install.sh | bash && \
     test -x /home/fletcher/.local/bin/claude
 
-# codex (OpenAI) — recommended for users on a ChatGPT Plus/Pro subscription.
+# codex (OpenAI) - recommended for users on a ChatGPT Plus/Pro subscription.
 RUN curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh && \
     test -x /home/fletcher/.local/bin/codex
 
-# pi (Earendil) — recommended default for users without a strong agent
+# pi (Earendil) - recommended default for users without a strong agent
 # preference. Its extensions system is the integration target for the
 # Fletcher pi-extension (Phase 14).
 RUN curl -fsSL https://pi.dev/install.sh | sh && \

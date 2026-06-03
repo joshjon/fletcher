@@ -33,7 +33,7 @@ type ClientConfig struct {
 	// Endpoint is host:port the client dials.
 	Endpoint string
 	// AllowedIPs tells the client which traffic to send over the tunnel
-	// (e.g., "10.99.0.0/24" for split-tunnel; "0.0.0.0/0, ::/0" for full).
+	// (e.g. "10.99.0.0/24" for split-tunnel; "0.0.0.0/0, ::/0" for full).
 	AllowedIPs []string
 	// PersistentKeepalive in seconds; 0 disables.
 	PersistentKeepalive int

@@ -4,7 +4,7 @@
 // without requiring the operator to manually configure the router.
 //
 // Phase 9 ships UPnP IGD discovery and AddPortMapping. NAT-PMP and PCP
-// are documented as follow-ups — the Result shape leaves room for them.
+// are documented as follow-ups - the Result shape leaves room for them.
 package portmap
 
 import (
@@ -36,7 +36,7 @@ type Request struct {
 	// Protocol selects TCP or UDP.
 	Protocol Protocol
 	// LeaseDuration is how long the mapping should live; 0 = indefinite
-	// (router-dependent — many treat 0 as "until reboot").
+	// (router-dependent - many treat 0 as "until reboot").
 	LeaseDuration time.Duration
 	// Description is shown in router UIs.
 	Description string
@@ -58,7 +58,7 @@ type Result struct {
 }
 
 // Map attempts to install a port mapping. The returned error is
-// informational — callers should treat absence of NAT punch-through as
+// informational - callers should treat absence of NAT punch-through as
 // "operator must configure manually", not as a fatal startup failure.
 func Map(ctx context.Context, req Request) (Result, error) {
 	if req.Protocol != ProtocolTCP && req.Protocol != ProtocolUDP {
@@ -137,7 +137,7 @@ func mapUPnP(ctx context.Context, req Request, internalIP string) (Result, error
 }
 
 // defaultLANIP returns the IPv4 address on the interface that owns the
-// default route. We open a UDP socket "to" a public address — that
+// default route. We open a UDP socket "to" a public address - that
 // resolves the kernel's route choice without sending any packets.
 func defaultLANIP(ctx context.Context) (string, error) {
 	var d net.Dialer

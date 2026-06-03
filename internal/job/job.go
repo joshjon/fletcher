@@ -41,7 +41,7 @@ const (
 	TriggerLongRunning Trigger = "long_running"
 )
 
-// idPrefix is the typeid prefix for job IDs (e.g., "job_01h...").
+// idPrefix is the typeid prefix for job IDs (e.g. "job_01h...").
 const idPrefix = "job"
 
 // ErrNotFound is returned when a requested job ID does not exist. It is
@@ -78,7 +78,7 @@ type CreateParams struct {
 
 // Coordinator is what Service needs from the running supervisor: a way to
 // nudge it after a new queued job appears, and a way to abort a job that's
-// already running. It is optional — passing nil yields a CRUD-only service.
+// already running. It is optional - passing nil yields a CRUD-only service.
 type Coordinator interface {
 	Notify()
 	CancelRunning(jobID string) bool
@@ -91,7 +91,7 @@ type Service struct {
 }
 
 // NewService wires a Service to a sqlc-generated querier (anything that
-// satisfies sqliteq.Querier — *sqliteq.Queries in prod, a fake in tests).
+// satisfies sqliteq.Querier - *sqliteq.Queries in prod, a fake in tests).
 // The supervisor argument may be nil for tests that only exercise CRUD.
 func NewService(q sqliteq.Querier, sup Coordinator) *Service {
 	return &Service{q: q, sup: sup}

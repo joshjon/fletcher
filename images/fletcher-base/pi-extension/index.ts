@@ -1,4 +1,4 @@
-// Fletcher pi-extension — DESIGN.md §13 Phase 14.
+// Fletcher pi-extension - DESIGN.md §13 Phase 14.
 //
 // Pi (https://pi.dev, Earendil Inc.) supports TypeScript extensions that
 // can register custom providers, tools, commands, and TUI elements. This
@@ -11,7 +11,7 @@
 
 // CATALOG_URL is overridden by the daemon's env injection at job start
 // (FLETCHER_CATALOG_URL); the fallback hostname is what fletcher-base
-// bakes in. Both resolve to the same gateway listener — see the daemon's
+// bakes in. Both resolve to the same gateway listener - see the daemon's
 // JobEnv wiring in internal/daemon/daemon.go.
 const CATALOG_URL =
   (typeof process !== "undefined" && process.env?.FLETCHER_CATALOG_URL) ||

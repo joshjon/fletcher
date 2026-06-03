@@ -10,7 +10,7 @@ import (
 
 // unixHTTPClient returns an *http.Client that dials the daemon over a Unix
 // socket. The base URL passed to Connect clients is meaningless on Unix
-// transport — http://unix is conventional.
+// transport - http://unix is conventional.
 func unixHTTPClient(socket string) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{

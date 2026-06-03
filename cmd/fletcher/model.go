@@ -36,7 +36,7 @@ Anthropic SDKs (Claude Code) read ANTHROPIC_BASE_URL. OpenAI SDKs
 (Codex, Aider, OpenHands, pi) read OPENAI_BASE_URL. Set the env var
 to the matching URL.
 
-Model IDs work on either endpoint — same id, two wire formats.`,
+Model IDs work on either endpoint - same id, two wire formats.`,
 		Flags: []cli.Flag{
 			socketFlag(),
 			outputFlag(),

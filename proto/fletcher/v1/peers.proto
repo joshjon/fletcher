@@ -6,7 +6,7 @@ option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;
 
 // PeerService manages WireGuard peers and emits the wg-quick configs
 // operators install on either side of the tunnel. Private keys are
-// returned to the client exactly once at creation time — the daemon
+// returned to the client exactly once at creation time - the daemon
 // retains only the public half.
 service PeerService {
   // CreatePeer mints a new keypair for the peer, persists the public
@@ -35,7 +35,7 @@ message CreatePeerRequest {
   repeated string allowed_ips = 2;
   // Optional render fields: when present, the response includes a
   // wg-quick config ready to drop on the client device.
-  string client_address = 3;       // e.g., "10.99.0.2/32"
+  string client_address = 3;       // e.g. "10.99.0.2/32"
   repeated string client_dns = 4;
   string server_endpoint = 5;      // host:port
   string server_public_key = 6;    // override; daemon supplies if empty
@@ -66,8 +66,8 @@ message DeletePeerRequest { string id = 1; }
 message DeletePeerResponse { bool existed = 1; }
 
 message ServerConfigRequest {
-  string address = 1;      // e.g., "10.99.0.1/24"
-  int32 listen_port = 2;   // e.g., 51820
+  string address = 1;      // e.g. "10.99.0.1/24"
+  int32 listen_port = 2;   // e.g. 51820
 }
 message ServerConfigResponse {
   // Config is the rendered wg-quick body, with the daemon's server

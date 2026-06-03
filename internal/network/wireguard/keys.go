@@ -4,7 +4,7 @@
 //
 // This package does NOT itself run the WireGuard data plane (the TUN
 // interface, packet forwarding, key handshake). The DESIGN.md §9 stack
-// names wireguard-go for that — but its integration needs OS-level
+// names wireguard-go for that - but its integration needs OS-level
 // privilege handling that's its own phase. For now the daemon manages
 // peers and emits configs that the operator applies via wg-quick.
 package wireguard
@@ -16,7 +16,7 @@ import (
 	"fmt"
 )
 
-// Key is a base64-encoded 32-byte Curve25519 key — the on-wire form
+// Key is a base64-encoded 32-byte Curve25519 key - the on-wire form
 // WireGuard config files use.
 type Key string
 

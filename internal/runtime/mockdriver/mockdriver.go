@@ -1,6 +1,6 @@
 // Package mockdriver is the mock runtime driver: it spawns local /bin/sh
 // processes instead of real Firecracker microVMs. Per DESIGN.md §10, this
-// is a production-code citizen (not a test hack) — it's what powers
+// is a production-code citizen (not a test hack) - it's what powers
 // Fletcher during macOS development where /dev/kvm is unavailable.
 package mockdriver
 
@@ -26,7 +26,7 @@ func New() *Driver { return &Driver{Shell: "/bin/sh"} }
 
 // Run executes spec.Command via "<shell> -c <command>", returning the
 // process's exit code. Setpgid is set so killing the process group is
-// effective — context cancellation kills the whole tree.
+// effective - context cancellation kills the whole tree.
 func (d *Driver) Run(ctx context.Context, spec runtime.Spec, stdout, stderr io.Writer) (runtime.Result, error) {
 	shell := d.Shell
 	if shell == "" {

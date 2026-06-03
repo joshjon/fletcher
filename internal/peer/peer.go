@@ -2,7 +2,7 @@
 // device (phone, laptop) authorised to connect to the daemon over
 // WireGuard; the daemon stores its name, public key, and allowed-IPs
 // claim. Private keys for peer-side devices are generated locally at
-// Create time and returned to the caller exactly once — the daemon
+// Create time and returned to the caller exactly once - the daemon
 // retains only the public half.
 package peer
 
@@ -49,7 +49,7 @@ type CreateParams struct {
 }
 
 // Created bundles the persisted Peer with the one-time secret returned to
-// the caller. PrivateKey is non-empty only on Create — the daemon does
+// the caller. PrivateKey is non-empty only on Create - the daemon does
 // not store it.
 type Created struct {
 	Peer       Peer

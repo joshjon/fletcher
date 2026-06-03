@@ -4,7 +4,7 @@ package fletcher.v1;
 
 option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
 
-// AdminService is the daemon's administrative surface — health checks and
+// AdminService is the daemon's administrative surface - health checks and
 // basic runtime inspection. Available on the local Unix socket only.
 service AdminService {
   // Health returns the daemon's liveness state.

@@ -8,7 +8,7 @@
 // Real isolation depends on the operator's runc + kernel config:
 // rootless-runc with user namespaces gives meaningful isolation on a
 // home server; running as root unlocks the full set of capabilities
-// the OCI spec supports. The driver is deliberately conservative — it
+// the OCI spec supports. The driver is deliberately conservative - it
 // drops all capabilities and disables the network namespace by default.
 //
 // This package compiles only on Linux; runcdriver_other.go provides a
@@ -119,7 +119,7 @@ func writeOCIConfig(bundle string, spec runtime.Spec) error {
 }
 
 // minimalOCIConfig builds a small but valid OCI runtime spec for runc.
-// We drop the network namespace and all capabilities by default — jobs
+// We drop the network namespace and all capabilities by default - jobs
 // reach out via the daemon-mediated MCP/gateway, not directly.
 func minimalOCIConfig(spec runtime.Spec) map[string]any {
 	env := append([]string{

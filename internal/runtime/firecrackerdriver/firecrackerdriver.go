@@ -3,7 +3,7 @@
 // firecracker-containerd, VM lifecycle through firecracker-go-sdk, vsock
 // guest agent, MMDS-injected env) is large and load-bearing enough that
 // it must be built and verified on a real Linux + KVM host before being
-// claimed as supported — see DESIGN.md §11 ("open questions").
+// claimed as supported - see DESIGN.md §11 ("open questions").
 //
 // For now this package returns a clear, operator-friendly error from New
 // so the runtime-selection plumbing is testable end-to-end and the seam

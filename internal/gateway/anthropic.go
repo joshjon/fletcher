@@ -38,12 +38,12 @@ func (a *AnthropicBackend) Complete(req OpenAIRequest, apiKey string) (OpenAIRes
 
 // ForwardMessages proxies a raw Anthropic Messages request body to the
 // upstream endpoint, stamping the x-api-key header from the secrets
-// store. The returned response is the raw upstream response — including
-// streaming SSE bodies — and is the caller's responsibility to close.
+// store. The returned response is the raw upstream response - including
+// streaming SSE bodies - and is the caller's responsibility to close.
 func (a *AnthropicBackend) ForwardMessages(ctx context.Context, body []byte, apiKey string) (*http.Response, error) {
 	// gosec flags this as SSRF because the body is user-controlled. The
 	// endpoint URL (a.Endpoint) is operator-configured at daemon start, not
-	// user-controlled — forwarding agent requests to a fixed upstream is
+	// user-controlled - forwarding agent requests to a fixed upstream is
 	// the gateway's purpose (DESIGN.md §6).
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.Endpoint, bytes.NewReader(body)) //nolint:gosec // fixed upstream URL, not user-controlled
 	if err != nil {

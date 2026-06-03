@@ -182,7 +182,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 			"ANTHROPIC_BASE_URL=" + gatewayURL,
 			"ANTHROPIC_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
 			"FLETCHER_MCP_URL=" + mcpURL,
-			// Model catalog (Phase 14) — pi-extension and other agents fetch
+			// Model catalog (Phase 14) - pi-extension and other agents fetch
 			// this on startup to discover providers without per-job config.
 			"FLETCHER_CATALOG_URL=" + gatewayURL + "/v1/catalog.json",
 		},

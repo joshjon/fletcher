@@ -14,7 +14,7 @@ option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;
 // name do I use in my request?" (models). Earlier shapes nested models
 // under providers, which duplicated model rows and made the OpenAI-vs-
 // Anthropic wire-format distinction read as if there were two upstreams.
-// There is one upstream — Anthropic — exposed via two wire formats.
+// There is one upstream - Anthropic - exposed via two wire formats.
 service ModelService {
   // ListModels returns the catalog.
   rpc ListModels(ListModelsRequest) returns (ListModelsResponse) {}

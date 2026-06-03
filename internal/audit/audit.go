@@ -5,7 +5,7 @@
 //
 // Production code holds a Recorder; the daemon currently configures the
 // Noop recorder. When the audit log lands as a SQLite-backed table, a
-// real Recorder replaces it — no call sites change.
+// real Recorder replaces it - no call sites change.
 package audit
 
 import "context"
@@ -19,13 +19,13 @@ type Event struct {
 	// Actor is who initiated the operation (agent ID, user ID, ...).
 	Actor string
 	// Detail carries small, ad-hoc structured metadata. Implementations
-	// must treat values as opaque and avoid logging secrets — callers are
+	// must treat values as opaque and avoid logging secrets - callers are
 	// expected to redact before passing in.
 	Detail map[string]any
 }
 
 // Recorder appends Events to the audit log. Implementations must be safe
-// for concurrent use. Recording must not fail the calling operation — log
+// for concurrent use. Recording must not fail the calling operation - log
 // the error internally and return nil where appropriate.
 type Recorder interface {
 	Record(ctx context.Context, e Event) error

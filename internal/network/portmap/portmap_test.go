@@ -38,7 +38,7 @@ func TestMapDiscoveryRunsInProcess(t *testing.T) {
 		LeaseDuration: time.Hour,
 		Description:   "fletcher test",
 	})
-	// We don't assert on err's content — absence of a UPnP router is
+	// We don't assert on err's content - absence of a UPnP router is
 	// the common case. The test just confirms discovery doesn't panic.
 	_ = err
 }

@@ -1,10 +1,10 @@
-# Fletcher — Design Doc
+# Fletcher - Design Doc
 
 *Self-hosted agent compute.*
 
 Private agent compute on hardware you own. A single Go binary you install on one
 Linux box; from a native phone/desktop client you spin up isolated VMs and run
-anything on them — coding agents, day-to-day jobs, recurring monitoring — with
+anything on them - coding agents, day-to-day jobs, recurring monitoring - with
 nothing leaving your network and no cloud account anywhere in the loop.
 
 ---
@@ -17,14 +17,14 @@ nothing leaving your network and no cloud account anywhere in the loop.
   their business, so none of them can offer "runs on hardware you own" without
   abandoning their model. They can copy any feature in this doc; they cannot copy
   where it runs.
-- **The climb:** "just a computer" is a bare substrate — too
+- **The climb:** "just a computer" is a bare substrate - too
   unopinionated to pull people in. The product puts an *opinionated, delightful
   agent experience* on top of that substrate. Privacy/own-your-metal is the
   **positioning** (and the moat); the native-app agent experience is the **demo**
   (what creates desire). We headline one, not both.
 - **Scope of use:** coding tasks and general day-to-day jobs are co-equal
   priorities for the product itself. "Pick one hero" applies only to the
-  launch/marketing hook, decided later — not to capability or personal use.
+  launch/marketing hook, decided later - not to capability or personal use.
 - **Business model:** one-time license. No SaaS, no hosted infrastructure, no
   metering. The developer hosts nothing.
 
@@ -50,7 +50,7 @@ nothing leaving your network and no cloud account anywhere in the loop.
 - No multi-box mesh. Single box only; multiple *client devices* are fine.
 - No hosted control plane / coordination SaaS.
 - No built-in metering or billing.
-- No skill marketplace (deliberate — see §8).
+- No skill marketplace (deliberate - see §8).
 - Cross-site VM-to-VM networking is explicitly out of scope.
 
 ---
@@ -68,7 +68,7 @@ flowchart TD
     clients ==>|WireGuard hub-and-spoke + Connect-RPC| API
 
     subgraph daemon["Single Go binary (the daemon)"]
-        API["API: connect-go — gRPC / HTTP-JSON / gRPC-Web"]
+        API["API: connect-go - gRPC / HTTP-JSON / gRPC-Web"]
 
         subgraph svc["App services"]
             JOB["Job engine"]
@@ -109,7 +109,7 @@ flowchart TD
 ```
 
 > *VMM binary bundled via `embed.FS`, extracted on first run. One VMM process
-> per VM at runtime — single binary to ship, not single process.*
+> per VM at runtime - single binary to ship, not single process.*
 
 **Two networking planes that never touch.** Clients talk only to the daemon (one
 WireGuard peer, one allowed-IP). VM networking lives entirely inside the box.
@@ -122,13 +122,13 @@ workflow engine can't checkpoint inside it, and embedding one contradicts the
 "just a computer, let native primitives orchestrate" thesis. The properties
 Temporal was standing in for are delivered by native primitives (supervisor loop,
 SQLite, cron, idempotent egress). Temporal may return *inside* a future
-first-party pipeline feature — never as the substrate. (See §6, §10.)
+first-party pipeline feature - never as the substrate. (See §6, §10.)
 
 ---
 
 ## 4. The Job Model (the one primitive)
 
-Every use case — coding, monitoring, automation — is one abstraction wearing
+Every use case - coding, monitoring, automation - is one abstraction wearing
 different hats. Do **not** build long-running / cron / ephemeral as three
 subsystems; they are three values of one field.
 
@@ -138,19 +138,19 @@ A **job** = **environment** + **payload** + **trigger** + **output sink**.
 - **payload:** an agent (Claude Code, Codex, local-model agent) *or* a plain
   program the agent previously wrote.
 - **trigger:**
-  - `ephemeral` — fire once, run to completion, optionally tear down
+  - `ephemeral` - fire once, run to completion, optionally tear down
     ("build me the dog-walking site").
-  - `cron` — fire on a schedule ("fetch the odds every morning").
-  - `long-running` — no terminating trigger; stays alive (a web app, a bot).
-- **output sink:** where the result lands — a preview URL, a results card /
+  - `cron` - fire on a schedule ("fetch the odds every morning").
+  - `long-running` - no terminating trigger; stays alive (a web app, a bot).
+- **output sink:** where the result lands - a preview URL, a results card /
   dashboard in the client inbox, a file, a notification.
 
 **Recurring jobs: two modes.** Most recurring "agent" tasks shouldn't run an agent
 each time. The agent's job is to *write the scraper once*; after that a plain
-cron'd program runs it — free, deterministic, reliable.
-- **agent-authored-then-automated** (default for data fetching) — cheap, no tokens
+cron'd program runs it - free, deterministic, reliable.
+- **agent-authored-then-automated** (default for data fetching) - cheap, no tokens
   per run, no nondeterminism.
-- **agent-in-the-loop** — only when each run needs *judgment*
+- **agent-in-the-loop** - only when each run needs *judgment*
   ("tell me what's interesting today," not just "fetch it").
 
 ---
@@ -184,14 +184,14 @@ flowchart LR
 
 - **The fork is the sandbox.** Every action is contained by the CoW fork; blast
   radius is the fork; rollback is instant. In-fork bash needs a sandbox, not a
-  gate — and it has one. So there's no "turn every tool call into a task" problem;
+  gate - and it has one. So there's no "turn every tool call into a task" problem;
   it doesn't exist.
 - **Durable state lives on disk, not in an engine.** Resume state = the agent's
   own persisted session/history inside the fork + the fork snapshot. The daemon's
   job is only to *decide* to resume; "resume" = restart the agent process pointed
   at its on-disk session on the restored snapshot.
 - **Side effects that *escape* the fork are the real gates.** Writing the real
-  Postgres, pushing to the real remote, promoting a fork to "real" — a small,
+  Postgres, pushing to the real remote, promoting a fork to "real" - a small,
   enumerable set. Gate by **capability, not by intercepting intent:** the fork has
   no real credentials and no egress route, so the only way out is to ask the
   daemon. That chokepoint is where the approval sits. The agent may freely *want*
@@ -205,12 +205,12 @@ flowchart LR
 **Credential modes (homelab reality).** The "no creds in the fork" property
 above holds strictly only in **API-key mode**, where the daemon stamps headers
 on outbound model calls via the gateway (§6). Most of Fletcher's audience runs
-on subscription-based agent CLIs — Claude Max, ChatGPT Plus/Pro, Gemini
-Advanced — which authenticate via OAuth tokens on disk (`~/.claude/`,
+on subscription-based agent CLIs - Claude Max, ChatGPT Plus/Pro, Gemini
+Advanced - which authenticate via OAuth tokens on disk (`~/.claude/`,
 `~/.codex/`, etc.), not via headers the daemon can intercept. For those users
 Fletcher exposes a **trusted-credential mode** per job: the named credential
 directory is bind-mounted into the fork. In this mode the boundary is
-explicitly weakened — in-fork code can read the OAuth tokens — but the §5 claim
+explicitly weakened - in-fork code can read the OAuth tokens - but the §5 claim
 still holds for every *non-mounted* credential (other integrations, other
 secrets). On a homelab the operator and the agent's principal are the same
 person, so "the agent can read my own subscription token" is an acceptable
@@ -237,7 +237,7 @@ sequenceDiagram
 
     Note over D,V: Agent blocked on a pending approval (idle, fork stable)
     D->>DB: write pending_approval row
-    D->>U: APNs push — approve?
+    D->>U: APNs push - approve?
     Note over D,V: Host reboots
     D-->>D: Daemon restarts
     D->>DB: read active jobs + pending approvals
@@ -261,14 +261,14 @@ sequenceDiagram
 
 ## 6. The Model Gateway
 
-The daemon **is** the model gateway — the key call for "any agent, no hassle."
+The daemon **is** the model gateway - the key call for "any agent, no hassle."
 
 - Every agent (Codex, Claude Code, local-model agent) points its base-URL at the
   daemon's local endpoint. The daemon routes to Anthropic / OpenAI / local Ollama
   and holds all credentials.
 - Configure a provider **once, centrally**; any agent in any VM inherits it.
 - Swap local-vs-cloud **per job** without touching agent config.
-- **Keys never enter the fork** (API-key mode) — this *is* the privacy story for
+- **Keys never enter the fork** (API-key mode) - this *is* the privacy story for
   credentials the gateway can stamp on the wire, and it's what makes the
   capability boundary in §5 hold. See §5 "Credential modes" for the
   subscription-mode caveat.
@@ -279,17 +279,17 @@ Codex, and OpenAI-compatible tools generally do; a few are stubborn).
 
 ---
 
-## 7. Clients — Control Panel + Results Inbox
+## 7. Clients - Control Panel + Results Inbox
 
 The native first-party client is the product to a non-technical user, and it has
 **two surfaces**, both first-class:
 
 - **Control panel:** VMs, terminals, live previews, the approval prompts.
 - **Results inbox:** a feed of cards / small dashboards where job outputs land
-  ("today's flight prices," "disk usage report," "build finished — preview").
+  ("today's flight prices," "disk usage report," "build finished - preview").
 
 The inbox is half of why monitoring use-cases are sticky and is probably what makes
-non-technical people open the app daily — you check a dashboard, you don't check a
+non-technical people open the app daily - you check a dashboard, you don't check a
 terminal. Design for both from the start.
 
 ---
@@ -299,21 +299,21 @@ terminal. Design for both from the start.
 **The moat is structural:** this runs on metal the user owns. The two relevant
 camps both structurally can't follow:
 
-*Hosted compute clouds* — they host the compute as their business:
-- **OpenComputer / E2B** — cloud API sandboxes; key-based, metered, you ship code
+*Hosted compute clouds* - they host the compute as their business:
+- **OpenComputer / E2B** - cloud API sandboxes; key-based, metered, you ship code
   *to* them. We never meter and nothing leaves the LAN. (OpenComputer is the
-  closest primitive match and open source — study it; its hosted model is the
+  closest primitive match and open source - study it; its hosted model is the
   difference.)
-- **Pi.dev** — secure terminal coding agent pitching "code never leaves your
+- **Pi.dev** - secure terminal coding agent pitching "code never leaves your
   boundary," with regulated-industry pull. Validates our wedge has commercial
   weight; it lives in a CLI, not a native client.
 
-*Self-hosted agent incumbents* — same "runs on your server" turf, huge mindshare,
+*Self-hosted agent incumbents* - same "runs on your server" turf, huge mindshare,
 but a different shape:
-- **Hermes** (Nous Research, ~175k★) — self-hosted autonomous agent with persistent
+- **Hermes** (Nous Research, ~175k★) - self-hosted autonomous agent with persistent
   memory, self-writing skills, scheduled tasks; reached through *other people's*
   chat apps (Telegram/Discord/etc.). Sandbox is just Docker.
-- **OpenClaw** (MIT, ~365k★) — widest chat surface + Chrome control + a skill
+- **OpenClaw** (MIT, ~365k★) - widest chat surface + Chrome control + a skill
   marketplace (ClawHub) that suffered waves of malicious skills.
 
 **Our two differentiators against the agent incumbents:**
@@ -325,7 +325,7 @@ but a different shape:
 
 **Steal selectively (on-wedge only):** persistent memory + scheduled jobs (Hermes);
 browser control as an accessible "go do this on the web" feature (OpenClaw). **Skip
-the self-writing-skills me-too. Skip the skill marketplace entirely** — it's an
+the self-writing-skills me-too. Skip the skill marketplace entirely** - it's an
 attack surface that directly contradicts a trust-positioned product.
 
 ---
@@ -350,7 +350,7 @@ attack surface that directly contradicts a trust-positioned product.
 | Daemon ⇄ guest | vsock | Tiny in-guest agent listens; daemon dials in, streams stdout. |
 | State | `modernc.org/sqlite` (pure Go) + `sqlc` + `golang-migrate` | No CGO; cross-compiles cleanly. Migrations embedded via `embed.FS`. |
 | Codegen | `sqlc` + `buf` + `protoc-gen-connect-go` + `mockery` v3 (matryer template) | Single `make generate` drives all; generated code committed. |
-| Validation | `bufbuild/protovalidate-go` | Rules in `.proto`; enforced via Connect interceptor — single source of truth with the schema. |
+| Validation | `bufbuild/protovalidate-go` | Rules in `.proto`; enforced via Connect interceptor - single source of truth with the schema. |
 | IDs | `jetify-com/typeid-go` | Prefixed, type-safe IDs (e.g. `job_01h...`). |
 | Secrets | `filippo.io/age` | Encryption at rest for tokens/keys. |
 | Networking | `wireguard-go` + UPnP/NAT-PMP/PCP + DDNS | Hub-and-spoke; no DERP/ICE; STUN is optional one-shot. |
@@ -373,14 +373,14 @@ runtime; runc as the labeled no-KVM fallback; btrfs for forks; one static
 
 **Why Mac isn't free** (the assumption "Mac is unix so it's fine" is true at
 userland and irrelevant here): Firecracker uses Linux KVM and the Firecracker team
-doesn't plan macOS support. The portable axis isn't POSIX — it's the
+doesn't plan macOS support. The portable axis isn't POSIX - it's the
 virtualization/kernel-isolation primitives, which Linux and macOS share nothing on.
 
 **The deferral is cheap *if* the seams stay honest.** Keep all KVM/Firecracker
 calls behind the runtime interface and all btrfs calls behind the snapshot
 interface. Do **not** scatter `exec("btrfs …")` or `/dev/kvm` checks through the
 job/agent/gateway code. Linux-only in *implementation*, platform-agnostic at the
-*interface seam* — you want that regardless.
+*interface seam* - you want that regardless.
 
 **Mac dev today (a free win from the same seams).** Day-to-day development
 happens on macOS. The pure-Go bulk of the daemon (`CGO_ENABLED=0`,
@@ -389,8 +389,8 @@ and runs there unchanged. The Linux-only pieces sit behind the runtime and
 snapshot interfaces, which ship with `MockDriver` implementations:
 `runtime.MockDriver` spawns local processes instead of microVMs;
 `snapshot.MockDriver` does directory copies instead of btrfs subvolumes. The
-daemon's coordination logic — supervisors, approvals, the gateway, the job
-state machine — is exercised end-to-end on Mac via the mock drivers. For real
+daemon's coordination logic - supervisors, approvals, the gateway, the job
+state machine - is exercised end-to-end on Mac via the mock drivers. For real
 Firecracker/btrfs/WireGuard work, cross-compile (`make build-linux-arm64`)
 and run inside an arm64 Linux VM (UTM on M1). The mocks are not a test hack;
 they are required production-code citizens behind the same interfaces the
@@ -400,27 +400,27 @@ macOS port will eventually plug a real driver into.
 `Code-Hex/vz` (boots Linux guest VMs; supports virtio/vsock/Rosetta) as a third
 runtime driver; APFS `clonefile` as a second snapshot backend; and a divergent Mac
 build (CGO + `com.apple.security.virtualization` entitlement + code-signing +
-notarization — not a static binary). Recommended path then: native VZ driver (works
+notarization - not a static binary). Recommended path then: native VZ driver (works
 on all Apple Silicon + Intel, no nested-virt requirement), not a nested-Firecracker
 appliance (which needs M3+/macOS 15 and adds overhead).
 
 ---
 
-## 11. Open Questions — Verify Before Building
+## 11. Open Questions - Verify Before Building
 
 Load-bearing and fast-moving; check the actual repos/tools before betting on them:
 
-- **`firecracker-containerd` current state** — the OCI→rootfs ergonomics for
+- **`firecracker-containerd` current state** - the OCI→rootfs ergonomics for
   "configure a VM with an image/deps" ride on this.
-- **Firecracker snapshot/restore maturity** — underpins hibernate/wake. Note: live
+- **Firecracker snapshot/restore maturity** - underpins hibernate/wake. Note: live
   memory-snapshot restore is for *instant-wake UX only*; it is **not** load-bearing
   for durability correctness (that comes from restarting the agent against its
   on-disk session + a consistent fork snapshot + idempotent egress). Don't
   over-engineer the durability path chasing a RAM-restore guarantee you don't need.
-- **Agent resume ergonomics** — confirm your chosen agent(s) can be restarted
+- **Agent resume ergonomics** - confirm your chosen agent(s) can be restarted
   against a persisted session and pick up reasoning. *This capability, not any
   engine, is what in-fork durability actually rests on.*
-- **Base-URL override per agent** — confirms the model-gateway design (§6).
+- **Base-URL override per agent** - confirms the model-gateway design (§6).
 
 ---
 
@@ -430,7 +430,7 @@ End-state is described above; scoping is the owner's call. Carried reminders:
 
 - **The hardest remaining work is the runtime/image layer**, not networking.
   Networking is deliberately the boring, solved, hub-and-spoke case.
-- **One primitive, many hats.** The job model (§4) unifies every use case — resist
+- **One primitive, many hats.** The job model (§4) unifies every use case - resist
   re-splitting it into three subsystems.
 - **Keep the interface seams clean** (§10) so macOS is "one more driver," not a
   rewrite.
@@ -444,7 +444,7 @@ End-state is described above; scoping is the owner's call. Carried reminders:
 
 Vertical-slice approach: build the thinnest end-to-end path through the
 system with mock drivers, then iteratively swap in real implementations.
-The §10 mock drivers are the structural enabler — they are required
+The §10 mock drivers are the structural enabler - they are required
 production-code citizens, not test hacks.
 
 Why vertical over horizontal: the structural risks here (resume semantics,
@@ -467,12 +467,12 @@ integration arrives.
 | 8 | Real Linux runtime | Real Firecracker + runc + btrfs drivers behind same interfaces. Requires UTM dev VM. Mocks stay forever. |
 | 9 | Networking | WireGuard peers + UPnP/NAT-PMP/PCP + DDNS. Large standalone chunk. |
 | 10 | v0.1.0 polish | Install script, systemd unit, README quickstart, goreleaser config, first tagged release. |
-| 11 | Base image (`fletcher-base`) | A Fletcher-blessed OCI image built from a Dockerfile in-repo (reference pattern: exe.dev's "exeuntu"). Variants named `fletcher-base:debian-13`, `fletcher-base:ubuntu-24.04`, etc. — descriptive, not portmanteau. Ships with: three agent CLIs pre-installed (`claude` from Anthropic, `codex` from OpenAI, `pi` from Earendil — `pi` is the recommended default for users without a strong agent preference, because its extensions system enables Phase 14's deeper integration, but all three are first-class so users can keep existing workflows); their config directories pre-created at the well-known paths Phase 12's bind-mounts target; a single `AGENTS.md` symlinked into each agent's expected location (one source of truth for shared instructions); a `fletcher` user (UID 1000, NOPASSWD sudo, linger enabled for systemd-user services); dev essentials (git, gh, jq, ripgrep, vim, build-essential, Node, Go, Python, uv); the daemon contract baked into env defaults (gateway base-URL, MCP URL, `/workspace` mount point) so agents don't need per-job env configuration; `wireguard-tools` — **not** Tailscale, which is off-thesis (hosted control plane); no baked SSH host keys (generated at VM creation); `x-systemd.growfs` in `/etc/fstab` for first-boot rootfs expansion. Built via standard `docker build`; flattened into a btrfs subvolume by the snapshot driver at `<snapshots>/images/<name>` until the `firecracker-containerd` OCI pull pipeline per §3 lands. Substrate for phases 12, 13, 14. |
-| 12 | Trusted-credential mode | Per-job opt-in to bind-mount named credential directories (`~/.claude`, `~/.codex`, `~/.config/gemini`) into the fork. Enables subscription-auth agents (Claude Max, ChatGPT Plus, Gemini Advanced) — the primary audience — at the documented §5 "Credential modes" cost. |
+| 11 | Base image (`fletcher-base`) | A Fletcher-blessed OCI image built from a Dockerfile in-repo (reference pattern: exe.dev's "exeuntu"). Variants named `fletcher-base:debian-13`, `fletcher-base:ubuntu-24.04`, etc. - descriptive, not portmanteau. Ships with: three agent CLIs pre-installed (`claude` from Anthropic, `codex` from OpenAI, `pi` from Earendil - `pi` is the recommended default for users without a strong agent preference, because its extensions system enables Phase 14's deeper integration, but all three are first-class so users can keep existing workflows); their config directories pre-created at the well-known paths Phase 12's bind-mounts target; a single `AGENTS.md` symlinked into each agent's expected location (one source of truth for shared instructions); a `fletcher` user (UID 1000, NOPASSWD sudo, linger enabled for systemd-user services); dev essentials (git, gh, jq, ripgrep, vim, build-essential, Node, Go, Python, uv); the daemon contract baked into env defaults (gateway base-URL, MCP URL, `/workspace` mount point) so agents don't need per-job env configuration; `wireguard-tools` - **not** Tailscale, which is off-thesis (hosted control plane); no baked SSH host keys (generated at VM creation); `x-systemd.growfs` in `/etc/fstab` for first-boot rootfs expansion. Built via standard `docker build`; flattened into a btrfs subvolume by the snapshot driver at `<snapshots>/images/<name>` until the `firecracker-containerd` OCI pull pipeline per §3 lands. Substrate for phases 12, 13, 14. |
+| 12 | Trusted-credential mode | Per-job opt-in to bind-mount named credential directories (`~/.claude`, `~/.codex`, `~/.config/gemini`) into the fork. Enables subscription-auth agents (Claude Max, ChatGPT Plus, Gemini Advanced) - the primary audience - at the documented §5 "Credential modes" cost. |
 | 13 | Anthropic-native gateway inbound | Gateway accepts `POST /v1/messages` directly; daemon injects `ANTHROPIC_BASE_URL` alongside `OPENAI_BASE_URL`. Closes the API-key path for Claude Code so users with an Anthropic console key can run it in a fork without §5 boundary breaks. Secondary to phase 12 by audience size but cheaper to ship. |
-| 14 | Model catalog + per-agent integration | Gateway exposes a model-discovery endpoint (`GET /catalog.json` or equivalent) listing available providers and models — Anthropic, OpenAI passthrough, locally-served Ollama, etc. Surfaces through (a) a Fletcher CLI command (`fletcher models list`) for humans, and (b) a Fletcher-authored extension for `pi` (the Earendil agent baked into Phase 11) that pre-fetches the catalog and registers providers on startup — mirroring how exe.dev's `exe-dev` pi-extension does this for their gateway. Agents *without* an extensions system (Claude Code, Codex) continue to work via the env-var injection from Phase 13; no agent-side auto-discovery is possible for them and that is fine — Phase 12's trusted-credential mode is what those users actually need. The gateway becomes a model-discovery surface for humans and extension-capable agents, not a universal magic layer. |
+| 14 | Model catalog + per-agent integration | Gateway exposes a model-discovery endpoint (`GET /catalog.json` or equivalent) listing available providers and models - Anthropic, OpenAI passthrough, locally-served Ollama, etc. Surfaces through (a) a Fletcher CLI command (`fletcher models list`) for humans, and (b) a Fletcher-authored extension for `pi` (the Earendil agent baked into Phase 11) that pre-fetches the catalog and registers providers on startup - mirroring how exe.dev's `exe-dev` pi-extension does this for their gateway. Agents *without* an extensions system (Claude Code, Codex) continue to work via the env-var injection from Phase 13; no agent-side auto-discovery is possible for them and that is fine - Phase 12's trusted-credential mode is what those users actually need. The gateway becomes a model-discovery surface for humans and extension-capable agents, not a universal magic layer. |
 
-Past Phase 14 — don't plan now. Real users reshape priorities. Phases 11–14
+Past Phase 14 - don't plan now. Real users reshape priorities. Phases 11–14
 above are concrete continuations derived from observed homelab / Claude Code
 needs and the exeuntu reference, not speculation; anything past them should
 wait for actual usage.

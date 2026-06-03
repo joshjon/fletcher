@@ -118,7 +118,7 @@ func (s *Supervisor) Notify() {
 // CancelRunning signals a running job's process tree to terminate. It
 // returns true iff a process was actually tracked and cancelled. The DB
 // transition to "cancelled" is the caller's responsibility (see
-// Service.Cancel) — this method only kills the child.
+// Service.Cancel) - this method only kills the child.
 func (s *Supervisor) CancelRunning(jobID string) bool {
 	s.mu.Lock()
 	cancel, ok := s.active[jobID]
