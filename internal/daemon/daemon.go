@@ -16,7 +16,10 @@ import (
 
 	"github.com/oklog/run"
 
+	"connectrpc.com/connect"
+
 	"github.com/joshjon/fletcher/internal/api"
+	"github.com/joshjon/fletcher/internal/audit"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/job"
 	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
@@ -24,6 +27,11 @@ import (
 	"github.com/joshjon/fletcher/internal/sqlite"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
 )
+
+// auditRecorder is the daemon's privileged-op audit sink. Phase 4 wires
+// the Noop recorder; future phases will replace it with the SQLite-backed
+// log without changing any call sites.
+var auditRecorder audit.Recorder = audit.Noop{}
 
 // Config holds boot-time daemon settings.
 type Config struct {
@@ -77,7 +85,7 @@ func Run(ctx context.Context, cfg Config) error {
 
 	supervisor := job.NewSupervisor(queries, rtDriver, snapDriver, logger, job.SupervisorOptions{})
 	jobSvc := job.NewService(queries, supervisor)
-	srv := newHTTPServer(time.Now().Unix(), jobSvc)
+	srv := newHTTPServer(time.Now().Unix(), jobSvc, logger)
 
 	var g run.Group
 	// serveActor's interrupt path uses a fresh context for graceful shutdown
@@ -123,13 +131,22 @@ func listenUnix(ctx context.Context, socketPath string) (net.Listener, error) {
 	return ln, nil
 }
 
-func newHTTPServer(startedAt int64, jobBackend api.JobsBackend) *http.Server {
+func newHTTPServer(startedAt int64, jobBackend api.JobsBackend, logger *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 
-	adminPath, adminHandler := fletcherv1connect.NewAdminServiceHandler(api.NewAdminService(startedAt))
+	interceptors := connect.WithInterceptors(
+		api.RequestIDInterceptor(),
+		api.ErrorInterceptor(logger),
+	)
+
+	adminPath, adminHandler := fletcherv1connect.NewAdminServiceHandler(
+		api.NewAdminService(startedAt), interceptors,
+	)
 	mux.Handle(adminPath, adminHandler)
 
-	jobsPath, jobsHandler := fletcherv1connect.NewJobServiceHandler(api.NewJobsService(jobBackend))
+	jobsPath, jobsHandler := fletcherv1connect.NewJobServiceHandler(
+		api.NewJobsService(jobBackend), interceptors,
+	)
 	mux.Handle(jobsPath, jobsHandler)
 
 	return &http.Server{
@@ -194,5 +211,6 @@ func newLogger(level string) *slog.Logger {
 	if err := lvl.UnmarshalText([]byte(level)); err != nil {
 		lvl = slog.LevelInfo
 	}
-	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: lvl}))
+	base := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})
+	return slog.New(api.NewContextLogHandler(base))
 }

@@ -14,6 +14,7 @@ import (
 
 	"go.jetify.com/typeid"
 
+	"github.com/joshjon/fletcher/internal/errs"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
 )
 
@@ -43,8 +44,10 @@ const (
 // idPrefix is the typeid prefix for job IDs (e.g., "job_01h...").
 const idPrefix = "job"
 
-// ErrNotFound is returned when a requested job ID does not exist.
-var ErrNotFound = errors.New("job not found")
+// ErrNotFound is returned when a requested job ID does not exist. It is
+// categorised so the Connect interceptor maps it to CodeNotFound without
+// the API handler needing to do anything.
+var ErrNotFound = errs.New(errs.CategoryNotFound, "job not found")
 
 // Job is the daemon's domain representation of a job. It hides the int64
 // epochs sqlc emits and the raw strings used at the SQL boundary.
@@ -196,21 +199,21 @@ func (s *Service) Cancel(ctx context.Context, id string) (bool, error) {
 
 func (p CreateParams) validate() error {
 	if strings.TrimSpace(p.Name) == "" {
-		return errors.New("name is required")
+		return errs.New(errs.CategoryInvalidArgument, "name is required")
 	}
 	if strings.TrimSpace(p.Command) == "" {
-		return errors.New("command is required")
+		return errs.New(errs.CategoryInvalidArgument, "command is required")
 	}
 	if strings.TrimSpace(p.Image) == "" {
-		return errors.New("image is required")
+		return errs.New(errs.CategoryInvalidArgument, "image is required")
 	}
 	switch p.Trigger {
 	case TriggerEphemeral, TriggerCron, TriggerLongRunning:
 		return nil
 	case "":
-		return errors.New("trigger is required")
+		return errs.New(errs.CategoryInvalidArgument, "trigger is required")
 	default:
-		return fmt.Errorf("invalid trigger %q", p.Trigger)
+		return errs.Newf(errs.CategoryInvalidArgument, "invalid trigger %q", p.Trigger)
 	}
 }
 

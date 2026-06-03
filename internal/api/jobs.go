@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 
 	"connectrpc.com/connect"
 
@@ -33,7 +32,8 @@ func NewJobsService(svc JobsBackend) *JobsService {
 	return &JobsService{svc: svc}
 }
 
-// CreateJob enqueues a new job. Validation errors map to InvalidArgument.
+// CreateJob enqueues a new job. Validation errors are categorised inside
+// the domain layer; the ErrorInterceptor maps them to the wire code.
 func (s *JobsService) CreateJob(ctx context.Context, req *connect.Request[fletcherv1.CreateJobRequest]) (*connect.Response[fletcherv1.CreateJobResponse], error) {
 	m := req.Msg
 	j, err := s.svc.Create(ctx, job.CreateParams{
@@ -43,19 +43,17 @@ func (s *JobsService) CreateJob(ctx context.Context, req *connect.Request[fletch
 		Image:   m.GetImage(),
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.CreateJobResponse{Job: jobToProto(j)}), nil
 }
 
-// GetJob fetches a single job by ID. Missing jobs map to NotFound.
+// GetJob fetches a single job by ID. Categorised job.ErrNotFound maps to
+// CodeNotFound via the ErrorInterceptor.
 func (s *JobsService) GetJob(ctx context.Context, req *connect.Request[fletcherv1.GetJobRequest]) (*connect.Response[fletcherv1.GetJobResponse], error) {
 	j, err := s.svc.Get(ctx, req.Msg.GetId())
-	if errors.Is(err, job.ErrNotFound) {
-		return nil, connect.NewError(connect.CodeNotFound, err)
-	}
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.GetJobResponse{Job: jobToProto(j)}), nil
 }
@@ -70,11 +68,11 @@ func (s *JobsService) ListJobs(ctx context.Context, req *connect.Request[fletche
 		StatusFilter: filter,
 	})
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, err
 	}
 	total, err := s.svc.Count(ctx, filter)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, err
 	}
 	protos := make([]*fletcherv1.Job, len(jobs))
 	for i, j := range jobs {
@@ -87,7 +85,7 @@ func (s *JobsService) ListJobs(ctx context.Context, req *connect.Request[fletche
 func (s *JobsService) CancelJob(ctx context.Context, req *connect.Request[fletcherv1.CancelJobRequest]) (*connect.Response[fletcherv1.CancelJobResponse], error) {
 	ok, err := s.svc.Cancel(ctx, req.Msg.GetId())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.CancelJobResponse{Cancelled: ok}), nil
 }
