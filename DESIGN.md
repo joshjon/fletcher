@@ -202,6 +202,22 @@ flowchart LR
 - **Idempotent egress.** Privileged ops carry idempotency keys; a retry after a
   crash must not double-apply.
 
+**Credential modes (homelab reality).** The "no creds in the fork" property
+above holds strictly only in **API-key mode**, where the daemon stamps headers
+on outbound model calls via the gateway (§6). Most of Fletcher's audience runs
+on subscription-based agent CLIs — Claude Max, ChatGPT Plus/Pro, Gemini
+Advanced — which authenticate via OAuth tokens on disk (`~/.claude/`,
+`~/.codex/`, etc.), not via headers the daemon can intercept. For those users
+Fletcher exposes a **trusted-credential mode** per job: the named credential
+directory is bind-mounted into the fork. In this mode the boundary is
+explicitly weakened — in-fork code can read the OAuth tokens — but the §5 claim
+still holds for every *non-mounted* credential (other integrations, other
+secrets). On a homelab the operator and the agent's principal are the same
+person, so "the agent can read my own subscription token" is an acceptable
+threat-model concession. A daemon-side OAuth proxy per vendor would restore
+strict isolation for subscription users; it is deferred past v0.1.0 because
+each vendor's OAuth flow is an internal protocol subject to silent change.
+
 **Crash-resume semantics (state plainly).** Resume is "from the agent's last
 persisted turn," *not* a frame-perfect mid-instruction restore. If the box dies
 between an agent disk-write and the next snapshot, restored state is seconds behind
@@ -252,8 +268,10 @@ The daemon **is** the model gateway — the key call for "any agent, no hassle."
   and holds all credentials.
 - Configure a provider **once, centrally**; any agent in any VM inherits it.
 - Swap local-vs-cloud **per job** without touching agent config.
-- **Keys never enter the fork** — this *is* the privacy story, and it's what makes
-  the capability boundary in §5 hold.
+- **Keys never enter the fork** (API-key mode) — this *is* the privacy story for
+  credentials the gateway can stamp on the wire, and it's what makes the
+  capability boundary in §5 hold. See §5 "Credential modes" for the
+  subscription-mode caveat.
 - Every model call flows through one place → free audit log.
 
 *Verify per agent:* that it actually honors a base-URL override (Claude Code,
@@ -449,5 +467,12 @@ integration arrives.
 | 8 | Real Linux runtime | Real Firecracker + runc + btrfs drivers behind same interfaces. Requires UTM dev VM. Mocks stay forever. |
 | 9 | Networking | WireGuard peers + UPnP/NAT-PMP/PCP + DDNS. Large standalone chunk. |
 | 10 | v0.1.0 polish | Install script, systemd unit, README quickstart, goreleaser config, first tagged release. |
+| 11 | Base image (`fletcher-base`) | A Fletcher-blessed OCI image built from a Dockerfile in-repo (reference pattern: exe.dev's "exeuntu"). Variants named `fletcher-base:debian-13`, `fletcher-base:ubuntu-24.04`, etc. — descriptive, not portmanteau. Ships with: three agent CLIs pre-installed (`claude` from Anthropic, `codex` from OpenAI, `pi` from Earendil — `pi` is the recommended default for users without a strong agent preference, because its extensions system enables Phase 14's deeper integration, but all three are first-class so users can keep existing workflows); their config directories pre-created at the well-known paths Phase 12's bind-mounts target; a single `AGENTS.md` symlinked into each agent's expected location (one source of truth for shared instructions); a `fletcher` user (UID 1000, NOPASSWD sudo, linger enabled for systemd-user services); dev essentials (git, gh, jq, ripgrep, vim, build-essential, Node, Go, Python, uv); the daemon contract baked into env defaults (gateway base-URL, MCP URL, `/workspace` mount point) so agents don't need per-job env configuration; `wireguard-tools` — **not** Tailscale, which is off-thesis (hosted control plane); no baked SSH host keys (generated at VM creation); `x-systemd.growfs` in `/etc/fstab` for first-boot rootfs expansion. Built via standard `docker build`; flattened into a btrfs subvolume by the snapshot driver at `<snapshots>/images/<name>` until the `firecracker-containerd` OCI pull pipeline per §3 lands. Substrate for phases 12, 13, 14. |
+| 12 | Trusted-credential mode | Per-job opt-in to bind-mount named credential directories (`~/.claude`, `~/.codex`, `~/.config/gemini`) into the fork. Enables subscription-auth agents (Claude Max, ChatGPT Plus, Gemini Advanced) — the primary audience — at the documented §5 "Credential modes" cost. |
+| 13 | Anthropic-native gateway inbound | Gateway accepts `POST /v1/messages` directly; daemon injects `ANTHROPIC_BASE_URL` alongside `OPENAI_BASE_URL`. Closes the API-key path for Claude Code so users with an Anthropic console key can run it in a fork without §5 boundary breaks. Secondary to phase 12 by audience size but cheaper to ship. |
+| 14 | Model catalog + per-agent integration | Gateway exposes a model-discovery endpoint (`GET /catalog.json` or equivalent) listing available providers and models — Anthropic, OpenAI passthrough, locally-served Ollama, etc. Surfaces through (a) a Fletcher CLI command (`fletcher models list`) for humans, and (b) a Fletcher-authored extension for `pi` (the Earendil agent baked into Phase 11) that pre-fetches the catalog and registers providers on startup — mirroring how exe.dev's `exe-dev` pi-extension does this for their gateway. Agents *without* an extensions system (Claude Code, Codex) continue to work via the env-var injection from Phase 13; no agent-side auto-discovery is possible for them and that is fine — Phase 12's trusted-credential mode is what those users actually need. The gateway becomes a model-discovery surface for humans and extension-capable agents, not a universal magic layer. |
 
-Past v0.1.0 — don't plan now. Real users reshape priorities.
+Past Phase 14 — don't plan now. Real users reshape priorities. Phases 11–14
+above are concrete continuations derived from observed homelab / Claude Code
+needs and the exeuntu reference, not speculation; anything past them should
+wait for actual usage.
