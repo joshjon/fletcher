@@ -46,6 +46,10 @@ func jobCreateCmd() *cli.Command {
 				Value: "ephemeral",
 				Usage: "trigger kind (ephemeral, cron, long_running)",
 			},
+			&cli.StringSliceFlag{
+				Name:  "credential",
+				Usage: "bind-mount a named credential dir into the fork (repeatable; allowed: claude, codex, gemini)",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			trigger, err := triggerFromString(cmd.String("trigger"))
@@ -54,10 +58,11 @@ func jobCreateCmd() *cli.Command {
 			}
 			client := newJobsClient(cmd.String("socket"))
 			resp, err := client.CreateJob(ctx, connect.NewRequest(&fletcherv1.CreateJobRequest{
-				Trigger: trigger,
-				Name:    cmd.String("name"),
-				Command: cmd.String("command"),
-				Image:   cmd.String("image"),
+				Trigger:     trigger,
+				Name:        cmd.String("name"),
+				Command:     cmd.String("command"),
+				Image:       cmd.String("image"),
+				Credentials: cmd.StringSlice("credential"),
 			}))
 			if err != nil {
 				return err
@@ -243,6 +248,9 @@ func writeJobDetails(w io.Writer, j *fletcherv1.Job) error {
 	fmt.Fprintf(tw, "trigger:\t%s\n", triggerLabel(j.GetTrigger()))
 	fmt.Fprintf(tw, "image:\t%s\n", j.GetImage())
 	fmt.Fprintf(tw, "command:\t%s\n", j.GetCommand())
+	if creds := j.GetCredentials(); len(creds) > 0 {
+		fmt.Fprintf(tw, "credentials:\t%s\n", strings.Join(creds, ", "))
+	}
 	fmt.Fprintf(tw, "created_at:\t%s\n", formatUnix(j.GetCreatedAt()))
 	fmt.Fprintf(tw, "updated_at:\t%s\n", formatUnix(j.GetUpdatedAt()))
 	if j.StartedAt != nil {

@@ -66,6 +66,10 @@ type Config struct {
 	BtrfsRoot string
 	// RuncBinary overrides the runc executable path when RuntimeKind=runc.
 	RuncBinary string
+	// CredentialsDir is the host directory under which trusted-credential
+	// mode (Phase 12) resolves each credential's HostRelPath. Defaults to
+	// the operator's $HOME; empty disables credential mounting entirely.
+	CredentialsDir string
 }
 
 // shutdownTimeout caps how long the daemon waits for in-flight work before
@@ -173,6 +177,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 			"OPENAI_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
 			"FLETCHER_MCP_URL=" + mcpURL,
 		},
+		CredentialsRoot: cfg.CredentialsDir,
 	})
 
 	connectDeps := connectDeps{

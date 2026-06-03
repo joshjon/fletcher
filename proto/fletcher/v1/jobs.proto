@@ -48,6 +48,10 @@ message Job {
   optional int64 completed_at = 10;
   string error_message = 11;
   optional int32 exit_code = 12;
+  // Named credential directories bind-mounted into the fork at job start
+  // (DESIGN.md §5 "Credential modes", Phase 12 "trusted-credential mode").
+  // Supported names: "claude", "codex", "gemini".
+  repeated string credentials = 13;
 }
 
 message CreateJobRequest {
@@ -55,6 +59,8 @@ message CreateJobRequest {
   string name = 2;
   string command = 3;
   string image = 4;
+  // Optional list of credentials to bind-mount; see Job.credentials.
+  repeated string credentials = 5;
 }
 
 message CreateJobResponse {

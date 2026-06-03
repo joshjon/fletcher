@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -25,9 +27,10 @@ type Supervisor struct {
 	snapshot snapshot.Driver
 	logger   *slog.Logger
 
-	pollInterval  time.Duration
-	drainDeadline time.Duration
-	jobEnv        []string
+	pollInterval    time.Duration
+	drainDeadline   time.Duration
+	jobEnv          []string
+	credentialsRoot string
 
 	mu     sync.Mutex
 	active map[string]context.CancelFunc
@@ -48,6 +51,10 @@ type SupervisorOptions struct {
 	// this to inject OPENAI_BASE_URL pointing at the local model gateway
 	// (so agents inside forks never see real API keys).
 	JobEnv []string
+	// CredentialsRoot is the host directory under which each credential's
+	// HostRelPath (see AllowedCredentials) is resolved. Empty disables
+	// trusted-credential mode: jobs that request credentials fail at start.
+	CredentialsRoot string
 }
 
 // NewSupervisor wires a Supervisor to its dependencies.
@@ -62,15 +69,16 @@ func NewSupervisor(q sqliteq.Querier, rt runtime.Driver, sn snapshot.Driver, log
 		logger = slog.Default()
 	}
 	return &Supervisor{
-		q:             q,
-		runtime:       rt,
-		snapshot:      sn,
-		logger:        logger,
-		pollInterval:  opts.PollInterval,
-		drainDeadline: opts.DrainDeadline,
-		jobEnv:        append([]string(nil), opts.JobEnv...),
-		active:        make(map[string]context.CancelFunc),
-		wakeup:        make(chan struct{}, 1),
+		q:               q,
+		runtime:         rt,
+		snapshot:        sn,
+		logger:          logger,
+		pollInterval:    opts.PollInterval,
+		drainDeadline:   opts.DrainDeadline,
+		jobEnv:          append([]string(nil), opts.JobEnv...),
+		credentialsRoot: opts.CredentialsRoot,
+		active:          make(map[string]context.CancelFunc),
+		wakeup:          make(chan struct{}, 1),
 	}
 }
 
@@ -199,6 +207,13 @@ func (s *Supervisor) runOne(jobCtx context.Context, row sqliteq.Job) {
 	)
 	log.Info("starting job")
 
+	mounts, err := s.resolveCredentials(row.Credentials)
+	if err != nil {
+		log.Error("resolve credentials", slog.String("err", err.Error()))
+		s.markFailed(row.ID, -1, fmt.Sprintf("resolve credentials: %s", err))
+		return
+	}
+
 	snap, err := s.snapshot.Create(jobCtx, row.Image)
 	if err != nil {
 		log.Error("create snapshot", slog.String("err", err.Error()))
@@ -213,6 +228,7 @@ func (s *Supervisor) runOne(jobCtx context.Context, row sqliteq.Job) {
 		Command: row.Command,
 		WorkDir: snap.Path,
 		Env:     s.jobEnv,
+		Mounts:  mounts,
 	}, io.Discard, io.Discard)
 
 	// Two cancellation paths share ctx.Canceled: targeted CancelRunning
@@ -280,6 +296,42 @@ func (s *Supervisor) deleteSnapshot(id string, log *slog.Logger) {
 	if err := s.snapshot.Delete(context.Background(), id); err != nil {
 		log.Warn("delete snapshot", slog.String("snapshot_id", id), slog.String("err", err.Error()))
 	}
+}
+
+// resolveCredentials turns the row's stored credential list (JSON-encoded
+// allowlist names) into concrete runtime.Mount entries by joining each
+// credential's HostRelPath onto the supervisor's CredentialsRoot. Each
+// resolved source path must exist on the host; missing dirs fail the
+// job early with a clear message rather than producing a confusing
+// bind-mount error from the runtime.
+func (s *Supervisor) resolveCredentials(encoded string) ([]runtime.Mount, error) {
+	names, err := decodeCredentials(encoded)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	if s.credentialsRoot == "" {
+		return nil, fmt.Errorf("job requests credentials %v but daemon has no credentials root configured", names)
+	}
+	mounts := make([]runtime.Mount, 0, len(names))
+	for _, name := range names {
+		spec, ok := AllowedCredentials[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown credential %q stored on job (allowed: %s)", name, allowedCredentialNames())
+		}
+		src := filepath.Join(s.credentialsRoot, spec.HostRelPath)
+		if _, statErr := os.Stat(src); statErr != nil {
+			return nil, fmt.Errorf("credential %q: host path %s: %w", name, src, statErr)
+		}
+		mounts = append(mounts, runtime.Mount{
+			Source:      src,
+			Destination: spec.GuestPath,
+			ReadOnly:    false,
+		})
+	}
+	return mounts, nil
 }
 
 // drain waits up to drainDeadline for in-flight runOne goroutines to

@@ -140,12 +140,16 @@ type Job struct {
 	Command string                 `protobuf:"bytes,5,opt,name=command,proto3" json:"command,omitempty"`
 	Image   string                 `protobuf:"bytes,6,opt,name=image,proto3" json:"image,omitempty"`
 	// Unix epoch seconds.
-	CreatedAt     int64  `protobuf:"varint,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     int64  `protobuf:"varint,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	StartedAt     *int64 `protobuf:"varint,9,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
-	CompletedAt   *int64 `protobuf:"varint,10,opt,name=completed_at,json=completedAt,proto3,oneof" json:"completed_at,omitempty"`
-	ErrorMessage  string `protobuf:"bytes,11,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	ExitCode      *int32 `protobuf:"varint,12,opt,name=exit_code,json=exitCode,proto3,oneof" json:"exit_code,omitempty"`
+	CreatedAt    int64  `protobuf:"varint,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt    int64  `protobuf:"varint,8,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	StartedAt    *int64 `protobuf:"varint,9,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
+	CompletedAt  *int64 `protobuf:"varint,10,opt,name=completed_at,json=completedAt,proto3,oneof" json:"completed_at,omitempty"`
+	ErrorMessage string `protobuf:"bytes,11,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
+	ExitCode     *int32 `protobuf:"varint,12,opt,name=exit_code,json=exitCode,proto3,oneof" json:"exit_code,omitempty"`
+	// Named credential directories bind-mounted into the fork at job start
+	// (DESIGN.md §5 "Credential modes", Phase 12 "trusted-credential mode").
+	// Supported names: "claude", "codex", "gemini".
+	Credentials   []string `protobuf:"bytes,13,rep,name=credentials,proto3" json:"credentials,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -264,12 +268,21 @@ func (x *Job) GetExitCode() int32 {
 	return 0
 }
 
+func (x *Job) GetCredentials() []string {
+	if x != nil {
+		return x.Credentials
+	}
+	return nil
+}
+
 type CreateJobRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Trigger       JobTrigger             `protobuf:"varint,1,opt,name=trigger,proto3,enum=fletcher.v1.JobTrigger" json:"trigger,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Command       string                 `protobuf:"bytes,3,opt,name=command,proto3" json:"command,omitempty"`
-	Image         string                 `protobuf:"bytes,4,opt,name=image,proto3" json:"image,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Trigger JobTrigger             `protobuf:"varint,1,opt,name=trigger,proto3,enum=fletcher.v1.JobTrigger" json:"trigger,omitempty"`
+	Name    string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Command string                 `protobuf:"bytes,3,opt,name=command,proto3" json:"command,omitempty"`
+	Image   string                 `protobuf:"bytes,4,opt,name=image,proto3" json:"image,omitempty"`
+	// Optional list of credentials to bind-mount; see Job.credentials.
+	Credentials   []string `protobuf:"bytes,5,rep,name=credentials,proto3" json:"credentials,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -330,6 +343,13 @@ func (x *CreateJobRequest) GetImage() string {
 		return x.Image
 	}
 	return ""
+}
+
+func (x *CreateJobRequest) GetCredentials() []string {
+	if x != nil {
+		return x.Credentials
+	}
+	return nil
 }
 
 type CreateJobResponse struct {
@@ -668,7 +688,7 @@ var File_fletcher_v1_jobs_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_jobs_proto_rawDesc = "" +
 	"\n" +
-	"\x16fletcher/v1/jobs.proto\x12\vfletcher.v1\"\xbb\x03\n" +
+	"\x16fletcher/v1/jobs.proto\x12\vfletcher.v1\"\xdd\x03\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12.\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x16.fletcher.v1.JobStatusR\x06status\x121\n" +
@@ -685,16 +705,18 @@ const file_fletcher_v1_jobs_proto_rawDesc = "" +
 	"\fcompleted_at\x18\n" +
 	" \x01(\x03H\x01R\vcompletedAt\x88\x01\x01\x12#\n" +
 	"\rerror_message\x18\v \x01(\tR\ferrorMessage\x12 \n" +
-	"\texit_code\x18\f \x01(\x05H\x02R\bexitCode\x88\x01\x01B\r\n" +
+	"\texit_code\x18\f \x01(\x05H\x02R\bexitCode\x88\x01\x01\x12 \n" +
+	"\vcredentials\x18\r \x03(\tR\vcredentialsB\r\n" +
 	"\v_started_atB\x0f\n" +
 	"\r_completed_atB\f\n" +
 	"\n" +
-	"_exit_code\"\x89\x01\n" +
+	"_exit_code\"\xab\x01\n" +
 	"\x10CreateJobRequest\x121\n" +
 	"\atrigger\x18\x01 \x01(\x0e2\x17.fletcher.v1.JobTriggerR\atrigger\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\acommand\x18\x03 \x01(\tR\acommand\x12\x14\n" +
-	"\x05image\x18\x04 \x01(\tR\x05image\"7\n" +
+	"\x05image\x18\x04 \x01(\tR\x05image\x12 \n" +
+	"\vcredentials\x18\x05 \x03(\tR\vcredentials\"7\n" +
 	"\x11CreateJobResponse\x12\"\n" +
 	"\x03job\x18\x01 \x01(\v2\x10.fletcher.v1.JobR\x03job\"\x1f\n" +
 	"\rGetJobRequest\x12\x0e\n" +

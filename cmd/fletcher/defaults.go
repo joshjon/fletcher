@@ -42,3 +42,14 @@ func defaultAgeIdentityPath() string {
 	}
 	return "age.key"
 }
+
+// defaultCredentialsDir returns the operator's $HOME, which is where agent
+// CLIs typically store their config (~/.claude, ~/.codex, etc.). An empty
+// string is returned if HOME is unset; the supervisor treats that as
+// "trusted-credential mode disabled" and fails jobs that request mounts.
+func defaultCredentialsDir() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return home
+	}
+	return ""
+}

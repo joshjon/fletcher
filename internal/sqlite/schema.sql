@@ -57,3 +57,11 @@ CREATE TABLE peers (
 ) STRICT;
 
 CREATE INDEX idx_peers_created_at ON peers (created_at DESC);
+
+-- File: 0006_job_credentials.up.sql
+-- Trusted-credential mode (DESIGN.md §5 + Phase 12). The column stores
+-- a JSON array of credential names (e.g. ["claude","codex"]); empty
+-- string means no credentials are mounted. Storing JSON instead of a
+-- separate join table keeps the supervisor's read path one row, which
+-- is the only access pattern.
+ALTER TABLE jobs ADD COLUMN credentials TEXT NOT NULL DEFAULT '';

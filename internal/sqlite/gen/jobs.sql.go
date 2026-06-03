@@ -53,11 +53,11 @@ func (q *Queries) CountJobsByStatus(ctx context.Context, status string) (int64, 
 
 const createJob = `-- name: CreateJob :one
 INSERT INTO jobs (
-    id, status, trigger_kind, name, command, image, created_at, updated_at
+    id, status, trigger_kind, name, command, image, credentials, created_at, updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code
+RETURNING id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials
 `
 
 type CreateJobParams struct {
@@ -67,6 +67,7 @@ type CreateJobParams struct {
 	Name        string
 	Command     string
 	Image       string
+	Credentials string
 	CreatedAt   int64
 	UpdatedAt   int64
 }
@@ -79,6 +80,7 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		arg.Name,
 		arg.Command,
 		arg.Image,
+		arg.Credentials,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -96,12 +98,13 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		&i.CompletedAt,
 		&i.ErrorMessage,
 		&i.ExitCode,
+		&i.Credentials,
 	)
 	return i, err
 }
 
 const getJob = `-- name: GetJob :one
-SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code FROM jobs WHERE id = ?
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials FROM jobs WHERE id = ?
 `
 
 func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
@@ -120,12 +123,13 @@ func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
 		&i.CompletedAt,
 		&i.ErrorMessage,
 		&i.ExitCode,
+		&i.Credentials,
 	)
 	return i, err
 }
 
 const listJobs = `-- name: ListJobs :many
-SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code FROM jobs
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials FROM jobs
 ORDER BY created_at DESC
 LIMIT ? OFFSET ?
 `
@@ -157,6 +161,7 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, erro
 			&i.CompletedAt,
 			&i.ErrorMessage,
 			&i.ExitCode,
+			&i.Credentials,
 		); err != nil {
 			return nil, err
 		}
@@ -172,7 +177,7 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, erro
 }
 
 const listJobsByStatus = `-- name: ListJobsByStatus :many
-SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code FROM jobs
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials FROM jobs
 WHERE status = ?
 ORDER BY created_at DESC
 LIMIT ? OFFSET ?
@@ -206,6 +211,7 @@ func (q *Queries) ListJobsByStatus(ctx context.Context, arg ListJobsByStatusPara
 			&i.CompletedAt,
 			&i.ErrorMessage,
 			&i.ExitCode,
+			&i.Credentials,
 		); err != nil {
 			return nil, err
 		}

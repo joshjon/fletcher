@@ -66,6 +66,12 @@ func serveCmd() *cli.Command {
 				Usage:   "path to the runc executable (defaults to $PATH lookup)",
 				Sources: cli.EnvVars("FLETCHER_RUNC_BINARY"),
 			},
+			&cli.StringFlag{
+				Name:    "credentials-dir",
+				Usage:   "host directory holding agent credential dirs (.claude, .codex, .config/gemini) for trusted-credential mode",
+				Sources: cli.EnvVars("FLETCHER_CREDENTIALS_DIR"),
+				Value:   defaultCredentialsDir(),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return daemon.Run(ctx, daemon.Config{
@@ -79,6 +85,7 @@ func serveCmd() *cli.Command {
 				SnapshotKind:      cmd.String("snapshot"),
 				BtrfsRoot:         cmd.String("btrfs-root"),
 				RuncBinary:        cmd.String("runc-binary"),
+				CredentialsDir:    cmd.String("credentials-dir"),
 			})
 		},
 	}

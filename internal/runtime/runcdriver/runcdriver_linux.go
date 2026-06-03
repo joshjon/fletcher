@@ -148,14 +148,7 @@ func minimalOCIConfig(spec runtime.Spec) map[string]any {
 			"readonly": false,
 		},
 		"hostname": "fletcher-job",
-		"mounts": []map[string]any{
-			{"destination": "/proc", "type": "proc", "source": "proc"},
-			{"destination": "/dev", "type": "tmpfs", "source": "tmpfs", "options": []string{"nosuid", "strictatime", "mode=755", "size=65536k"}},
-			{"destination": "/dev/pts", "type": "devpts", "source": "devpts", "options": []string{"nosuid", "noexec", "newinstance", "ptmxmode=0666", "mode=0620"}},
-			{"destination": "/dev/shm", "type": "tmpfs", "source": "shm", "options": []string{"nosuid", "noexec", "nodev", "mode=1777", "size=65536k"}},
-			{"destination": "/dev/mqueue", "type": "mqueue", "source": "mqueue", "options": []string{"nosuid", "noexec", "nodev"}},
-			{"destination": "/sys", "type": "sysfs", "source": "sysfs", "options": []string{"nosuid", "noexec", "nodev", "ro"}},
-		},
+		"mounts":   buildMounts(spec.Mounts),
 		"linux": map[string]any{
 			"namespaces": []map[string]any{
 				{"type": "pid"},
@@ -166,4 +159,33 @@ func minimalOCIConfig(spec runtime.Spec) map[string]any {
 			},
 		},
 	}
+}
+
+// buildMounts assembles the OCI mount list: the standard filesystem
+// pseudo-mounts every container needs plus any caller-supplied bind
+// mounts (trusted-credential dirs, per DESIGN.md §5 Phase 12).
+func buildMounts(extra []runtime.Mount) []map[string]any {
+	out := []map[string]any{
+		{"destination": "/proc", "type": "proc", "source": "proc"},
+		{"destination": "/dev", "type": "tmpfs", "source": "tmpfs", "options": []string{"nosuid", "strictatime", "mode=755", "size=65536k"}},
+		{"destination": "/dev/pts", "type": "devpts", "source": "devpts", "options": []string{"nosuid", "noexec", "newinstance", "ptmxmode=0666", "mode=0620"}},
+		{"destination": "/dev/shm", "type": "tmpfs", "source": "shm", "options": []string{"nosuid", "noexec", "nodev", "mode=1777", "size=65536k"}},
+		{"destination": "/dev/mqueue", "type": "mqueue", "source": "mqueue", "options": []string{"nosuid", "noexec", "nodev"}},
+		{"destination": "/sys", "type": "sysfs", "source": "sysfs", "options": []string{"nosuid", "noexec", "nodev", "ro"}},
+	}
+	for _, m := range extra {
+		opts := []string{"rbind"}
+		if m.ReadOnly {
+			opts = append(opts, "ro")
+		} else {
+			opts = append(opts, "rw")
+		}
+		out = append(out, map[string]any{
+			"destination": m.Destination,
+			"type":        "bind",
+			"source":      m.Source,
+			"options":     opts,
+		})
+	}
+	return out
 }

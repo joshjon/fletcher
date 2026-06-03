@@ -37,10 +37,11 @@ func NewJobsService(svc JobsBackend) *JobsService {
 func (s *JobsService) CreateJob(ctx context.Context, req *connect.Request[fletcherv1.CreateJobRequest]) (*connect.Response[fletcherv1.CreateJobResponse], error) {
 	m := req.Msg
 	j, err := s.svc.Create(ctx, job.CreateParams{
-		Trigger: triggerFromProto(m.GetTrigger()),
-		Name:    m.GetName(),
-		Command: m.GetCommand(),
-		Image:   m.GetImage(),
+		Trigger:     triggerFromProto(m.GetTrigger()),
+		Name:        m.GetName(),
+		Command:     m.GetCommand(),
+		Image:       m.GetImage(),
+		Credentials: m.GetCredentials(),
 	})
 	if err != nil {
 		return nil, err
@@ -156,6 +157,7 @@ func jobToProto(j job.Job) *fletcherv1.Job {
 		Name:         j.Name,
 		Command:      j.Command,
 		Image:        j.Image,
+		Credentials:  j.Credentials,
 		CreatedAt:    j.CreatedAt.Unix(),
 		UpdatedAt:    j.UpdatedAt.Unix(),
 		ErrorMessage: j.ErrorMessage,

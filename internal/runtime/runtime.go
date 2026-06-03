@@ -19,6 +19,22 @@ type Spec struct {
 	Command string
 	WorkDir string
 	Env     []string // "KEY=value" entries; merged onto the driver's defaults
+	// Mounts are bind-mounts the runtime should set up inside the fork.
+	// Used by the job supervisor to surface trusted-credential dirs
+	// (DESIGN.md §5 "Credential modes"); drivers without a notion of
+	// mounting (e.g. the mock driver) ignore this field.
+	Mounts []Mount
+}
+
+// Mount is one bind-mount from the host into the fork's filesystem.
+type Mount struct {
+	// Source is the absolute path on the host to bind-mount.
+	Source string
+	// Destination is the absolute path inside the fork to mount at.
+	Destination string
+	// ReadOnly mounts the source read-only when true. Trusted-credential
+	// mounts are read-write because some agents refresh tokens in place.
+	ReadOnly bool
 }
 
 // Result is the outcome of a finished execution. Drivers return a Result

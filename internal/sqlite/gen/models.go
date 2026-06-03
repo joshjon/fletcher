@@ -17,6 +17,7 @@ type Job struct {
 	CompletedAt  *int64
 	ErrorMessage *string
 	ExitCode     *int64
+	Credentials  string
 }
 
 type Peer struct {

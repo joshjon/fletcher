@@ -1,8 +1,8 @@
 -- name: CreateJob :one
 INSERT INTO jobs (
-    id, status, trigger_kind, name, command, image, created_at, updated_at
+    id, status, trigger_kind, name, command, image, credentials, created_at, updated_at
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
 RETURNING *;
 

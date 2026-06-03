@@ -58,6 +58,7 @@ type Job struct {
 	Name         string
 	Command      string
 	Image        string
+	Credentials  []string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	StartedAt    *time.Time
@@ -68,10 +69,11 @@ type Job struct {
 
 // CreateParams are the caller-supplied fields for a new job.
 type CreateParams struct {
-	Trigger Trigger
-	Name    string
-	Command string
-	Image   string
+	Trigger     Trigger
+	Name        string
+	Command     string
+	Image       string
+	Credentials []string
 }
 
 // Coordinator is what Service needs from the running supervisor: a way to
@@ -100,6 +102,14 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 	if err := p.validate(); err != nil {
 		return Job{}, err
 	}
+	creds, err := normaliseCredentials(p.Credentials)
+	if err != nil {
+		return Job{}, err
+	}
+	credsEncoded, err := encodeCredentials(creds)
+	if err != nil {
+		return Job{}, err
+	}
 	id, err := typeid.WithPrefix(idPrefix)
 	if err != nil {
 		return Job{}, fmt.Errorf("generate id: %w", err)
@@ -112,6 +122,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 		Name:        p.Name,
 		Command:     p.Command,
 		Image:       p.Image,
+		Credentials: credsEncoded,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
@@ -121,7 +132,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 	if s.sup != nil {
 		s.sup.Notify()
 	}
-	return jobFromRow(row), nil
+	return jobFromRow(row)
 }
 
 // Get returns the job with the given ID. Returns ErrNotFound if missing.
@@ -133,7 +144,7 @@ func (s *Service) Get(ctx context.Context, id string) (Job, error) {
 	if err != nil {
 		return Job{}, fmt.Errorf("get job: %w", err)
 	}
-	return jobFromRow(row), nil
+	return jobFromRow(row)
 }
 
 // ListParams paginates the jobs table; StatusFilter is optional ("" = all).
@@ -157,7 +168,7 @@ func (s *Service) List(ctx context.Context, p ListParams) ([]Job, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list jobs by status: %w", err)
 		}
-		return mapRows(rows), nil
+		return mapRows(rows)
 	}
 	rows, err := s.q.ListJobs(ctx, sqliteq.ListJobsParams{
 		Limit:  int64(p.Limit),
@@ -166,7 +177,7 @@ func (s *Service) List(ctx context.Context, p ListParams) ([]Job, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
 	}
-	return mapRows(rows), nil
+	return mapRows(rows)
 }
 
 // Count returns the total number of jobs (optionally filtered by status).
@@ -217,15 +228,23 @@ func (p CreateParams) validate() error {
 	}
 }
 
-func mapRows(rows []sqliteq.Job) []Job {
+func mapRows(rows []sqliteq.Job) ([]Job, error) {
 	out := make([]Job, len(rows))
 	for i, r := range rows {
-		out[i] = jobFromRow(r)
+		j, err := jobFromRow(r)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = j
 	}
-	return out
+	return out, nil
 }
 
-func jobFromRow(r sqliteq.Job) Job {
+func jobFromRow(r sqliteq.Job) (Job, error) {
+	creds, err := decodeCredentials(r.Credentials)
+	if err != nil {
+		return Job{}, err
+	}
 	return Job{
 		ID:           r.ID,
 		Status:       Status(r.Status),
@@ -233,13 +252,14 @@ func jobFromRow(r sqliteq.Job) Job {
 		Name:         r.Name,
 		Command:      r.Command,
 		Image:        r.Image,
+		Credentials:  creds,
 		CreatedAt:    time.Unix(r.CreatedAt, 0).UTC(),
 		UpdatedAt:    time.Unix(r.UpdatedAt, 0).UTC(),
 		StartedAt:    timePtrFromUnix(r.StartedAt),
 		CompletedAt:  timePtrFromUnix(r.CompletedAt),
 		ErrorMessage: derefString(r.ErrorMessage),
 		ExitCode:     int32PtrFromInt64(r.ExitCode),
-	}
+	}, nil
 }
 
 func timePtrFromUnix(p *int64) *time.Time {
