@@ -1,0 +1,32 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+)
+
+// defaultSocketPath returns the daemon's default Unix-socket path. Prefers
+// $XDG_RUNTIME_DIR (set on most modern Linux), falls back to $HOME/.fletcher,
+// and finally /tmp for the headless / no-home edge case.
+func defaultSocketPath() string {
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		return filepath.Join(dir, "fletcher", "fletcher.sock")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".fletcher", "fletcher.sock")
+	}
+	return "/tmp/fletcher.sock"
+}
+
+// defaultDatabasePath returns the daemon's default SQLite path. Prefers
+// $XDG_DATA_HOME, falls back to $HOME/.local/share/fletcher, and finally
+// the current directory.
+func defaultDatabasePath() string {
+	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
+		return filepath.Join(dir, "fletcher", "fletcher.db")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".local", "share", "fletcher", "fletcher.db")
+	}
+	return "fletcher.db"
+}

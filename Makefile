@@ -49,8 +49,9 @@ cover: ## Run tests with coverage; emit HTML report
 
 ## --- Quality gates ---
 
-lint: ## Run golangci-lint
+lint: ## Run golangci-lint and buf lint
 	$(GO) tool golangci-lint run
+	$(GO) tool buf lint
 
 fmt: ## Auto-format source via gofumpt + goimports
 	$(GO) tool golangci-lint fmt
@@ -59,8 +60,8 @@ check: lint test generate-check ## Full local gate: lint + tests + generated dri
 
 ## --- Codegen ---
 
-generate: ## Run all code generators (sqlc, buf, mockery) — added per-phase
-	@echo "no generators registered yet"
+generate: ## Run all code generators (buf, sqlc, mockery) — registered per-phase
+	$(GO) tool buf generate
 
 generate-check: ## Fail if 'make generate' would modify the working tree
 	@before=$$(git status --porcelain); \

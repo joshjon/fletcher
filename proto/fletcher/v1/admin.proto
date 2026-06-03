@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// AdminService is the daemon's administrative surface — health checks and
+// basic runtime inspection. Available on the local Unix socket only.
+service AdminService {
+  // Health returns the daemon's liveness state.
+  rpc Health(HealthRequest) returns (HealthResponse) {}
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  // status is "ok" when the daemon is healthy.
+  string status = 1;
+  // version of the running daemon.
+  string version = 2;
+  // commit of the running daemon's build.
+  string commit = 3;
+  // started_at is the daemon's start time as Unix epoch seconds.
+  int64 started_at = 4;
+}

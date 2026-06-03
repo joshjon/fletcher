@@ -36,6 +36,8 @@ func newApp() *cli.Command {
 		Usage:   "private agent compute on hardware you own",
 		Version: buildinfo.Version,
 		Commands: []*cli.Command{
+			serveCmd(),
+			healthCmd(),
 			versionCmd(),
 		},
 	}

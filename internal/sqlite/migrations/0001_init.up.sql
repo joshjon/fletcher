@@ -1,0 +1,2 @@
+-- Initialize schema-migrations bookkeeping. Real tables follow in later
+-- migrations. This file establishes that version 1 of the schema applied.
