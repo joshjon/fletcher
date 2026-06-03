@@ -1,0 +1,24 @@
+# lefthook drives our git hooks. Install once per clone with `lefthook install`.
+# Pre-commit runs fast formatters and govet on touched files. Pre-push runs the
+# full `make check` plus generated-drift check. commit-msg enforces Conventional
+# Commits via siderolabs/conform.
+
+pre-commit:
+  parallel: true
+  commands:
+    fmt:
+      glob: "*.go"
+      run: go tool golangci-lint fmt --diff
+    vet:
+      glob: "*.go"
+      run: go vet ./...
+
+pre-push:
+  commands:
+    check:
+      run: make check
+
+commit-msg:
+  commands:
+    conform:
+      run: go tool conform enforce --commit-msg-file {1}

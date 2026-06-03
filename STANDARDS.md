@@ -36,9 +36,9 @@ embed/         # firecracker binary + rootfs assets
 
 - `Makefile` at repo root. Targets: `build`, `build-linux-amd64`, `build-linux-arm64`, `test`, `lint`, `check` (lint + test), `generate`, `generate-check`, `fmt`, `cover`, `tools`, `clean`.
 - `CGO_ENABLED=0` baked into build target.
-- Reproducible build flags: `-trimpath`, `-ldflags="-s -w -X main.version=… -X main.commit=… -X main.date=…"`.
-- `tools.go` pins build-time tool versions; `make tools` installs into `./bin/`.
-- `lefthook` for git hooks. Pre-commit: `gofumpt`, `goimports`, `govet`. Pre-push: full `make check` (lint + tests + `generate-check`).
+- Reproducible build flags: `-trimpath`, `-ldflags="-s -w -X <pkg>/internal/buildinfo.Version=… -X …Commit=… -X …Date=…"`. Build metadata lives in `internal/buildinfo`.
+- Build-time tools pinned via Go 1.24+ `tool` directives in `go.mod`. Invoked as `go tool <name>` (e.g. `go tool golangci-lint run`). No separate `tools.go` file.
+- `lefthook` for git hooks. Pre-commit: `golangci-lint fmt --diff`, `go vet`. Pre-push: `make check` (lint + tests + `generate-check`). Install once per clone: `lefthook install`.
 - Releases: `goreleaser`. Conventional commits feed auto-generated changelogs.
 - Commit format: [Conventional Commits 1.0](https://www.conventionalcommits.org/). Enforced via `lefthook` `commit-msg` hook running `siderolabs/conform`.
 

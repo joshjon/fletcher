@@ -1,6 +1,37 @@
-.idea/
-.DS_Store
+# Build / release artifacts
+/bin/
+/dist/
 build/
 tmp/
+
+# Test / coverage
+coverage.out
+coverage.html
+
+# Local SQLite files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Local config / secrets
+fletcher.toml
+*.age
+
+# Lefthook local overrides
+lefthook-local.yml
+.lefthook-local.yml
+
+# Logs
+*.log
+
+# Misc local
 local/
-dist/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
