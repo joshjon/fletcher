@@ -27,6 +27,7 @@ type Supervisor struct {
 
 	pollInterval  time.Duration
 	drainDeadline time.Duration
+	jobEnv        []string
 
 	mu     sync.Mutex
 	active map[string]context.CancelFunc
@@ -43,6 +44,10 @@ type SupervisorOptions struct {
 	// DrainDeadline caps how long Run will wait for in-flight jobs to finish
 	// once ctx is cancelled. Default 30s.
 	DrainDeadline time.Duration
+	// JobEnv is appended to every job's runtime.Spec.Env. The daemon uses
+	// this to inject OPENAI_BASE_URL pointing at the local model gateway
+	// (so agents inside forks never see real API keys).
+	JobEnv []string
 }
 
 // NewSupervisor wires a Supervisor to its dependencies.
@@ -63,6 +68,7 @@ func NewSupervisor(q sqliteq.Querier, rt runtime.Driver, sn snapshot.Driver, log
 		logger:        logger,
 		pollInterval:  opts.PollInterval,
 		drainDeadline: opts.DrainDeadline,
+		jobEnv:        append([]string(nil), opts.JobEnv...),
 		active:        make(map[string]context.CancelFunc),
 		wakeup:        make(chan struct{}, 1),
 	}
@@ -206,6 +212,7 @@ func (s *Supervisor) runOne(jobCtx context.Context, row sqliteq.Job) {
 		Image:   row.Image,
 		Command: row.Command,
 		WorkDir: snap.Path,
+		Env:     s.jobEnv,
 	}, io.Discard, io.Discard)
 
 	// Two cancellation paths share ctx.Canceled: targeted CancelRunning

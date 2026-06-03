@@ -18,3 +18,10 @@ type Job struct {
 	ErrorMessage *string
 	ExitCode     *int64
 }
+
+type Secret struct {
+	Name       string
+	Ciphertext []byte
+	CreatedAt  int64
+	UpdatedAt  int64
+}

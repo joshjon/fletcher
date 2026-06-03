@@ -30,3 +30,15 @@ func defaultDatabasePath() string {
 	}
 	return "fletcher.db"
 }
+
+// defaultAgeIdentityPath returns the default location of the daemon's age
+// private key. Generated automatically on first boot if missing.
+func defaultAgeIdentityPath() string {
+	if dir := os.Getenv("XDG_DATA_HOME"); dir != "" {
+		return filepath.Join(dir, "fletcher", "age.key")
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".local", "share", "fletcher", "age.key")
+	}
+	return "age.key"
+}

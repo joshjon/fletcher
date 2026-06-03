@@ -13,13 +13,17 @@ type Querier interface {
 	CountJobs(ctx context.Context) (int64, error)
 	CountJobsByStatus(ctx context.Context, status string) (int64, error)
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
+	DeleteSecret(ctx context.Context, name string) (int64, error)
 	GetJob(ctx context.Context, id string) (Job, error)
+	GetSecret(ctx context.Context, name string) ([]byte, error)
 	ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, error)
 	ListJobsByStatus(ctx context.Context, arg ListJobsByStatusParams) ([]Job, error)
+	ListSecretMetadata(ctx context.Context) ([]ListSecretMetadataRow, error)
 	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) error
 	MarkJobStarted(ctx context.Context, arg MarkJobStartedParams) error
 	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
+	UpsertSecret(ctx context.Context, arg UpsertSecretParams) error
 }
 
 var _ Querier = (*Queries)(nil)

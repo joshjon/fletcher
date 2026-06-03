@@ -20,9 +20,11 @@ import (
 
 	"github.com/joshjon/fletcher/internal/api"
 	"github.com/joshjon/fletcher/internal/audit"
+	"github.com/joshjon/fletcher/internal/gateway"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/job"
 	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
+	"github.com/joshjon/fletcher/internal/secrets"
 	snapmock "github.com/joshjon/fletcher/internal/snapshot/mockdriver"
 	"github.com/joshjon/fletcher/internal/sqlite"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
@@ -35,9 +37,11 @@ var auditRecorder audit.Recorder = audit.Noop{}
 
 // Config holds boot-time daemon settings.
 type Config struct {
-	SocketPath   string
-	DatabasePath string
-	LogLevel     string
+	SocketPath        string
+	DatabasePath      string
+	LogLevel          string
+	GatewayListenAddr string
+	AgeIdentityPath   string
 }
 
 // shutdownTimeout caps how long the daemon waits for in-flight work before
@@ -76,6 +80,11 @@ func Run(ctx context.Context, cfg Config) error {
 
 	queries := sqliteq.New(db)
 
+	secretsStore, err := secrets.Open(queries, cfg.AgeIdentityPath)
+	if err != nil {
+		return fmt.Errorf("open secrets store: %w", err)
+	}
+
 	snapRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
 	snapDriver, err := snapmock.New(snapRoot)
 	if err != nil {
@@ -83,15 +92,30 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	rtDriver := runtimemock.New()
 
-	supervisor := job.NewSupervisor(queries, rtDriver, snapDriver, logger, job.SupervisorOptions{})
+	gw := gateway.New(secretsStore, gateway.NewAnthropicBackend(), logger)
+	gwListener, gwBaseURL, err := listenGateway(ctx, cfg.GatewayListenAddr)
+	if err != nil {
+		return err
+	}
+	logger.Info("model gateway ready", slog.String("base_url", gwBaseURL))
+
+	supervisor := job.NewSupervisor(queries, rtDriver, snapDriver, logger, job.SupervisorOptions{
+		JobEnv: []string{
+			"OPENAI_BASE_URL=" + gwBaseURL + "/v1",
+			"OPENAI_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
+		},
+	})
 	jobSvc := job.NewService(queries, supervisor)
-	srv := newHTTPServer(time.Now().Unix(), jobSvc, logger)
+	srv := newHTTPServer(time.Now().Unix(), jobSvc, secretsStore, logger)
+	gwSrv := newGatewayHTTPServer(gw)
 
 	var g run.Group
 	// serveActor's interrupt path uses a fresh context for graceful shutdown
 	// because the parent ctx is already cancelled by the time interrupt fires.
 	//nolint:contextcheck // shutdown must outlive the cancelled parent ctx
 	g.Add(serveActor(logger, srv, ln, cfg.SocketPath))
+	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
+	g.Add(gatewayServeActor(logger, gwSrv, gwListener, gwBaseURL))
 	g.Add(supervisorActor(ctx, supervisor))
 	g.Add(signalActor(ctx))
 
@@ -131,7 +155,7 @@ func listenUnix(ctx context.Context, socketPath string) (net.Listener, error) {
 	return ln, nil
 }
 
-func newHTTPServer(startedAt int64, jobBackend api.JobsBackend, logger *slog.Logger) *http.Server {
+func newHTTPServer(startedAt int64, jobBackend api.JobsBackend, secretsBackend api.SecretsBackend, logger *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 
 	interceptors := connect.WithInterceptors(
@@ -149,10 +173,61 @@ func newHTTPServer(startedAt int64, jobBackend api.JobsBackend, logger *slog.Log
 	)
 	mux.Handle(jobsPath, jobsHandler)
 
+	secretsPath, secretsHandler := fletcherv1connect.NewSecretServiceHandler(
+		api.NewSecretsService(secretsBackend), interceptors,
+	)
+	mux.Handle(secretsPath, secretsHandler)
+
 	return &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+}
+
+// listenGateway binds the model-gateway TCP listener and resolves the
+// base URL that jobs should target. Resolving here (rather than echoing
+// the config) means random-port (":0") setups produce a usable URL.
+func listenGateway(ctx context.Context, addr string) (net.Listener, string, error) {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		return nil, "", fmt.Errorf("listen gateway %s: %w", addr, err)
+	}
+	tcp, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = ln.Close()
+		return nil, "", fmt.Errorf("gateway listener returned unexpected addr type %T", ln.Addr())
+	}
+	host := tcp.IP.String()
+	if host == "<nil>" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return ln, fmt.Sprintf("http://%s:%d", host, tcp.Port), nil
+}
+
+func newGatewayHTTPServer(gw *gateway.Gateway) *http.Server {
+	return &http.Server{
+		Handler:           gw.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+}
+
+// gatewayServeActor is the run.Group actor that owns the gateway HTTP
+// listener. Pattern mirrors serveActor.
+func gatewayServeActor(logger *slog.Logger, srv *http.Server, ln net.Listener, baseURL string) (func() error, func(error)) {
+	execute := func() error {
+		logger.Info("gateway listening", slog.String("base_url", baseURL))
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("gateway serve: %w", err)
+		}
+		return nil
+	}
+	interrupt := func(_ error) {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}
+	return execute, interrupt
 }
 
 // serveActor returns the run.Group actor pair that owns the HTTP server.

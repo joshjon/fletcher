@@ -21,10 +21,13 @@ import (
 // start the daemon in-process, call Health over the Unix socket, then cancel
 // and verify the socket is cleaned up.
 func TestDaemonServesHealthAndShutsDownCleanly(t *testing.T) {
+	dataDir := t.TempDir()
 	cfg := daemon.Config{
-		SocketPath:   shortSocketPath(t),
-		DatabasePath: filepath.Join(t.TempDir(), "fletcher.db"),
-		LogLevel:     "warn",
+		SocketPath:        shortSocketPath(t),
+		DatabasePath:      filepath.Join(dataDir, "fletcher.db"),
+		LogLevel:          "warn",
+		GatewayListenAddr: "127.0.0.1:0", // random free port for the test
+		AgeIdentityPath:   filepath.Join(dataDir, "age.key"),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
