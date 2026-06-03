@@ -419,3 +419,35 @@ End-state is described above; scoping is the owner's call. Carried reminders:
 - **Discipline at launch.** The substrate is general on purpose, but the launch
   hook is not: pick one magical demo when you make the video. Privacy is the
   positioning; the native-app agent experience is the wow.
+
+---
+
+## 13. Build Sequencing (Phases)
+
+Vertical-slice approach: build the thinnest end-to-end path through the
+system with mock drivers, then iteratively swap in real implementations.
+The §10 mock drivers are the structural enabler — they are required
+production-code citizens, not test hacks.
+
+Why vertical over horizontal: the structural risks here (resume semantics,
+the trust boundary, idempotent egress, supervisor reconciliation) only
+become real when there is something to test them against. Building "the
+SQLite layer" then "the API layer" then "the runtime layer" risks
+polishing infrastructure that turns out to be the wrong shape when
+integration arrives.
+
+| # | Phase | Outcome |
+|---|-------|---------|
+| 0 | Foundations | Makefile, deps, lint, lefthook, package skeleton, `fletcher version`. Build pipeline green. |
+| 1 | Skeleton daemon | `fletcher serve` runs an `oklog/run` group; `Health` RPC over Unix socket; `fletcher health` calls it; SQLite opens and migrates. |
+| 2 | Job model + storage | Migration + sqlc for `jobs`; CRUD RPCs; CLI `fletcher job create/get/list/cancel`. |
+| 3 | Mock runtime + supervisor | `runtime.MockDriver`, `snapshot.MockDriver`, supervisor that picks queued jobs and runs them. Resume-on-boot. |
+| 4 | Trust boundary plumbing | `internal/errs` + Connect interceptor; `background.Go` + `fname`; audit middleware seam (wrapper exists, no storage yet). |
+| 5 | Model gateway (basic) | Daemon-local OpenAI-compatible endpoint, one backend (Anthropic), age secrets, base-URL injected. |
+| 6 | MCP server | `mark3labs/mcp-go` in daemon; 1–2 trivial privileged tools; routed through audit seam. |
+| 7 | Approvals | `pending_approvals` table + RPCs + CLI. (APNs push deferred.) |
+| 8 | Real Linux runtime | Real Firecracker + runc + btrfs drivers behind same interfaces. Requires UTM dev VM. Mocks stay forever. |
+| 9 | Networking | WireGuard peers + UPnP/NAT-PMP/PCP + DDNS. Large standalone chunk. |
+| 10 | v0.1.0 polish | Install script, systemd unit, README quickstart, goreleaser config, first tagged release. |
+
+Past v0.1.0 — don't plan now. Real users reshape priorities.
