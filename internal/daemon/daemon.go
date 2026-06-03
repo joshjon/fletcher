@@ -19,6 +19,8 @@ import (
 	"github.com/joshjon/fletcher/internal/api"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/job"
+	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
+	snapmock "github.com/joshjon/fletcher/internal/snapshot/mockdriver"
 	"github.com/joshjon/fletcher/internal/sqlite"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
 )
@@ -64,7 +66,17 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	jobSvc := job.NewService(sqliteq.New(db))
+	queries := sqliteq.New(db)
+
+	snapRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
+	snapDriver, err := snapmock.New(snapRoot)
+	if err != nil {
+		return fmt.Errorf("init snapshot driver: %w", err)
+	}
+	rtDriver := runtimemock.New()
+
+	supervisor := job.NewSupervisor(queries, rtDriver, snapDriver, logger, job.SupervisorOptions{})
+	jobSvc := job.NewService(queries, supervisor)
 	srv := newHTTPServer(time.Now().Unix(), jobSvc)
 
 	var g run.Group
@@ -72,6 +84,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// because the parent ctx is already cancelled by the time interrupt fires.
 	//nolint:contextcheck // shutdown must outlive the cancelled parent ctx
 	g.Add(serveActor(logger, srv, ln, cfg.SocketPath))
+	g.Add(supervisorActor(ctx, supervisor))
 	g.Add(signalActor(ctx))
 
 	if err := g.Run(); err != nil && !errors.Is(err, context.Canceled) {
@@ -140,6 +153,22 @@ func serveActor(logger *slog.Logger, srv *http.Server, ln net.Listener, socketPa
 		_ = srv.Shutdown(shutdownCtx)
 		_ = os.Remove(socketPath)
 	}
+	return execute, interrupt
+}
+
+// supervisorActor wraps the job supervisor's Run as an oklog/run actor.
+// The supervisor's drain() honours ctx cancellation and waits for in-flight
+// runOne goroutines, so the interrupt closure has nothing to do here.
+func supervisorActor(ctx context.Context, sup *job.Supervisor) (func() error, func(error)) {
+	cancelCh := make(chan struct{})
+	execute := func() error {
+		err := sup.Run(ctx)
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
+	}
+	interrupt := func(_ error) { close(cancelCh) }
 	return execute, interrupt
 }
 

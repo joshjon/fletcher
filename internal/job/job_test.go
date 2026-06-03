@@ -19,7 +19,7 @@ func newService(t *testing.T) *job.Service {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
-	return job.NewService(sqliteq.New(db))
+	return job.NewService(sqliteq.New(db), nil)
 }
 
 func TestCreateAndGetJobRoundTrip(t *testing.T) {

@@ -66,6 +66,12 @@ linters:
       - path: cmd/
         linters:
           - funlen
+      # The supervisor finalises DB state and removes snapshots after the
+      # job's context is cancelled — a fresh context for cleanup is the
+      # whole pattern, not a mistake.
+      - path: internal/job/supervisor\.go
+        linters:
+          - contextcheck
 
 formatters:
   enable:

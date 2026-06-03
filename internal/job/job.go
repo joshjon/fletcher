@@ -71,15 +71,25 @@ type CreateParams struct {
 	Image   string
 }
 
+// Coordinator is what Service needs from the running supervisor: a way to
+// nudge it after a new queued job appears, and a way to abort a job that's
+// already running. It is optional — passing nil yields a CRUD-only service.
+type Coordinator interface {
+	Notify()
+	CancelRunning(jobID string) bool
+}
+
 // Service is the high-level façade over the jobs storage layer.
 type Service struct {
-	q sqliteq.Querier
+	q   sqliteq.Querier
+	sup Coordinator
 }
 
 // NewService wires a Service to a sqlc-generated querier (anything that
 // satisfies sqliteq.Querier — *sqliteq.Queries in prod, a fake in tests).
-func NewService(q sqliteq.Querier) *Service {
-	return &Service{q: q}
+// The supervisor argument may be nil for tests that only exercise CRUD.
+func NewService(q sqliteq.Querier, sup Coordinator) *Service {
+	return &Service{q: q, sup: sup}
 }
 
 // Create validates inputs, generates a typeid, and inserts a new queued job.
@@ -104,6 +114,9 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 	})
 	if err != nil {
 		return Job{}, fmt.Errorf("create job: %w", err)
+	}
+	if s.sup != nil {
+		s.sup.Notify()
 	}
 	return jobFromRow(row), nil
 }
@@ -163,7 +176,8 @@ func (s *Service) Count(ctx context.Context, status Status) (int64, error) {
 
 // Cancel transitions a queued or running job to cancelled. Returns true if a
 // row was updated; false if the job was already in a terminal state or
-// missing entirely.
+// missing entirely. When the supervisor is wired and the job is currently
+// running, the corresponding process is also signalled to stop.
 func (s *Service) Cancel(ctx context.Context, id string) (bool, error) {
 	now := time.Now().Unix()
 	n, err := s.q.CancelJob(ctx, sqliteq.CancelJobParams{
@@ -173,6 +187,9 @@ func (s *Service) Cancel(ctx context.Context, id string) (bool, error) {
 	})
 	if err != nil {
 		return false, fmt.Errorf("cancel job: %w", err)
+	}
+	if n > 0 && s.sup != nil {
+		s.sup.CancelRunning(id)
 	}
 	return n > 0, nil
 }
