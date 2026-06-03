@@ -15,7 +15,7 @@ BUILD_FLAGS := -trimpath -ldflags "$(LDFLAGS)"
 
 .PHONY: help build build-linux build-linux-amd64 build-linux-arm64 \
 	test test-integration lint fmt check cover generate generate-check \
-	tools clean
+	tools clean image image-amd64 image-arm64
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -98,3 +98,18 @@ release-check: ## Validate .goreleaser.yaml without building
 
 clean: ## Remove build & coverage artifacts
 	rm -rf bin/ dist/ coverage.out coverage.html
+
+## --- Images ---
+
+IMAGE_NAME ?= fletcher-base
+IMAGE_TAG  ?= dev
+IMAGE_DIR  := images/fletcher-base
+
+image: ## Build the fletcher-base OCI image for the host architecture
+	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_DIR)
+
+image-amd64: ## Build fletcher-base for linux/amd64 (cross-platform)
+	docker buildx build --platform linux/amd64 -t $(IMAGE_NAME):$(IMAGE_TAG)-amd64 --load $(IMAGE_DIR)
+
+image-arm64: ## Build fletcher-base for linux/arm64 (cross-platform)
+	docker buildx build --platform linux/arm64 -t $(IMAGE_NAME):$(IMAGE_TAG)-arm64 --load $(IMAGE_DIR)
