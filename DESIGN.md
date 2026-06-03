@@ -2,8 +2,6 @@
 
 *Self-hosted agent compute.*
 
-> *"It's exe.dev, but it runs on the server in your closet."*
-
 Private agent compute on hardware you own. A single Go binary you install on one
 Linux box; from a native phone/desktop client you spin up isolated VMs and run
 anything on them — coding agents, day-to-day jobs, recurring monitoring — with
@@ -19,7 +17,7 @@ nothing leaving your network and no cloud account anywhere in the loop.
   their business, so none of them can offer "runs on hardware you own" without
   abandoning their model. They can copy any feature in this doc; they cannot copy
   where it runs.
-- **The climb:** "just a computer" (exe.dev's stance) is a bare substrate — too
+- **The climb:** "just a computer" is a bare substrate — too
   unopinionated to pull people in. The product puts an *opinionated, delightful
   agent experience* on top of that substrate. Privacy/own-your-metal is the
   **positioning** (and the moat); the native-app agent experience is the **demo**
@@ -284,9 +282,6 @@ terminal. Design for both from the start.
 camps both structurally can't follow:
 
 *Hosted compute clouds* — they host the compute as their business:
-- **exe.dev** — hosted cloud, one built-in agent (Shelley), hosted LLM gateway. We
-  invert every axis this audience cares about: their hardware, models, network, one
-  payment.
 - **OpenComputer / E2B** — cloud API sandboxes; key-based, metered, you ship code
   *to* them. We never meter and nothing leaves the LAN. (OpenComputer is the
   closest primitive match and open source — study it; its hosted model is the
@@ -335,7 +330,10 @@ attack surface that directly contradicts a trust-positioned product.
 | Model gateway | bespoke; daemon-local OpenAI/Anthropic-compatible endpoint | §6. Holds creds; routes to Anthropic/OpenAI/Ollama; keys never enter forks. |
 | Events | `nats-io/nats-server/v2` (embedded) + JetStream | Terminal fan-out, agent events, results-to-inbox, push triggers. |
 | Daemon ⇄ guest | vsock | Tiny in-guest agent listens; daemon dials in, streams stdout. |
-| State | `modernc.org/sqlite` (pure Go) + `sqlc` + `goose` | No CGO; cross-compiles cleanly. |
+| State | `modernc.org/sqlite` (pure Go) + `sqlc` + `golang-migrate` | No CGO; cross-compiles cleanly. Migrations embedded via `embed.FS`. |
+| Codegen | `sqlc` + `buf` + `protoc-gen-connect-go` + `mockery` v3 (matryer template) | Single `make generate` drives all; generated code committed. |
+| Validation | `bufbuild/protovalidate-go` | Rules in `.proto`; enforced via Connect interceptor — single source of truth with the schema. |
+| IDs | `jetify-com/typeid-go` | Prefixed, type-safe IDs (e.g. `job_01h...`). |
 | Secrets | `filippo.io/age` | Encryption at rest for tokens/keys. |
 | Networking | `wireguard-go` + UPnP/NAT-PMP/PCP + DDNS | Hub-and-spoke; no DERP/ICE; STUN is optional one-shot. |
 | Terminal | `creack/pty` + `coder/websocket` | PTYs in-VM; streamed to clients. |
@@ -343,7 +341,7 @@ attack surface that directly contradicts a trust-positioned product.
 | Auth | `go-webauthn/webauthn` (passkeys) + `lestrrat-go/jwx` | Device pairing. |
 | TLS | `caddyserver/certmagic` | ACME for preview endpoints. |
 | Observability | `log/slog` + optional OTLP + Prometheus `/metrics` | User points at their own Grafana/Tempo. |
-| Config/lifecycle | `knadh/koanf` + `spf13/cobra` + `oklog/run` | Clean subsystem start/stop. |
+| Config/lifecycle | `urfave/cli` v3 + `oklog/run` | CLI does flag/env/TOML-file config natively; oklog/run owns subsystem start/stop. Runtime-mutable settings live in a SQLite `settings` table. |
 | Self-update | `minio/selfupdate` | Signed binary updates. |
 | Build/dist | `goreleaser` | linux/amd64, arm64, arm. |
 
@@ -365,6 +363,20 @@ calls behind the runtime interface and all btrfs calls behind the snapshot
 interface. Do **not** scatter `exec("btrfs …")` or `/dev/kvm` checks through the
 job/agent/gateway code. Linux-only in *implementation*, platform-agnostic at the
 *interface seam* — you want that regardless.
+
+**Mac dev today (a free win from the same seams).** Day-to-day development
+happens on macOS. The pure-Go bulk of the daemon (`CGO_ENABLED=0`,
+`modernc.org/sqlite`, `slog`, Connect handlers, NATS, MCP plumbing) compiles
+and runs there unchanged. The Linux-only pieces sit behind the runtime and
+snapshot interfaces, which ship with `MockDriver` implementations:
+`runtime.MockDriver` spawns local processes instead of microVMs;
+`snapshot.MockDriver` does directory copies instead of btrfs subvolumes. The
+daemon's coordination logic — supervisors, approvals, the gateway, the job
+state machine — is exercised end-to-end on Mac via the mock drivers. For real
+Firecracker/btrfs/WireGuard work, cross-compile (`make build-linux-arm64`)
+and run inside an arm64 Linux VM (UTM on M1). The mocks are not a test hack;
+they are required production-code citizens behind the same interfaces the
+macOS port will eventually plug a real driver into.
 
 **When we revisit, the macOS path is:** Apple Virtualization.framework via
 `Code-Hex/vz` (boots Linux guest VMs; supports virtio/vsock/Rosetta) as a third

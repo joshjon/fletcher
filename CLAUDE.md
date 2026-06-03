@@ -2,7 +2,7 @@
 
 Private agent compute on hardware the user owns. A single Go binary on one Linux box; native clients spin up isolated VMs and run agents/jobs/programs with nothing leaving the user's network.
 
-**Read `DESIGN.md` first.** It is the source of truth for positioning, architecture, and rationale. This file is operational guidance — what to do, what not to do — distilled from it.
+**Read `DESIGN.md` first** for positioning, architecture, and rationale. **Read `STANDARDS.md`** for repo layout, build, lint, test, error, logging, CLI, concurrency, migration, dependency, release, and utility conventions. This file is operational guidance — what to do, what not to do — distilled from both.
 
 ## Thesis (do not drift from these)
 
@@ -24,13 +24,16 @@ Private agent compute on hardware the user owns. A single Go binary on one Linux
 - Runtime: Firecracker + `firecracker-go-sdk` (default); `runc`/containerd (labeled degraded-isolation fallback)
 - Image pipeline: `firecracker-containerd`
 - Fork/snapshot: btrfs subvolumes behind a snapshot interface
-- State: `modernc.org/sqlite` + `sqlc` + `goose`
+- State: `modernc.org/sqlite` + `sqlc` + `golang-migrate` (migrations embedded)
+- Codegen: `sqlc` + `buf`/`connect-go` + `mockery` v3 (matryer template); single `make generate`
+- Validation: `bufbuild/protovalidate-go` (rules in `.proto`, Connect interceptor enforces)
+- IDs: `jetify-com/typeid-go`
 - Secrets: `filippo.io/age`
 - Events: embedded NATS JetStream
 - Daemon ⇄ guest: vsock
 - Networking: `wireguard-go` + UPnP/NAT-PMP/PCP + DDNS (hub-and-spoke, no DERP/ICE)
 - Agents: MCP server (`mark3labs/mcp-go`); spawn Claude Code / Codex / OpenHands / Aider / Goose
-- Lifecycle: `knadh/koanf` + `spf13/cobra` + `oklog/run`
+- Lifecycle: `urfave/cli` v3 + `oklog/run` (CLI handles flag/env/TOML; runtime settings in SQLite)
 
 ## Conventions
 
@@ -57,9 +60,16 @@ Listed in §11; check actual repos/tools before designing around them:
 - Agent resume ergonomics — that the chosen agent(s) can be restarted against a persisted session
 - Base-URL override per agent (Claude Code, Codex, OpenAI-compatible generally do; verify each)
 
+## Mac dev (free win from the §10 seams)
+
+- Pure-Go bulk of the daemon (`CGO_ENABLED=0` + `modernc.org/sqlite`) runs on macOS unchanged.
+- `runtime.MockDriver` and `snapshot.MockDriver` sit behind the §10 interfaces — production citizens, not test hacks — so the daemon's coordination logic runs end-to-end on Mac.
+- Real Firecracker/btrfs/WireGuard work: cross-compile then run in UTM arm64 Ubuntu.
+
 ## Working norms for this repo
 
 - When proposing architecture, cite the relevant §section of `DESIGN.md` so drift is visible.
+- For coding standards (layout, lint, test, error handling, logging, CLI, concurrency, etc.), follow `STANDARDS.md`. Cite it when proposing something that deviates.
 - If a suggestion would require the developer to host something, route traffic through a service we operate, or meter usage — stop and flag it; it's off-thesis.
 - If a suggestion would split the job model into multiple subsystems, stop and flag it (§4).
 - If a suggestion adds Linux-specific calls outside the runtime/snapshot interfaces, stop and flag it (§10).
