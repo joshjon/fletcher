@@ -33,6 +33,11 @@ linters:
         - (*database/sql.DB).Close
         - (*database/sql.Rows).Close
         - (*database/sql.Stmt).Close
+        # Output-rendering helpers write to buffered/tab writers where the
+        # error path is practically unreachable; the final Flush is checked.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     funlen:
       lines: 100
       statements: 50

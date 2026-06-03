@@ -103,7 +103,7 @@ embed/         # firecracker binary + rootfs assets
 
 - Generated code is committed. `make generate-check` regenerates and `git diff --exit-code`s in pre-push.
 - Proto layout: `proto/fletcher/v1/*.proto` → `internal/gen/proto/fletcher/v1/`.
-- sqlc layout: `internal/sqlite/queries/*.sql` → `internal/sqlite/gen/`. sqlc points at `migrations/` directly — no mirror schema file.
+- sqlc layout: `internal/sqlite/queries/*.sql` → `internal/sqlite/gen/`. sqlc reads `internal/sqlite/schema.sql`, which is a generated mirror built by `make generate` by concatenating the `migrations/*.up.sql` files in order. The mirror is committed (so `go build` works on a fresh clone), but it is never hand-edited — migrations remain the source of truth.
 - Mocks: `internal/<pkg>/<pkg>mock/`.
 - Generated files carry `// Code generated <tool>. DO NOT EDIT.` header (golangci-lint auto-excludes).
 - sqlc options: `emit_interface: true`, `emit_pointers_for_null_types: true`, `emit_json_tags: false`.

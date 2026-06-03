@@ -13,12 +13,7 @@ func serveCmd() *cli.Command {
 		Name:  "serve",
 		Usage: "run the fletcher daemon",
 		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "socket",
-				Usage:   "Unix socket path the daemon will listen on",
-				Sources: cli.EnvVars("FLETCHER_SOCKET"),
-				Value:   defaultSocketPath(),
-			},
+			socketFlag(),
 			&cli.StringFlag{
 				Name:    "database",
 				Usage:   "SQLite database path",

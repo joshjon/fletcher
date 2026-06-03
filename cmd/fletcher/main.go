@@ -38,6 +38,7 @@ func newApp() *cli.Command {
 		Commands: []*cli.Command{
 			serveCmd(),
 			healthCmd(),
+			jobCmd(),
 			versionCmd(),
 		},
 	}

@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// JobService is the client API for creating and managing jobs.
+service JobService {
+  // CreateJob enqueues a new job. The returned job has status QUEUED.
+  rpc CreateJob(CreateJobRequest) returns (CreateJobResponse) {}
+  // GetJob fetches a single job by ID.
+  rpc GetJob(GetJobRequest) returns (GetJobResponse) {}
+  // ListJobs paginates the job table, newest first. status_filter applies an
+  // optional equality filter; UNSPECIFIED returns all.
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse) {}
+  // CancelJob transitions a queued or running job to CANCELLED. Returns
+  // cancelled=false (no error) if the job was already terminal.
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse) {}
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  JOB_STATUS_QUEUED = 1;
+  JOB_STATUS_RUNNING = 2;
+  JOB_STATUS_SUCCEEDED = 3;
+  JOB_STATUS_FAILED = 4;
+  JOB_STATUS_CANCELLED = 5;
+}
+
+enum JobTrigger {
+  JOB_TRIGGER_UNSPECIFIED = 0;
+  JOB_TRIGGER_EPHEMERAL = 1;
+  JOB_TRIGGER_CRON = 2;
+  JOB_TRIGGER_LONG_RUNNING = 3;
+}
+
+message Job {
+  string id = 1;
+  JobStatus status = 2;
+  JobTrigger trigger = 3;
+  string name = 4;
+  string command = 5;
+  string image = 6;
+  // Unix epoch seconds.
+  int64 created_at = 7;
+  int64 updated_at = 8;
+  optional int64 started_at = 9;
+  optional int64 completed_at = 10;
+  string error_message = 11;
+  optional int32 exit_code = 12;
+}
+
+message CreateJobRequest {
+  JobTrigger trigger = 1;
+  string name = 2;
+  string command = 3;
+  string image = 4;
+}
+
+message CreateJobResponse {
+  Job job = 1;
+}
+
+message GetJobRequest {
+  string id = 1;
+}
+
+message GetJobResponse {
+  Job job = 1;
+}
+
+message ListJobsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+  JobStatus status_filter = 3;
+}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+  int64 total = 2;
+}
+
+message CancelJobRequest {
+  string id = 1;
+}
+
+message CancelJobResponse {
+  bool cancelled = 1;
+}

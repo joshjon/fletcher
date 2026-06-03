@@ -4,15 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 
 	"connectrpc.com/connect"
 	"github.com/urfave/cli/v3"
 
 	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
-	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 )
 
 func healthCmd() *cli.Command {
@@ -20,12 +17,7 @@ func healthCmd() *cli.Command {
 		Name:  "health",
 		Usage: "check the running daemon's health",
 		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "socket",
-				Usage:   "Unix socket path of the daemon",
-				Sources: cli.EnvVars("FLETCHER_SOCKET"),
-				Value:   defaultSocketPath(),
-			},
+			socketFlag(),
 			&cli.BoolFlag{
 				Name:  "json",
 				Usage: "output as JSON",
@@ -54,19 +46,4 @@ func healthCmd() *cli.Command {
 			return nil
 		},
 	}
-}
-
-// newAdminClient builds a Connect client that dials the daemon over a Unix
-// socket. The base URL is meaningless on Unix transport — Connect just needs
-// a syntactically valid URL — so we use http://unix.
-func newAdminClient(socket string) fletcherv1connect.AdminServiceClient {
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				var d net.Dialer
-				return d.DialContext(ctx, "unix", socket)
-			},
-		},
-	}
-	return fletcherv1connect.NewAdminServiceClient(httpClient, "http://unix")
 }

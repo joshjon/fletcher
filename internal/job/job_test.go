@@ -1,0 +1,120 @@
+package job_test
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/joshjon/fletcher/internal/job"
+	"github.com/joshjon/fletcher/internal/sqlite"
+	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
+)
+
+func newService(t *testing.T) *job.Service {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "fletcher.db")
+	db, err := sqlite.Open(context.Background(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, sqlite.Migrate(db))
+	return job.NewService(sqliteq.New(db))
+}
+
+func TestCreateAndGetJobRoundTrip(t *testing.T) {
+	svc := newService(t)
+	ctx := context.Background()
+
+	created, err := svc.Create(ctx, job.CreateParams{
+		Trigger: job.TriggerEphemeral,
+		Name:    "build",
+		Command: "make build",
+		Image:   "fletcher/go:1.26",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, created.ID)
+	require.Equal(t, job.StatusQueued, created.Status)
+
+	got, err := svc.Get(ctx, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, created, got)
+}
+
+func TestGetMissingJobReturnsNotFound(t *testing.T) {
+	svc := newService(t)
+	_, err := svc.Get(context.Background(), "job_doesnotexist")
+	require.ErrorIs(t, err, job.ErrNotFound)
+}
+
+func TestCreateValidatesRequiredFields(t *testing.T) {
+	svc := newService(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		p    job.CreateParams
+	}{
+		{"missing trigger", job.CreateParams{Name: "x", Command: "x", Image: "x"}},
+		{"missing name", job.CreateParams{Trigger: job.TriggerEphemeral, Command: "x", Image: "x"}},
+		{"missing command", job.CreateParams{Trigger: job.TriggerEphemeral, Name: "x", Image: "x"}},
+		{"missing image", job.CreateParams{Trigger: job.TriggerEphemeral, Name: "x", Command: "x"}},
+		{"invalid trigger", job.CreateParams{Trigger: "nonsense", Name: "x", Command: "x", Image: "x"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.Create(ctx, tc.p)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestListAndCount(t *testing.T) {
+	svc := newService(t)
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		_, err := svc.Create(ctx, job.CreateParams{
+			Trigger: job.TriggerEphemeral,
+			Name:    "x",
+			Command: "x",
+			Image:   "x",
+		})
+		require.NoError(t, err)
+	}
+
+	total, err := svc.Count(ctx, "")
+	require.NoError(t, err)
+	require.EqualValues(t, 3, total)
+
+	jobs, err := svc.List(ctx, job.ListParams{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, jobs, 3)
+	// Newest-first.
+	require.GreaterOrEqual(t, jobs[0].CreatedAt.Unix(), jobs[1].CreatedAt.Unix())
+}
+
+func TestCancelTransitionsQueuedJobAndIgnoresTerminal(t *testing.T) {
+	svc := newService(t)
+	ctx := context.Background()
+
+	created, err := svc.Create(ctx, job.CreateParams{
+		Trigger: job.TriggerEphemeral,
+		Name:    "x", Command: "x", Image: "x",
+	})
+	require.NoError(t, err)
+
+	ok, err := svc.Cancel(ctx, created.ID)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	got, err := svc.Get(ctx, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, job.StatusCancelled, got.Status)
+	require.NotNil(t, got.CompletedAt)
+
+	// Cancelling again is a no-op (returns false, no error).
+	ok, err = svc.Cancel(ctx, created.ID)
+	require.NoError(t, err)
+	require.False(t, ok)
+}

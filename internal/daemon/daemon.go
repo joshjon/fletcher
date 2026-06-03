@@ -18,7 +18,9 @@ import (
 
 	"github.com/joshjon/fletcher/internal/api"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
+	"github.com/joshjon/fletcher/internal/job"
 	"github.com/joshjon/fletcher/internal/sqlite"
+	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
 )
 
 // Config holds boot-time daemon settings.
@@ -62,7 +64,8 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 
-	srv := newHTTPServer(time.Now().Unix())
+	jobSvc := job.NewService(sqliteq.New(db))
+	srv := newHTTPServer(time.Now().Unix(), jobSvc)
 
 	var g run.Group
 	// serveActor's interrupt path uses a fresh context for graceful shutdown
@@ -107,11 +110,15 @@ func listenUnix(ctx context.Context, socketPath string) (net.Listener, error) {
 	return ln, nil
 }
 
-func newHTTPServer(startedAt int64) *http.Server {
+func newHTTPServer(startedAt int64, jobBackend api.JobsBackend) *http.Server {
 	mux := http.NewServeMux()
-	adminSvc := api.NewAdminService(startedAt)
-	path, handler := fletcherv1connect.NewAdminServiceHandler(adminSvc)
-	mux.Handle(path, handler)
+
+	adminPath, adminHandler := fletcherv1connect.NewAdminServiceHandler(api.NewAdminService(startedAt))
+	mux.Handle(adminPath, adminHandler)
+
+	jobsPath, jobsHandler := fletcherv1connect.NewJobServiceHandler(api.NewJobsService(jobBackend))
+	mux.Handle(jobsPath, jobsHandler)
+
 	return &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
