@@ -1,0 +1,81 @@
+version: 2
+
+project_name: fletcher
+
+before:
+  hooks:
+    # Make sure generated code is in sync with sources before cutting a
+    # release; goreleaser refuses to proceed if generate-check would fail.
+    - make generate-check
+
+builds:
+  - id: fletcher
+    main: ./cmd/fletcher
+    binary: fletcher
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/joshjon/fletcher/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/joshjon/fletcher/internal/buildinfo.Commit={{ .ShortCommit }}
+      - -X github.com/joshjon/fletcher/internal/buildinfo.Date={{ .CommitDate }}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: fletcher
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - DESIGN.md
+      - STANDARDS.md
+      - init/fletcher.service
+      - scripts/install.sh
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - "^chore:"
+      - "^docs:"
+      - "^test:"
+      - "^style:"
+  groups:
+    - title: Features
+      regexp: '^feat(\([^)]*\))?:'
+      order: 0
+    - title: Bug fixes
+      regexp: '^fix(\([^)]*\))?:'
+      order: 1
+    - title: Refactors
+      regexp: '^refactor(\([^)]*\))?:'
+      order: 2
+    - title: Build / CI
+      regexp: '^(build|ci)(\([^)]*\))?:'
+      order: 3
+
+release:
+  github:
+    owner: joshjon
+    name: fletcher
+  draft: false
+  prerelease: auto
+  name_template: "{{ .ProjectName }} {{ .Version }}"
+  header: |
+    Fletcher {{ .Version }}.
+    See `README.md` for install instructions.

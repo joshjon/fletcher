@@ -88,5 +88,13 @@ generate-check: ## Fail if 'make generate' would modify the working tree
 tools: ## Print pinned tool list (resolved via 'go tool')
 	@$(GO) tool
 
+## --- Release ---
+
+release-snapshot: ## Build a goreleaser snapshot (no publish, no tag)
+	goreleaser release --clean --snapshot --skip=publish
+
+release-check: ## Validate .goreleaser.yaml without building
+	goreleaser check
+
 clean: ## Remove build & coverage artifacts
 	rm -rf bin/ dist/ coverage.out coverage.html

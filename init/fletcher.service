@@ -1,0 +1,57 @@
+[Unit]
+Description=Fletcher private agent compute daemon
+Documentation=https://github.com/joshjon/fletcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fletcher
+Group=fletcher
+
+# State, config, and the age private key live under these dirs. systemd
+# creates them with 0700 perms before the daemon starts.
+StateDirectory=fletcher
+ConfigurationDirectory=fletcher
+StateDirectoryMode=0700
+ConfigurationDirectoryMode=0700
+
+Environment=FLETCHER_SOCKET=/run/fletcher/fletcher.sock
+Environment=FLETCHER_DATABASE=/var/lib/fletcher/fletcher.db
+Environment=FLETCHER_AGE_KEY=/var/lib/fletcher/age.key
+Environment=FLETCHER_GATEWAY_LISTEN=127.0.0.1:11500
+Environment=FLETCHER_MCP_LISTEN=127.0.0.1:11600
+Environment=FLETCHER_LOG_LEVEL=info
+
+# Socket dir on /run is wiped each boot; systemd recreates it.
+RuntimeDirectory=fletcher
+RuntimeDirectoryMode=0750
+
+ExecStart=/usr/local/bin/fletcher serve
+
+# Restart on crash with a small backoff. The job supervisor re-runs
+# orphan running rows on boot, so a clean exit + restart is safe.
+Restart=on-failure
+RestartSec=2s
+
+# Sandboxing — works on most distros and is safe for a single-binary
+# daemon that owns its state directories.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=false
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# Read/write only the paths the daemon needs.
+ReadWritePaths=/var/lib/fletcher /etc/fletcher /run/fletcher
+
+[Install]
+WantedBy=multi-user.target
