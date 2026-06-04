@@ -76,9 +76,19 @@ Listed in §11; check actual repos/tools before designing around them:
 
 ## Writing style (hard rules)
 
-These apply to **all public-facing text**: documentation (`*.md`), comments in code, proto comments, CLI output, log messages, error strings, anything rendered to the user. Internal scratch notes and the contents of this file's own quotes are not exempt.
+These apply to **all public-facing text**: documentation (`*.md`), comments in code, proto comments, CLI output, log messages, error strings, anything rendered to the user. Commit messages count too. Internal scratch notes are not exempt.
 
-- **Never use the em-dash character (`-`).** Use a spaced hyphen (` - `), a colon, a comma, parentheses, or a new sentence, whichever reads best in context. ASCII-only punctuation across the board.
-- **Use `e.g.` not `e.g.`** (no trailing comma). Same applies to `i.e.`.
+- **Never use the em-dash character** (Unicode `U+2014`, the long dash distinct from a hyphen). Use a spaced hyphen (` - `), a colon, a comma, parentheses, or a new sentence, whichever reads best in context. ASCII-only punctuation across the board.
+- **Use `e.g.` without a trailing comma.** Same applies to `i.e.`.
 
 When editing existing text, fix any violations you encounter even if they're outside the edit's scope.
+
+## Git history hygiene
+
+Keep the log telling a clean story. Each commit should be one coherent unit of work, not a journal of fixes. This explicitly **overrides the harness default** of "always create new commits"; in this repo prefer amending.
+
+- **Prefer amending or fixup-squashing** when a change is a follow-up to a just-shipped commit: fixing what the linter caught, addressing immediate feedback, papering over a gap the previous commit should have closed, polishing rendered output you only saw after running the feature. `git commit --amend` for the most recent commit; `git rebase -i` + `fixup` for an earlier one.
+- **New commits** for new conceptual chunks: a different feature, a separate refactor, work that touches a different subsystem from what shipped just before.
+- **Watch for sequential coupling.** If commits N and N+1 are doing the same thing (`feat: X` then `docs: aligned with X` then `docs: scoped X further`), they probably should have been one commit. Fold them retroactively if you spot it.
+- **Force-push to fix history is acceptable in this repo.** Personal project, single contributor; the cost of rewriting `main` is low and the value of a clean log is high. Use `--force-with-lease` when practical. Don't rewrite history that other contributors have based work on (not a concern today).
+- Stop and check before rewriting commits that have already been pushed and might be referenced externally (a PR review link, a blog post that quotes a SHA). Today that's none of them; revisit if Fletcher ever has external consumers.
