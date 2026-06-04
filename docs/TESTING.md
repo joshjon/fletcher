@@ -292,21 +292,42 @@ This prints a QR code and the equivalent `wg-quick` config. Then:
    reachability *through the port forward* from outside the LAN, not
    just LAN-local routing.
 3. Toggle the tunnel on.
-4. Confirm the handshake on the server:
+4. Confirm the tunnel on the server. Note `wg show` will print nothing:
+   Fletcher runs userspace wireguard-go in-process, so there is no kernel
+   WireGuard device and no `/var/run/wireguard` control socket for the
+   `wg` tool to read. Check the interface and the daemon log instead:
 
    ```sh
-   sudo wg show
+   ip addr show fletcher0                       # UP, with 10.99.0.1/24
+   journalctl -u fletcher | grep -i wireguard   # "tunnel up" + "peer set updated peers:N"
    ```
 
-   Success is a `latest handshake: <N> seconds ago` line and non-zero
-   `transfer:` for the peer.
-5. Confirm traffic flows: from the phone, `ping 10.99.0.1` (the
-   server's default tunnel address).
+5. Confirm the handshake from the client. The server cannot show it -
+   per-peer handshake/transfer stats live inside the in-process
+   wireguard-go device and are not surfaced server-side yet - so the
+   WireGuard app itself is the place to look, and it is the easiest
+   check on any platform:
 
-If `wg show` lists the peer but shows **no handshake**, that is a
-router/firewall problem on the WireGuard UDP port, not Fletcher -
-`doctor` having confirmed the forward narrows it to the router actually
-honouring it or an upstream ISP block.
+   - Tap the tunnel's name to open its detail screen.
+   - Look for **Latest handshake: <N> seconds ago** and non-zero
+     **Data received / sent**.
+
+   The rendered config sets `PersistentKeepalive = 25`, so the phone
+   handshakes within ~30s of enabling the tunnel without any manual
+   traffic. If the handshake stays empty, pull to refresh, or open
+   `http://10.99.0.1:11500` in the phone's browser - it returns no page
+   (nothing is bound there for tunnel clients yet), but the attempt
+   pushes a packet through the tunnel and forces the handshake.
+
+   iOS has no built-in `ping`/terminal, so the app's counters are the
+   confirmation; if you want an explicit ICMP `ping 10.99.0.1`, install a
+   network-utility app from the App Store. On a laptop peer, plain
+   `ping 10.99.0.1` works.
+
+If the handshake never lands while `fletcher0` is up and the daemon
+logged the peer, that is a router/firewall problem on the WireGuard UDP
+port, not Fletcher - `doctor` having confirmed the forward narrows it to
+the router actually honouring it or an upstream ISP block.
 
 Scope note: the daemon's Connect API (Unix socket) and gateway
 (`127.0.0.1:11500`) are loopback-bound, so a peer cannot reach those
