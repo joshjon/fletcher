@@ -102,7 +102,15 @@ install -d -m 0700 -o fletcher -g fletcher /var/lib/fletcher /etc/fletcher
 
 if command -v systemctl >/dev/null 2>&1; then
 	systemctl daemon-reload
-	log "installed. start with: sudo systemctl enable --now fletcher"
+	# On upgrade the service is already running - restart so the new
+	# binary + unit settings take effect. On first install the service
+	# isn't enabled yet; print the enable hint instead.
+	if systemctl is-active --quiet fletcher; then
+		log "fletcher is running; restarting to pick up the new binary"
+		systemctl restart fletcher
+	else
+		log "installed. start with: sudo systemctl enable --now fletcher"
+	fi
 else
 	log "installed. start with: ${PREFIX}/bin/fletcher serve"
 fi

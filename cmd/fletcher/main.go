@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -57,16 +58,63 @@ func versionCmd() *cli.Command {
 				Name:  "json",
 				Usage: "output as JSON",
 			},
+			&cli.BoolFlag{
+				Name:  "check-latest",
+				Usage: "also check GitHub for the newest published release",
+			},
 		},
-		Action: func(_ context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *cli.Command) error {
 			info := buildinfo.Info()
+			var (
+				latest      *buildinfo.LatestRelease
+				noReleases  bool
+				checkErrMsg string
+			)
+			if cmd.Bool("check-latest") {
+				rel, err := buildinfo.CheckLatest(ctx, nil)
+				switch {
+				case errors.Is(err, buildinfo.ErrNoReleases):
+					noReleases = true
+				case err != nil:
+					checkErrMsg = err.Error()
+					fmt.Fprintf(os.Stderr, "could not check latest release: %v\n", err)
+				default:
+					latest = &rel
+				}
+			}
 			if cmd.Bool("json") {
+				out := versionOutput{Information: info}
+				if latest != nil {
+					out.Latest = latest.TagName
+					out.UpgradeAvailable = buildinfo.UpgradeAvailable(info.Version, latest.TagName)
+					out.LatestURL = latest.HTMLURL
+				}
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
-				return enc.Encode(info)
+				return enc.Encode(out)
 			}
 			fmt.Printf("fletcher %s (commit %s, built %s)\n", info.Version, info.Commit, info.Date)
+			switch {
+			case latest != nil && buildinfo.UpgradeAvailable(info.Version, latest.TagName):
+				fmt.Printf("upgrade available: %s\n  %s\n", latest.TagName, latest.HTMLURL)
+			case latest != nil:
+				fmt.Printf("up to date (latest released: %s)\n", latest.TagName)
+			case noReleases:
+				fmt.Println("no releases published yet")
+			case checkErrMsg != "":
+				// Error already printed to stderr; keep stdout clean.
+			}
 			return nil
 		},
 	}
+}
+
+// versionOutput is the JSON shape printed by `fletcher version --json`.
+// Includes the optional --check-latest fields so consumers can parse
+// the same shape in both modes.
+type versionOutput struct {
+	buildinfo.Information
+	Latest           string `json:"latest,omitempty"`
+	LatestURL        string `json:"latest_url,omitempty"`
+	UpgradeAvailable bool   `json:"upgrade_available,omitempty"`
 }

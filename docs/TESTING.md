@@ -213,94 +213,71 @@ every failure. The CLI surfaces errors prefixed with their category
 
 To start clean between runs: `rm -rf /tmp/fletcher-data`.
 
-## Linux server
+## Linux server (testing a change)
 
-This is where Fletcher actually does its job: real container isolation
-via runc, CoW snapshots via btrfs (once Phase 8 lands the Firecracker
-driver, that swaps in too), and your phone/laptop dialing in over
-WireGuard.
+For the full setup flow that an end user follows (install, networking,
+pairing a device, security notes, troubleshooting), see
+[`setup.md`](setup.md). This section covers what's testing-specific
+for developers iterating on Fletcher itself.
 
-### One-time setup
+### First deploy to a test server
 
-1. **Forward UDP 51820 to the Linux box** on your home router. The
-   exact UI varies by router model; look for a section called "Port
-   Forwarding", "Virtual Server", or "NAT/Gaming". What you need to
-   set:
-   - Protocol: UDP (not TCP)
-   - External port: 51820
-   - Internal port: 51820
-   - Destination: your Linux box's LAN IP (find it with `ip -4 addr`
-     on the server, typically something like 192.168.1.x)
-
-   If port-forwarding isn't accessible (some ISP-provided routers
-   lock this down), your home network is behind CGNAT, or you're
-   testing inside a single LAN, this step can be skipped — peers
-   on the same network can still reach the daemon via its LAN IP.
-
-2. **Pick a public address** peers can dial. Two options:
-   - **Static public IP**: use the IP directly (e.g. `203.0.113.5:51820`).
-   - **DDNS hostname**: if your ISP rotates your IP, sign up for a free
-     dynamic-DNS service (DuckDNS, no-ip) and use its hostname (e.g.
-     `myhome.duckdns.org:51820`).
-
-3. **Install Fletcher** and start the daemon with `--public-endpoint`
-   set to whatever you picked above. The systemd unit (Phase 10) is
-   the long-running form; for a quick first run:
-
-   ```sh
-   ./bin/fletcher serve \
-     --public-endpoint myhome.duckdns.org:51820
-   ```
-
-   That's the only piece of one-time setup. Everything from here is
-   one-command operations.
-
-### Add a device
+After cloning Fletcher on the server, one command does everything
+`scripts/install.sh` does, against local files:
 
 ```sh
-./bin/fletcher peer pair phone
+make install
 ```
 
-The daemon picks the next free tunnel IP (`10.99.0.2/32` for the first
-peer, `10.99.0.3/32` for the next, etc.), generates a keypair, prints
-the wg-quick config, and renders a QR code in the terminal. Scan it
-with the WireGuard mobile app; the phone is online in seconds.
+This creates the `fletcher` system user (if missing), pre-creates the
+state directories under `/var/lib/fletcher` and `/etc/fletcher`,
+installs the binary at `/usr/local/bin/fletcher` and the systemd unit
+at `/etc/systemd/system/fletcher.service`, reloads systemd, and (if
+the service is already running) restarts it. The `daemon-reload` and
+restart matter when the unit file has changed in your branch.
 
-For a laptop, run the same command (`./bin/fletcher peer pair laptop`)
-and copy the printed `[Interface]` / `[Peer]` block into
-`/etc/wireguard/fletcher.conf`, then `sudo wg-quick up fletcher`.
+For first install, set the public endpoint via a drop-in override and
+start the service (see [setup.md § Mode A](setup.md#mode-a-built-in-wireguard-recommended-for-most-homelabs)
+for the boilerplate). For testing inside a single LAN, you can skip
+both the port forward and `--public-endpoint` — peers on the same
+network reach the daemon via its LAN IP.
 
-If you forgot to set `--public-endpoint`:
+### Deploy-iterate loop
 
-```
-fletcher: failed_precondition: daemon has no public-endpoint configured;
-restart with --public-endpoint <host:port> or set FLETCHER_PUBLIC_ENDPOINT
-```
-
-Set it and try again.
-
-### Real container isolation
-
-Switch the runtime driver from the macOS default (`mock`) to `runc` on
-the Linux box. Once Phase 8 lands the Firecracker driver, swap to that
-for hardware-isolation; `runc` is the degraded-but-functional fallback.
+After making changes locally:
 
 ```sh
-./bin/fletcher serve \
-  --public-endpoint myhome.duckdns.org:51820 \
-  --runtime runc \
-  --snapshot btrfs \
-  --btrfs-root /srv/fletcher/snapshots
+# On the server:
+cd ~/git/fletcher
+git pull
+make install        # same command for upgrade; restarts daemon if running
+sudo journalctl -u fletcher -f
 ```
 
-`--btrfs-root` must already be a btrfs filesystem (a subvolume on /srv
-is fine; `mkfs.btrfs` if needed). After that, every job runs inside a
-runc container against a fresh CoW snapshot, with WireGuard as the
-only path in.
+About 15 seconds from `git pull` to "new binary running." Watch the
+logs for the lines you care about (UPnP result, tunnel up, peer pair
+output).
+
+### What to verify after a deploy
+
+Most changes only need the macOS smoke test above to gain confidence,
+but some are Linux-only:
+
+- **Phase 15 networking** (UPnP, tunnel up): startup logs should
+  include `upnp port-forward installed` and `wireguard tunnel up`. If
+  UPnP failed, the log says so and `fletcher peer pair` falls back to
+  needing `--public-endpoint` set manually.
+- **Real runtime**: switch the runtime driver from `mock` to `runc`
+  via the systemd drop-in (`Environment=FLETCHER_RUNTIME=runc`), restart,
+  and verify a job runs inside a real OCI container against a btrfs
+  snapshot. Requires `runc` and a btrfs filesystem.
+- **Peer pairing end-to-end**: `fletcher peer pair phone`, scan QR
+  with WireGuard app, toggle on. `sudo wg show` on the server should
+  list the peer with a recent handshake within seconds.
 
 ### Power-user CLI
 
-For atypical cases (custom tunnel IPs, split-tunnel allowed-IPs, etc.),
-`fletcher peer add` still exists with the same surface it always had.
-The pair command is the recommended path; add is for when you need to
-override defaults.
+`fletcher peer add` (the pre-Phase-15 CLI surface) still exists for
+operators who want to override tunnel IP, endpoint, or allowed-IPs
+manually. The `pair` command is the documented path; `add` is the
+escape hatch for atypical cases.

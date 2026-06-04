@@ -47,6 +47,27 @@ import (
 // log without changing any call sites.
 var auditRecorder audit.Recorder = audit.Noop{}
 
+// checkForUpgrade hits GitHub Releases in the background at boot and
+// logs a hint if a newer Fletcher version is published. Failures are
+// silent at info level (debug level if you want to see them) - the
+// daemon should not fail to start because GitHub is unreachable.
+func checkForUpgrade(ctx context.Context, logger *slog.Logger) {
+	release, err := buildinfo.CheckLatest(ctx, nil)
+	if err != nil {
+		logger.Debug("release check skipped", slog.String("err", err.Error()))
+		return
+	}
+	if !buildinfo.UpgradeAvailable(buildinfo.Version, release.TagName) {
+		return
+	}
+	logger.Info("a newer fletcher release is available",
+		slog.String("current", buildinfo.Version),
+		slog.String("latest", release.TagName),
+		slog.String("url", release.HTMLURL),
+		slog.String("upgrade", "curl -fsSL https://raw.githubusercontent.com/joshjon/fletcher/main/scripts/install.sh | sudo sh"),
+	)
+}
+
 // Config holds boot-time daemon settings.
 type Config struct {
 	SocketPath        string
@@ -99,10 +120,12 @@ func Run(ctx context.Context, cfg Config) error {
 	logger.Info("starting fletcher daemon",
 		slog.String("socket", cfg.SocketPath),
 		slog.String("database", cfg.DatabasePath),
+		slog.String("version", buildinfo.Version),
 	)
 	if err := ensureDirs(cfg); err != nil {
 		return err
 	}
+	go checkForUpgrade(ctx, logger)
 
 	db, err := sqlite.Open(ctx, cfg.DatabasePath)
 	if err != nil {

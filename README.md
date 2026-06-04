@@ -23,43 +23,67 @@ host; runc + btrfs Linux drivers are wired but unverified outside Linux.
 Requires Linux on amd64 or arm64.
 
 ```sh
-# 1. Install (replace TAG when releases land)
+# 1. Install (downloads the latest release, sets up systemd):
 curl -fsSL https://raw.githubusercontent.com/joshjon/fletcher/main/scripts/install.sh | sudo sh
 
-# 2. Enable + start the daemon
+# 2. Enable + start the daemon:
 sudo systemctl enable --now fletcher
 
-# 3. Talk to it
+# 3. Talk to it:
 fletcher health
-fletcher secret set anthropic_api_key sk-ant-...
 fletcher job create --name hello --command "echo hi" --image mock
 fletcher job list
 
-# 4. Add a WireGuard peer for your phone / laptop
-fletcher peer add laptop --address 10.99.0.2/32 --endpoint your.dyndns.org:51820
-fletcher peer server-config --listen-port 51820 > /etc/wireguard/fletcher.conf
-sudo wg-quick up fletcher
+# 4. Pair your phone (scan the QR with the WireGuard app):
+fletcher peer pair phone
 ```
+
+The daemon brings up its own WireGuard interface and asks your router to
+forward the listening port via UPnP - on most home connections that's
+the whole setup. Walkthrough, troubleshooting, and the
+"bring-your-own-VPN" alternative (Tailscale, etc.) live in
+[`docs/setup.md`](docs/setup.md).
 
 The CLI talks to the daemon over a local Unix socket. Subcommand help is
 the source of truth: `fletcher --help`, `fletcher job --help`, etc.
 
 ## Documentation
 
+- [`docs/setup.md`](docs/setup.md) - end-user install, first run,
+  networking modes, security notes, troubleshooting. Start here if
+  you're running Fletcher.
 - [`DESIGN.md`](./DESIGN.md) - positioning, architecture, the thinking
-  behind the trust boundary and the job model. Read this first.
-- [`STANDARDS.md`](./STANDARDS.md) - repo conventions: layout, lint, test,
-  error handling, logging, dependencies, release process.
+  behind the trust boundary and the job model. Read this first if
+  you're working on Fletcher.
+- [`STANDARDS.md`](./STANDARDS.md) - repo conventions: layout, lint,
+  test, error handling, logging, dependencies, release process.
+- [`docs/TESTING.md`](docs/TESTING.md) - developer smoke tests against
+  a running daemon.
 
 ## Building from source
+
+For developers, early testers, or anyone running on an arch the release
+tarballs don't cover. Go 1.26+ is required (we use the `tool`
+directive); all other build-time tools are pinned in `go.mod` and
+reachable via `go tool <name>`.
 
 ```sh
 git clone https://github.com/joshjon/fletcher.git
 cd fletcher
+
+# Local builds:
 make build          # local platform binary at ./bin/fletcher
 make build-linux    # cross-compile amd64 + arm64 Linux artefacts
 make check          # lint + tests + generated-file drift check
+
+# Install on a Linux server (mirrors what scripts/install.sh does
+# using your local build):
+make install        # create user, install binary + unit, reload + restart-if-running
 ```
 
-Go 1.24+ is required (we use the `tool` directive). All other build-time
-tools are pinned in `go.mod` and reachable via `go tool <name>`.
+Iterate on a deployed server with:
+
+```sh
+git pull
+make install        # same command for first install and upgrade
+```

@@ -18,29 +18,24 @@ see `docs/TESTING.md` instead.
 
 ## Install
 
-Right now Fletcher ships from source. A `curl | sh` installer is on the
-roadmap; for now:
-
 ```sh
-# Prereqs on the server (adjust for your package manager):
-sudo apt install -y git make
-# Go 1.26+ - if your distro's package is older, grab a tarball from go.dev.
-
-# Clone and build:
-git clone https://github.com/joshjon/fletcher
-cd fletcher
-make build
-
-# Install the binary and the systemd unit:
-sudo install bin/fletcher /usr/local/bin/fletcher
-sudo install -m 0644 init/fletcher.service /etc/systemd/system/
-
-# Create the unprivileged user the daemon runs as:
-sudo useradd --system --home-dir /var/lib/fletcher \
-  --shell /usr/sbin/nologin fletcher
+curl -fsSL https://raw.githubusercontent.com/joshjon/fletcher/main/scripts/install.sh | sudo sh
 ```
 
+The installer downloads the latest release tarball, verifies its SHA256,
+drops the binary at `/usr/local/bin/fletcher`, installs the systemd unit,
+creates the unprivileged `fletcher` system user, and pre-creates the
+state directories. The same command works for first install and upgrade
+- the script detects whether the service is already running and
+restarts it on upgrade automatically.
+
 You should now have `fletcher version` working.
+
+> **Pre-v0.1.0 note:** until the first release is tagged, the installer
+> errors with "could not resolve latest release from GitHub API." If
+> you're an early tester who wants to try Fletcher today, see the
+> "Building from source" section in the [README](../README.md) - the
+> from-source path is documented there for developers.
 
 ## First run (smoke test)
 

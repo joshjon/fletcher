@@ -15,7 +15,7 @@ BUILD_FLAGS := -trimpath -ldflags "$(LDFLAGS)"
 
 .PHONY: help build build-linux build-linux-amd64 build-linux-arm64 \
 	test test-integration lint fmt check cover generate generate-check \
-	tools clean image image-amd64 image-arm64
+	tools clean image image-amd64 image-arm64 install
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -25,6 +25,24 @@ help: ## Show this help
 
 build: ## Build the local fletcher binary
 	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -o $(BIN) ./cmd/fletcher
+
+PREFIX ?= /usr/local
+
+install: build ## Developer convenience - mirrors scripts/install.sh using local files. End users use scripts/install.sh instead.
+	@if ! id -u fletcher >/dev/null 2>&1; then \
+		echo "==> creating fletcher system user"; \
+		sudo useradd --system --home-dir /var/lib/fletcher --shell /usr/sbin/nologin fletcher; \
+	fi
+	sudo install -d -m 0700 -o fletcher -g fletcher /var/lib/fletcher /etc/fletcher
+	sudo install $(BIN) $(PREFIX)/bin/fletcher
+	sudo install -m 0644 init/fletcher.service /etc/systemd/system/
+	sudo systemctl daemon-reload
+	@if systemctl is-active --quiet fletcher; then \
+		echo "==> fletcher is running; restarting"; \
+		sudo systemctl restart fletcher; \
+	else \
+		echo "==> installed. start with: sudo systemctl enable --now fletcher"; \
+	fi
 
 build-linux: build-linux-amd64 build-linux-arm64 ## Cross-compile both Linux targets
 
