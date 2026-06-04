@@ -7,7 +7,12 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
+	"os/user"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"connectrpc.com/connect"
@@ -55,29 +60,7 @@ func diagnoseDaemonError(socketPath string, err error) Result {
 
 	switch {
 	case isPermissionDenied(err):
-		return Result{
-			Category: CategoryDaemon,
-			Name:     "Running",
-			Status:   StatusFail,
-			Detail:   "the socket exists but your user does not have permission to talk to it",
-			Plan: &PlanStep{
-				ID:       "socket-permission",
-				Priority: PriorityBlocker,
-				Title:    "Grant your user access to the daemon socket",
-				Why:      "The daemon's socket lives under a directory the systemd service restricts to its own group. The CLI cannot connect until your account is a member of that group.",
-				Options: []PlanOption{{
-					Label: "Add your user to the fletcher group",
-					Steps: []string{
-						"sudo usermod -aG fletcher $USER",
-						"# Log out and back in so the new group takes effect,",
-						"# or apply it to the current shell with:",
-						"newgrp fletcher",
-						"# Then re-run:",
-						"fletcher doctor",
-					},
-				}},
-			},
-		}
+		return socketPermissionResult(socketPath)
 	default:
 		return Result{
 			Category: CategoryDaemon,
@@ -100,6 +83,102 @@ func diagnoseDaemonError(socketPath string, err error) Result {
 			},
 		}
 	}
+}
+
+// socketPermissionResult builds the remediation for a permission-denied
+// socket. The fix differs by membership state, so the plan is tailored:
+//
+//   - Not yet in the group: add the user, then just re-run - the CLI
+//     re-execs itself under the group automatically on the next invocation,
+//     with newgrp/login as a fallback.
+//   - Already in the group on disk but the daemon still refused us: the
+//     auto-activation could not run (typically sg(1) is missing), so the
+//     operator has to activate the group themselves this once.
+func socketPermissionResult(socketPath string) Result {
+	group, gid, known := socketGroup(socketPath)
+	if !known {
+		group = "fletcher"
+	}
+
+	var why string
+	var steps []string
+	if known && userInGroup(gid) {
+		why = fmt.Sprintf("Your account already belongs to the %q group, but this login session predates the change, so the group is not active yet. The CLI normally re-activates it for you automatically; since that did not happen, the sg(1) helper is probably missing.", group)
+		steps = []string{
+			"# Activate the group in this shell:",
+			"newgrp " + group,
+			"# (or log out and back in - it sticks for every new shell)",
+			"# Then re-run:",
+			"fletcher doctor",
+		}
+	} else {
+		why = fmt.Sprintf("The daemon's socket is restricted to the %q group. Your account is not a member yet, so the CLI cannot connect.", group)
+		steps = []string{
+			"sudo usermod -aG " + group + " $USER",
+			"# Then just re-run fletcher - it picks up the new group",
+			"# automatically. If it does not, log out and back in, or run:",
+			"newgrp " + group,
+			"# Then:",
+			"fletcher doctor",
+		}
+	}
+
+	return Result{
+		Category: CategoryDaemon,
+		Name:     "Running",
+		Status:   StatusFail,
+		Detail:   "the socket exists but your user does not have permission to talk to it",
+		Plan: &PlanStep{
+			ID:       "socket-permission",
+			Priority: PriorityBlocker,
+			Title:    "Grant your user access to the daemon socket",
+			Why:      why,
+			Options:  []PlanOption{{Label: "Join the daemon's group", Steps: steps}},
+		},
+	}
+}
+
+// socketGroup returns the name and GID of the group owning the daemon socket.
+// It falls back to the socket's parent directory when the socket inode itself
+// is not statable (the 0750 runtime directory denies stat to non-members);
+// both carry the same ownership under systemd.
+func socketGroup(socketPath string) (name string, gid int, ok bool) {
+	for _, p := range []string{socketPath, filepath.Dir(socketPath)} {
+		fi, err := os.Stat(p)
+		if err != nil {
+			continue
+		}
+		st, isStat := fi.Sys().(*syscall.Stat_t)
+		if !isStat {
+			continue
+		}
+		g := int(st.Gid)
+		if grp, err := user.LookupGroupId(strconv.Itoa(g)); err == nil {
+			return grp.Name, g, true
+		}
+		return "", g, true
+	}
+	return "", 0, false
+}
+
+// userInGroup reports whether the current user is a member of gid according
+// to /etc/group, independent of this process's active group set.
+func userInGroup(gid int) bool {
+	u, err := user.Current()
+	if err != nil {
+		return false
+	}
+	ids, err := u.GroupIds()
+	if err != nil {
+		return false
+	}
+	target := strconv.Itoa(gid)
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
 }
 
 // isPermissionDenied returns true when err (typically wrapped by

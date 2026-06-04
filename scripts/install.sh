@@ -108,7 +108,7 @@ if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] \
 		&& ! id -nG "$SUDO_USER" 2>/dev/null | tr ' ' '\n' | grep -qx fletcher; then
 	log "adding $SUDO_USER to the fletcher group (needed to talk to the daemon socket)"
 	usermod -aG fletcher "$SUDO_USER"
-	log "note: log out and back in (or run 'newgrp fletcher') for the new group to take effect"
+	log "the fletcher CLI activates this group for you automatically; if a command still reports no socket access, log out and back in (or run 'newgrp fletcher')"
 fi
 
 if command -v systemctl >/dev/null 2>&1; then

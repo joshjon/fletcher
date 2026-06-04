@@ -31,6 +31,11 @@ func main() {
 }
 
 func run() error {
+	// If the operator was just added to the daemon's group but their shell
+	// predates the change, transparently re-exec under that group via sg(1)
+	// so client commands work without a logout. No-op in every other case.
+	maybeReexecUnderDaemonGroup()
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return newApp().Run(ctx, os.Args)

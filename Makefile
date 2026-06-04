@@ -40,7 +40,7 @@ install: build ## Developer convenience - mirrors scripts/install.sh using local
 	@if [ -n "$$USER" ] && [ "$$USER" != "root" ] && ! id -nG "$$USER" 2>/dev/null | grep -qw fletcher; then \
 		echo "==> adding $$USER to the fletcher group (needed to talk to the daemon socket)"; \
 		sudo usermod -aG fletcher "$$USER"; \
-		echo "==> note: log out and back in (or run 'newgrp fletcher' in this shell) for the new group to take effect"; \
+		echo "==> the fletcher CLI activates this group for you automatically; if a command still reports no socket access, log out and back in (or run 'newgrp fletcher')"; \
 	fi
 	@if systemctl is-active --quiet fletcher; then \
 		echo "==> fletcher is running; restarting"; \
