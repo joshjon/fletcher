@@ -20,7 +20,12 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "fletcher:", err)
+		// Colour the "fletcher:" prefix red so the failure stands out
+		// against ordinary output, especially when the error message
+		// itself is short. The error's own text is left uncoloured -
+		// it may already include categorised prefixes from the server
+		// (e.g. "invalid_argument: ...") that the user reads as data.
+		fmt.Fprintln(os.Stderr, red("fletcher:"), err)
 		os.Exit(1)
 	}
 }

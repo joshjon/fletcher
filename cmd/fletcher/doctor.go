@@ -55,6 +55,7 @@ auto-fixing. Re-run after each change to confirm.`,
 			results := doctor.Run(ctx, checkers)
 
 			if cmd.String("output") == "json" {
+				disableColor() // structured output should never contain ANSI escapes
 				return renderDoctorJSON(os.Stdout, results)
 			}
 			renderDoctorText(os.Stdout, results, cmd.Bool("quiet"))
@@ -89,12 +90,12 @@ func renderDoctorText(w io.Writer, results []doctor.Result, quiet bool) {
 			if len(rs) == 0 {
 				continue
 			}
-			fmt.Fprintln(w, string(cat))
+			fmt.Fprintln(w, bold(string(cat)))
 			for _, r := range rs {
 				icon := statusIcon(r.Status)
-				fmt.Fprintf(w, "  %s %s\n", icon, r.Name)
+				fmt.Fprintf(w, "  %s  %s\n", icon, r.Name)
 				if r.Detail != "" {
-					fmt.Fprintf(w, "      %s\n", r.Detail)
+					fmt.Fprintf(w, "      %s\n", dim(r.Detail))
 				}
 			}
 			fmt.Fprintln(w)
@@ -102,38 +103,41 @@ func renderDoctorText(w io.Writer, results []doctor.Result, quiet bool) {
 	}
 
 	s := doctor.Summarise(results)
-	fmt.Fprintf(w, "Summary: %d ok, %d warnings, %d issues",
-		s.OK, s.Warn, s.Fail)
+	fmt.Fprintf(w, "Summary: %s, %s, %s",
+		green(fmt.Sprintf("%d ok", s.OK)),
+		yellow(fmt.Sprintf("%d warnings", s.Warn)),
+		red(fmt.Sprintf("%d issues", s.Fail)),
+	)
 	if s.Skip > 0 {
-		fmt.Fprintf(w, ", %d skipped", s.Skip)
+		fmt.Fprintf(w, ", %s", gray(fmt.Sprintf("%d skipped", s.Skip)))
 	}
 	fmt.Fprintln(w, ".")
 
 	plan := doctor.CollectPlan(results)
 	if len(plan) == 0 {
 		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Nothing to do.")
+		fmt.Fprintln(w, green("Nothing to do."))
 		return
 	}
 
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, strings.Repeat("-", 60))
-	fmt.Fprintln(w, "WHAT TO DO NEXT")
+	fmt.Fprintln(w, gray(strings.Repeat("-", 60)))
+	fmt.Fprintln(w, bold("WHAT TO DO NEXT"))
 	fmt.Fprintln(w)
 	renderPlan(w, plan)
 }
 
 func renderPlan(w io.Writer, plan []doctor.PlanStep) {
 	for i, step := range plan {
-		label := "blocker"
-		if step.Priority != doctor.PriorityBlocker {
-			label = "follow-up"
+		label := green("follow-up")
+		if step.Priority == doctor.PriorityBlocker {
+			label = red("blocker")
 		}
-		fmt.Fprintf(w, "%d. %s (%s)\n", i+1, step.Title, label)
+		fmt.Fprintf(w, "%d. %s (%s)\n", i+1, bold(step.Title), label)
 		if step.Why != "" {
 			fmt.Fprintln(w)
 			for _, line := range wrap(step.Why, 70) {
-				fmt.Fprintf(w, "   %s\n", line)
+				fmt.Fprintf(w, "   %s\n", dim(line))
 			}
 		}
 		fmt.Fprintln(w)
@@ -143,9 +147,15 @@ func renderPlan(w io.Writer, plan []doctor.PlanStep) {
 			if multiple {
 				prefix = fmt.Sprintf("   %s. ", string(rune('A'+j)))
 			}
-			fmt.Fprintf(w, "%s%s\n", prefix, opt.Label)
+			fmt.Fprintf(w, "%s%s\n", prefix, bold(opt.Label))
 			for _, s := range opt.Steps {
-				fmt.Fprintf(w, "        %s\n", s)
+				// Lines starting with "#" are explanatory comments inside
+				// the recipe; dim them so the actual commands stand out.
+				if strings.HasPrefix(strings.TrimSpace(s), "#") {
+					fmt.Fprintf(w, "        %s\n", dim(s))
+				} else {
+					fmt.Fprintf(w, "        %s\n", s)
+				}
 			}
 			fmt.Fprintln(w)
 		}
@@ -173,18 +183,21 @@ func wrap(s string, width int) []string {
 	return out
 }
 
+// statusIcon renders the per-result status as a single coloured glyph.
+// Unicode symbols here are deliberate UI affordances (not punctuation,
+// which the CLAUDE.md writing rule restricts to ASCII).
 func statusIcon(s doctor.Status) string {
 	switch s {
 	case doctor.StatusOK:
-		return "[ok]  "
+		return green("✓")
 	case doctor.StatusWarn:
-		return "[warn]"
+		return yellow("⚠")
 	case doctor.StatusFail:
-		return "[fail]"
+		return red("✗")
 	case doctor.StatusSkip:
-		return "[skip]"
+		return gray("○")
 	}
-	return "[?]   "
+	return "?"
 }
 
 // renderDoctorJSON emits a structured form suitable for monitoring /

@@ -244,7 +244,7 @@ func writeJobDetails(w io.Writer, j *fletcherv1.Job) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "id:\t%s\n", j.GetId())
 	fmt.Fprintf(tw, "name:\t%s\n", j.GetName())
-	fmt.Fprintf(tw, "status:\t%s\n", statusLabel(j.GetStatus()))
+	fmt.Fprintf(tw, "status:\t%s\n", coloredStatusLabel(j.GetStatus()))
 	fmt.Fprintf(tw, "trigger:\t%s\n", triggerLabel(j.GetTrigger()))
 	fmt.Fprintf(tw, "image:\t%s\n", j.GetImage())
 	fmt.Fprintf(tw, "command:\t%s\n", j.GetCommand())
@@ -275,7 +275,7 @@ func writeJobsTable(w io.Writer, jobs []*fletcherv1.Job, total int64) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 			j.GetId(),
 			j.GetName(),
-			statusLabel(j.GetStatus()),
+			coloredStatusLabel(j.GetStatus()),
 			triggerLabel(j.GetTrigger()),
 			formatUnix(j.GetCreatedAt()),
 		)
@@ -301,6 +301,26 @@ func statusLabel(s fletcherv1.JobStatus) string {
 		return "cancelled"
 	}
 	return "unknown"
+}
+
+// coloredStatusLabel is statusLabel plus an ANSI colour by state.
+// Used in human table output only; the JSON path goes through the
+// underlying proto enum and never hits this.
+func coloredStatusLabel(s fletcherv1.JobStatus) string {
+	label := statusLabel(s)
+	switch s {
+	case fletcherv1.JobStatus_JOB_STATUS_QUEUED:
+		return blue(label)
+	case fletcherv1.JobStatus_JOB_STATUS_RUNNING:
+		return yellow(label)
+	case fletcherv1.JobStatus_JOB_STATUS_SUCCEEDED:
+		return green(label)
+	case fletcherv1.JobStatus_JOB_STATUS_FAILED:
+		return red(label)
+	case fletcherv1.JobStatus_JOB_STATUS_CANCELLED:
+		return gray(label)
+	}
+	return label
 }
 
 func triggerLabel(t fletcherv1.JobTrigger) string {
