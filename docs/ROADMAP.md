@@ -205,11 +205,11 @@ Per DESIGN.md §13, these wait for real demand rather than being pre-planned.
 Listed so they are visible, not lost:
 
 - **Cut v0.1.0** - the one thing blocking `curl | sh` install for anyone else.
-- **Image-to-rootfs flatten tooling** - bridge phase 11's `fletcher-base` OCI
-  image into the btrfs `images/<name>` template the runc/btrfs path runs against
-  (`internal/snapshot/btrfsdriver`). Without it a real-runtime job has no rootfs
-  to `exec`, so end-to-end runc + btrfs testing needs a manual rootfs workaround
-  (see `docs/TESTING.md`). This is the missing seam between phase 11 and phase 8.
+- **Image-to-rootfs flatten** - shipped as `fletcher image import`, which
+  flattens a built OCI image into the btrfs `images/<name>` template the
+  runc/btrfs path forks from. This is the interim `docker export` based bridge;
+  it is superseded by the firecracker-containerd OCI pull pipeline (DESIGN.md
+  §3) when that lands, which removes the Docker dependency.
 - **Firecracker driver** - the real-isolation runtime; needs a KVM host to build
   against (DESIGN.md §11).
 - **Audit log storage** - swap `audit.Noop` for a SQLite recorder.

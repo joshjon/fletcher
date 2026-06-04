@@ -347,18 +347,25 @@ fletcher peer delete <peer-id>
 a real copy-on-write snapshot (btrfs), instead of the mock driver's bare
 subprocess and plain directory.
 
-Prerequisites: `runc` on `PATH` and a btrfs filesystem for the snapshot
-root. If you do not have a spare btrfs partition, a loopback image is the
-no-hardware dev path:
+Prerequisites: `runc` and `docker` on `PATH`, and a btrfs filesystem for
+the snapshot root that the daemon (the `fletcher` user) can write to. No
+spare btrfs partition? A loopback image is the no-hardware dev path:
 
 ```sh
 sudo truncate -s 5G /var/lib/fletcher-snap.img
 sudo mkfs.btrfs /var/lib/fletcher-snap.img
 sudo mkdir -p /var/lib/fletcher/snapshots
 sudo mount -o loop /var/lib/fletcher-snap.img /var/lib/fletcher/snapshots
+# The daemon creates one fork subvolume per job, so it must own the root:
+sudo chown fletcher:fletcher /var/lib/fletcher/snapshots
 ```
 
-Point the daemon at the real drivers via a systemd drop-in:
+The shipped systemd unit grants the daemon `CAP_SYS_ADMIN` (for btrfs
+subvolumes and the namespaces runc needs), so `make install` covers the
+privilege side - nothing extra to configure there.
+
+Point the daemon at the real drivers via a systemd drop-in (still
+env-based until the settings work lands; see `ROADMAP.md` Phase 17):
 
 ```sh
 sudo systemctl edit fletcher
@@ -369,29 +376,33 @@ sudo systemctl edit fletcher
 sudo systemctl restart fletcher
 ```
 
-Confirm the switch took: the startup log should now read
+Confirm the switch took: the startup log should read
 `drivers selected runtime=runc snapshot=btrfs`, and `fletcher doctor`
 should still be clean.
 
-**Current limitation - read before running a job.** The btrfs driver runs
-a job against a rootfs template at `<btrfs-root>/images/<image>`. There is
-not yet any tooling to flatten the `fletcher-base` OCI image (from
-`make image`) into that location, so a job with no matching template gets
-an empty subvolume and runc has nothing to `exec`. Until the image-flatten
-step lands (tracked in `ROADMAP.md`), an end-to-end real-agent job is not
-push-button. For a manual smoke test you can populate a rootfs yourself,
-e.g. export a container filesystem into a freshly created subvolume:
+Import a base-image rootfs template so jobs have something to run in. A
+job's `--image` names a template at `<btrfs-root>/images/<name>`; build
+the OCI image once, then flatten it into the btrfs root with the CLI:
 
 ```sh
-# Build the base image first (needs Docker): make image
-sudo btrfs subvolume create /var/lib/fletcher/snapshots/images/fletcher-base
-CID=$(docker create fletcher-base:dev)
-docker export "$CID" | sudo tar -x -C /var/lib/fletcher/snapshots/images/fletcher-base
-docker rm "$CID"
-# Then a job with --image fletcher-base has a real rootfs to run in.
+make image                       # builds fletcher-base:dev (needs Docker)
+sudo fletcher image import fletcher-base:dev \
+  --btrfs-root /var/lib/fletcher/snapshots --name fletcher-base
+sudo fletcher image ls --btrfs-root /var/lib/fletcher/snapshots   # -> fletcher-base
+```
+
+All three `image` subcommands need `sudo`: the btrfs subvolume and docker
+need root, and `/var/lib/fletcher` is mode 0700 owned by the `fletcher`
+user, so a non-root CLI cannot even read the snapshot root (the daemon
+reads it fine as `fletcher`). Pass `--btrfs-root` explicitly because
+`sudo` does not carry `FLETCHER_BTRFS_ROOT` through.
+
+Run a job in it:
+
+```sh
 fletcher job create --name runc-smoke --command "echo hi from runc" --image fletcher-base
 sleep 1
-fletcher job get <job-id>   # expect status: succeeded
+fletcher job list   # runc-smoke -> succeeded
 ```
 
 To revert to the mock drivers, remove the drop-in

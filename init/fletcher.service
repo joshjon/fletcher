@@ -52,11 +52,16 @@ RestrictRealtime=true
 MemoryDenyWriteExecute=true
 SystemCallArchitectures=native
 
-# WireGuard tunnel + UPnP port-forward need CAP_NET_ADMIN. Granting it
-# via Ambient + Bounding keeps the daemon running as the unprivileged
-# `fletcher` user while still allowing the one privileged operation.
-AmbientCapabilities=CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN
+# Capabilities, granted via Ambient + Bounding so the daemon still runs as
+# the unprivileged `fletcher` user:
+#   CAP_NET_ADMIN - WireGuard tunnel + UPnP port-forward.
+#   CAP_SYS_ADMIN - btrfs subvolume create/snapshot (the fork mechanism) and
+#                   the namespace setup runc needs to launch job containers.
+# CAP_SYS_ADMIN is broad; it is the pragmatic grant for running real
+# isolation on a single owned box and is a candidate for tightening
+# (rootless-runc + user namespaces, unprivileged btrfs) in a later pass.
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
 
 # /dev/net/tun must be reachable for the daemon to create the WG
 # interface. The rest of /dev is left at the default (PrivateDevices=
