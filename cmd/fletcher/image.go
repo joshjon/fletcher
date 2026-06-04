@@ -207,28 +207,45 @@ func exportDockerRootfs(ctx context.Context, ref, dest string) error {
 		_ = exec.CommandContext(context.Background(), "docker", "rm", "-f", id).Run() //nolint:gosec // id is docker's own output
 	}()
 
-	export := exec.CommandContext(ctx, "docker", "export", id) //nolint:gosec // id is docker's own output
-	export.Stderr = os.Stderr
-	extract := exec.CommandContext(ctx, "tar", "-x", "-C", dest) //nolint:gosec // dest is the operator's btrfs root
-	extract.Stderr = os.Stderr
-
-	pipe, err := export.StdoutPipe()
+	// Pipe `docker export` into `tar -x` over an explicit os.Pipe. Do NOT use
+	// cmd.StdoutPipe(): its Wait closes the pipe, and calling export.Wait()
+	// before tar has drained the stream truncates the archive - silently
+	// dropping the tail (the agents' install dirs under ~/.local) while tar
+	// still exits 0. With an os.Pipe we close our own ends and let tar read to
+	// a real EOF (when export exits), so the whole filesystem is extracted.
+	pr, pw, err := os.Pipe()
 	if err != nil {
 		return fmt.Errorf("pipe: %w", err)
 	}
-	extract.Stdin = pipe
+
+	export := exec.CommandContext(ctx, "docker", "export", id) //nolint:gosec // id is docker's own output
+	export.Stdout = pw
+	export.Stderr = os.Stderr
+	extract := exec.CommandContext(ctx, "tar", "-x", "-C", dest) //nolint:gosec // dest is the operator's btrfs root
+	extract.Stdin = pr
+	extract.Stderr = os.Stderr
 
 	if err := export.Start(); err != nil {
+		_ = pw.Close()
+		_ = pr.Close()
 		return fmt.Errorf("start docker export: %w", err)
 	}
+	// Our copy of the write end is no longer needed; the export child holds
+	// its own, so tar sees EOF only when export actually exits.
+	_ = pw.Close()
 	if err := extract.Start(); err != nil {
+		_ = pr.Close()
 		return fmt.Errorf("start tar: %w", err)
 	}
-	if err := export.Wait(); err != nil {
-		return fmt.Errorf("docker export: %w", err)
+	_ = pr.Close()
+
+	errExport := export.Wait()
+	errExtract := extract.Wait()
+	if errExport != nil {
+		return fmt.Errorf("docker export: %w", errExport)
 	}
-	if err := extract.Wait(); err != nil {
-		return fmt.Errorf("extract rootfs: %w", err)
+	if errExtract != nil {
+		return fmt.Errorf("extract rootfs: %w", errExtract)
 	}
 	return nil
 }
