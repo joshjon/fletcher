@@ -1,12 +1,14 @@
-// Package wireguard owns the daemon's WireGuard support layer: Curve25519
-// key generation, peer configuration storage, and wg-quick-style config
-// emission for both server and client devices.
+// Package wireguard owns the daemon's WireGuard support layer:
+// Curve25519 key generation, peer configuration storage, wg-quick-style
+// config emission (for the power-user `peer add` flow that hands the
+// operator a text config), and the Tunnel abstraction that drives the
+// in-daemon data plane via embedded wireguard-go + netlink.
 //
-// This package does NOT itself run the WireGuard data plane (the TUN
-// interface, packet forwarding, key handshake). The DESIGN.md §9 stack
-// names wireguard-go for that - but its integration needs OS-level
-// privilege handling that's its own phase. For now the daemon manages
-// peers and emits configs that the operator applies via wg-quick.
+// The Tunnel implementation is Linux-only (tunnel_linux.go); other
+// platforms get a stub that errors on Start so the daemon's coordination
+// code still compiles and runs on macOS for development. Bringing the
+// interface up requires CAP_NET_ADMIN; the systemd unit grants it via
+// AmbientCapabilities.
 package wireguard
 
 import (

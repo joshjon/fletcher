@@ -28,6 +28,7 @@ import (
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/job"
 	fletchermcp "github.com/joshjon/fletcher/internal/mcp"
+	"github.com/joshjon/fletcher/internal/network/wireguard"
 	"github.com/joshjon/fletcher/internal/peer"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver"
@@ -76,6 +77,14 @@ type Config struct {
 	// clear error pointing at how to set it. Operator-knowledge config:
 	// the daemon can't reliably auto-detect this in every NAT setup.
 	PublicEndpoint string
+	// WireGuardListenPort is the UDP port wireguard-go binds on for the
+	// hub-side tunnel. Defaults to 51820. The same value is what UPnP
+	// asks the router to forward.
+	WireGuardListenPort int
+	// DisableUPnP turns off the automatic router-port-forward attempt
+	// at startup. Useful when running behind a router known to mishandle
+	// UPnP, or in test environments. Default false (UPnP enabled).
+	DisableUPnP bool
 }
 
 // shutdownTimeout caps how long the daemon waits for in-flight work before
@@ -131,6 +140,7 @@ type services struct {
 	mcpLn          net.Listener
 	gatewayBaseURL string
 	mcpBaseURL     string
+	tunnel         wireguard.Tunnel
 }
 
 func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, logger *slog.Logger) (*services, error) {
@@ -175,6 +185,11 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	})
 	wgKeyProvider := newServerKeyProvider(secretsStore)
 
+	netSetup, err := bringUpNetwork(ctx, cfg, logger, peerSvc, wgKeyProvider)
+	if err != nil {
+		return nil, fmt.Errorf("bring up network: %w", err)
+	}
+
 	mcpServer := fletchermcp.NewServer("fletcher", buildinfo.Version, auditRecorder, logger)
 	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, &http.Client{Timeout: 30 * time.Second}, approvalSvc)
 	logger.Info("mcp server ready", slog.String("base_url", mcpURL))
@@ -204,6 +219,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		peers:     peerSvc,
 		serverKey: wgKeyProvider,
 		models:    gatewayCatalog{baseURL: gatewayURL},
+		peerSync:  &tunnelPeerSyncer{peers: peerSvc, tunnel: netSetup.Tunnel, logger: logger},
 	}
 	return &services{
 		cfg:            cfg,
@@ -216,6 +232,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		mcpLn:          mcpLn,
 		gatewayBaseURL: gatewayURL,
 		mcpBaseURL:     mcpURL,
+		tunnel:         netSetup.Tunnel,
 	}, nil
 }
 
@@ -229,6 +246,34 @@ type connectDeps struct {
 	peers     api.PeersBackend
 	serverKey api.ServerKeyProvider
 	models    api.CatalogBuilder
+	peerSync  api.PeerSyncer
+}
+
+// tunnelPeerSyncer is the production PeerSyncer: it pulls the current
+// peer registry on every change and pushes the result into the running
+// WireGuard tunnel.
+type tunnelPeerSyncer struct {
+	peers  *peer.Service
+	tunnel wireguard.Tunnel
+	logger *slog.Logger
+}
+
+// SyncPeers refreshes the tunnel's peer set. Returns nil if the tunnel
+// is not configured (Mac dev / no public endpoint).
+func (t *tunnelPeerSyncer) SyncPeers(ctx context.Context) error {
+	if t == nil || t.tunnel == nil {
+		return nil
+	}
+	configs, err := loadPeerConfigs(ctx, t.peers)
+	if err != nil {
+		t.logger.Error("load peers for tunnel sync", slog.String("err", err.Error()))
+		return err
+	}
+	if err := t.tunnel.SetPeers(ctx, configs); err != nil {
+		t.logger.Error("apply peers to tunnel", slog.String("err", err.Error()))
+		return err
+	}
+	return nil
 }
 
 // gatewayCatalog adapts the gateway-base-URL closure into the
@@ -250,8 +295,28 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
 	g.Add(httpServeActor(logger, "mcp", s.mcpSrv, s.mcpLn, s.mcpBaseURL))
 	g.Add(supervisorActor(ctx, s.supervisor))
+	if s.tunnel != nil {
+		g.Add(tunnelActor(ctx, logger, s.tunnel))
+	}
 	g.Add(signalActor(ctx))
 	return g.Run()
+}
+
+// tunnelActor keeps the WireGuard interface alive until the run group
+// shuts down; on interrupt it tears the interface back down so the
+// kernel doesn't keep an orphaned link around between restarts.
+func tunnelActor(ctx context.Context, logger *slog.Logger, t wireguard.Tunnel) (func() error, func(error)) {
+	done := make(chan struct{})
+	return func() error {
+			<-done
+			return nil
+		}, func(error) {
+			if err := t.Stop(); err != nil {
+				logger.Warn("stop wireguard tunnel", slog.String("err", err.Error()))
+			}
+			close(done)
+			_ = ctx // shutdown is driven by run.Group interrupt; ctx is unused here
+		}
 }
 
 func ensureDirs(cfg Config) error {
@@ -312,7 +377,7 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	mux.Handle(approvalsPath, approvalsHandler)
 
 	peersPath, peersHandler := fletcherv1connect.NewPeerServiceHandler(
-		api.NewPeersService(deps.peers, deps.serverKey), interceptors,
+		api.NewPeersService(deps.peers, deps.serverKey, deps.peerSync), interceptors,
 	)
 	mux.Handle(peersPath, peersHandler)
 

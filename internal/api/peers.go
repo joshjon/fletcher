@@ -39,16 +39,43 @@ type ServerKeyProvider interface {
 	ServerPublicKey(ctx context.Context) (wireguard.Key, error)
 }
 
+// PeerSyncer pushes the current peer registry into the running
+// WireGuard tunnel, if any. Production wires this to a closure that
+// rebuilds the list from PeersBackend and calls Tunnel.SetPeers; nil is
+// a no-op (Mac dev, no tunnel configured, etc.).
+type PeerSyncer interface {
+	SyncPeers(ctx context.Context) error
+}
+
 // PeersService implements fletcherv1connect.PeerServiceHandler.
 type PeersService struct {
 	fletcherv1connect.UnimplementedPeerServiceHandler
 	peers     PeersBackend
 	serverKey ServerKeyProvider
+	syncer    PeerSyncer
 }
 
-// NewPeersService wires a PeersService.
-func NewPeersService(peers PeersBackend, serverKey ServerKeyProvider) *PeersService {
-	return &PeersService{peers: peers, serverKey: serverKey}
+// NewPeersService wires a PeersService. syncer may be nil; when set,
+// every peer create/delete pushes the new registry into the running
+// tunnel without needing a daemon restart.
+func NewPeersService(peers PeersBackend, serverKey ServerKeyProvider, syncer PeerSyncer) *PeersService {
+	return &PeersService{peers: peers, serverKey: serverKey, syncer: syncer}
+}
+
+// syncPeers fires SyncPeers if a syncer is wired. Failures are logged
+// but not returned: a peer is already persisted in the DB at this
+// point, and the tunnel will pick up changes on next restart even if
+// the live sync fails.
+func (s *PeersService) syncPeers(ctx context.Context) {
+	if s.syncer == nil {
+		return
+	}
+	if err := s.syncer.SyncPeers(ctx); err != nil {
+		// We have no logger handle here; the syncer is expected to log
+		// internally before returning. Swallowing keeps the RPC success
+		// path clean.
+		_ = err
+	}
 }
 
 // PairPeer is the one-call pairing path: the daemon auto-allocates a
@@ -79,6 +106,7 @@ func (s *PeersService) PairPeer(ctx context.Context, req *connect.Request[fletch
 	if err != nil {
 		return nil, err
 	}
+	s.syncPeers(ctx)
 	clientCfg := wireguard.RenderClient(wireguard.ClientConfig{
 		PrivateKey:          created.PrivateKey,
 		Address:             address,
@@ -108,6 +136,7 @@ func (s *PeersService) CreatePeer(ctx context.Context, req *connect.Request[flet
 		return nil, err
 	}
 
+	s.syncPeers(ctx)
 	resp := &fletcherv1.CreatePeerResponse{
 		Peer:       peerToProto(created.Peer),
 		PrivateKey: string(created.PrivateKey),
@@ -165,6 +194,9 @@ func (s *PeersService) DeletePeer(ctx context.Context, req *connect.Request[flet
 	existed, err := s.peers.Delete(ctx, req.Msg.GetId())
 	if err != nil {
 		return nil, err
+	}
+	if existed {
+		s.syncPeers(ctx)
 	}
 	return connect.NewResponse(&fletcherv1.DeletePeerResponse{Existed: existed}), nil
 }

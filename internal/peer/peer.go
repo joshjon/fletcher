@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"go.jetify.com/typeid"
@@ -65,8 +66,10 @@ type Created struct {
 
 // Service is the high-level peers API.
 type Service struct {
-	q              sqliteq.Querier
-	tunnelCIDR     string
+	q          sqliteq.Querier
+	tunnelCIDR string
+
+	mu             sync.RWMutex
 	publicEndpoint string
 }
 
@@ -97,7 +100,20 @@ func (s *Service) TunnelCIDR() string { return s.tunnelCIDR }
 
 // PublicEndpoint returns the operator-configured host:port peers should
 // dial, or "" if unset. Returned for use in pair-time config rendering.
-func (s *Service) PublicEndpoint() string { return s.publicEndpoint }
+func (s *Service) PublicEndpoint() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.publicEndpoint
+}
+
+// SetPublicEndpoint replaces the public endpoint advertised in pair-time
+// configs. Used by the daemon's networking setup when UPnP discovery
+// produces an endpoint the operator didn't supply at boot.
+func (s *Service) SetPublicEndpoint(endpoint string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.publicEndpoint = endpoint
+}
 
 // NextAvailableAddress returns the next free /32 inside the service's
 // TunnelCIDR, suitable for assigning to a new peer. The .1 host address

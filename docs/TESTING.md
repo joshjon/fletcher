@@ -1,12 +1,15 @@
-# Testing Fletcher
+# Testing Fletcher (developer smoke tests)
 
-How to exercise Fletcher manually. Automated tests live alongside the
-code (`make test`); this file is for end-to-end checks against a
-running daemon.
+> **This doc is for Fletcher developers**, not end users. If you want to
+> install and use Fletcher, read [`setup.md`](setup.md) instead.
+
+Automated tests live alongside the code (`make test`); this file covers
+the manual end-to-end smoke tests we run against a daemon before
+shipping a change.
 
 Two flows: **macOS for development** (no Linux, no networking knowledge
-required) and **Linux server for real deployment** (one-time setup of
-your public endpoint, then add devices with one command each).
+required) and **Linux server for real deployment** (covered in detail in
+`setup.md`; the testing-specific bits are below).
 
 ## macOS (development)
 

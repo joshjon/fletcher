@@ -34,7 +34,7 @@ ExecStart=/usr/local/bin/fletcher serve
 Restart=on-failure
 RestartSec=2s
 
-# Sandboxing — works on most distros and is safe for a single-binary
+# Sandboxing - works on most distros and is safe for a single-binary
 # daemon that owns its state directories.
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -42,13 +42,26 @@ ProtectHome=true
 PrivateTmp=true
 PrivateDevices=false
 ProtectKernelTunables=true
-ProtectKernelModules=true
+# ProtectKernelModules is intentionally NOT enabled: the daemon creates
+# a TUN interface for its built-in WireGuard tunnel, which may require
+# the tun module to be loaded on minimal images.
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
 RestrictRealtime=true
 MemoryDenyWriteExecute=true
 SystemCallArchitectures=native
+
+# WireGuard tunnel + UPnP port-forward need CAP_NET_ADMIN. Granting it
+# via Ambient + Bounding keeps the daemon running as the unprivileged
+# `fletcher` user while still allowing the one privileged operation.
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+
+# /dev/net/tun must be reachable for the daemon to create the WG
+# interface. The rest of /dev is left at the default (PrivateDevices=
+# false above already permits the basic set).
+DeviceAllow=/dev/net/tun rwm
 
 # Read/write only the paths the daemon needs.
 ReadWritePaths=/var/lib/fletcher /etc/fletcher /run/fletcher
