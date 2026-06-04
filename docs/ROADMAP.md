@@ -1,15 +1,12 @@
 # Fletcher Roadmap and Status
 
-Status tracker for the phases defined in `DESIGN.md` §13. That section is the
-plan of record: what each phase means and why. This file tracks *delivery* -
-what is actually built, what was deliberately cut and the reason, and what
-comes next.
+The single source of truth for where Fletcher actually stands: what is built,
+what was deliberately cut and why, the plan from here, and every known gap.
+`DESIGN.md` §13 is the plan of record for *what each phase means*; this file
+tracks *delivery and the path forward*. If a plan, decision, milestone, or gap
+exists, it belongs here - nothing should live only in a conversation.
 
-Why a separate file: §13 describes intent and intentionally does not change as
-work lands. Without a status layer, "phase 16 shipped" hides the corners that
-were cut inside earlier phases (e.g. the settings table that §13 never had a
-row for at all). This file is that layer, and it is meant to be edited as
-state changes.
+This file is meant to be edited as state changes. Keep it current.
 
 Verdict legend:
 
@@ -17,9 +14,33 @@ Verdict legend:
 - **PARTIAL** - core path works; named pieces deferred.
 - **STUB** - scaffolding/interface exists, returns "not implemented".
 - **DEFERRED** - intentionally not built yet, with a reason and a fallback.
-- **MISSING** - specified somewhere but not built and not tracked until now.
+- **MISSING** - specified somewhere but not built.
+- **SHIPPED** / **NEXT** / **PLANNED** - milestone states (see Execution plan).
 
-## Status at a glance
+## Where it stands today
+
+What runs end-to-end **on the mock runtime**: the daemon, job model + supervisor
++ resume, secrets (age), the model gateway (real Anthropic proxy with the key
+stamped daemon-side), the MCP server, approvals, WireGuard pairing over the
+tunnel, and `fletcher doctor`. The mock runtime executes a job's command as a
+plain host subprocess - no isolation, no image - so it proves the plumbing, not
+the product.
+
+What is newly runnable (Milestone 1, `fdc90d3`) but **not yet verified on
+hardware**: the real **runc + btrfs** path - a job running in a container fork
+on a copy-on-write snapshot, with a base-image rootfs imported via
+`fletcher image import`.
+
+What is **not** possible yet, and is the difference between "smoke test" and
+"the way users will use it":
+
+- A real agent (claude/codex/pi) verified running inside a fork (Milestone 2).
+- Changing config or lifecycle without `systemctl` (Milestone 3).
+- A remote client reaching the daemon over the tunnel - the API is bound to a
+  local Unix socket only (Milestone 4).
+- Firecracker microVMs - the intended default isolation tier (Milestone 5).
+
+## Status at a glance (phases 0-16)
 
 | # | Phase | Verdict | Cut corner (see notes) |
 |---|-------|---------|------------------------|
@@ -31,25 +52,25 @@ Verdict legend:
 | 5 | Model gateway (basic) | PARTIAL | Anthropic only; non-stream `/v1/chat/completions` |
 | 6 | MCP server | PARTIAL | 3 demo tools; egress validation permissive |
 | 7 | Approvals | DONE | APNs push deferred (polling `Wait` instead) |
-| 8 | Real Linux runtime | PARTIAL | runc + btrfs real; **Firecracker is a stub** |
+| 8 | Real Linux runtime | PARTIAL | runc + btrfs real (runnable as of M1); **Firecracker is a stub** |
 | 9 | Networking | PARTIAL | UPnP only (no NAT-PMP/PCP); **no DDNS** |
 | 10 | v0.1.0 polish | PARTIAL | Release tooling ready; **no tag cut yet** |
 | 11 | Base image (`fletcher-base`) | DONE | pi-extension is a skeleton (see phase 14) |
-| 12 | Trusted-credential mode | DONE | - |
+| 12 | Trusted-credential mode | DONE | Bind-mounts blocked by `ProtectHome` until M2 |
 | 13 | Anthropic-native inbound | DONE | - |
 | 14 | Model catalog | PARTIAL | Catalog + CLI real; pi-extension skeleton |
 | 15 | Zero-touch networking | DONE | Falls back to manual endpoint when UPnP absent |
-| 16 | `fletcher doctor` | DONE | - |
-| - | **Runtime settings (`settings` table + CLI)** | **MISSING** | Specified in STANDARDS §98 / DESIGN §13; never built |
+| 16 | `fletcher doctor` | DONE | No runtime-prereq checks (btrfs/runc); see Backlog |
+| - | Runtime settings (`settings` table + CLI) | MISSING | Specified in STANDARDS §98 / DESIGN §13; now Milestone 3 |
 
 ## Phases 0-16: what landed, and what was cut
 
 The vertical-slice strategy (DESIGN.md §13) drove the order: build the thinnest
 end-to-end job path on mock drivers, then swap in real implementations. That is
 why some horizontal concerns (audit storage, settings, a second model provider)
-were left as seams: the path that proves the architecture did not need them yet.
-The cut corners below are the price of that strategy. Most are deliberate and
-documented in code; one (settings) fell through the cracks.
+were left as seams - the path that proves the architecture did not need them
+yet. The cut corners below are the price of that strategy. Most are deliberate
+and documented in code; one (settings) fell through the cracks.
 
 ### Deliberate cuts, with fallbacks
 
@@ -77,8 +98,8 @@ documented in code; one (settings) fell through the cracks.
   `errNotImplemented`. runc (`runcdriver_linux.go`) and btrfs
   (`btrfsdriver_linux.go`) are real. *Why cut:* the full OCI-to-rootfs + VM
   lifecycle + vsock pipeline is load-bearing and must be verified on real
-  Linux + KVM before it is claimed (DESIGN.md §11 open questions). runc is the
-  labelled degraded-isolation path in the meantime.
+  Linux + KVM before it is claimed (DESIGN.md §11). runc is the labelled
+  degraded-isolation path in the meantime. Now Milestone 5.
 
 - **NAT-PMP / PCP (phase 9).** Only UPnP IGD is implemented
   (`internal/network/portmap`); the `Method` field is shaped for the others.
@@ -90,131 +111,189 @@ documented in code; one (settings) fell through the cracks.
   *Why cut:* the published catalog endpoint is the contract; the extension is a
   client that depends on an external project's API stabilising.
 
-### Genuine gaps (not previously tracked)
+### Genuine gaps (were untracked until this file)
 
 - **DDNS (phase 9).** §13 lists DDNS under networking; there is no
-  implementation and no deferral note. A dynamic public IP currently means the
-  operator re-sets the endpoint by hand. Tracked in Backlog below.
+  implementation and no deferral note. A dynamic public IP means the operator
+  re-sets the endpoint by hand. In Backlog.
 
 - **No v0.1.0 tag (phase 10).** `.goreleaser.yaml`, `scripts/install.sh`, and
   the systemd unit are all real, but no release has been cut (`git tag` is
   empty). The installer fetches "latest release", which does not exist yet, so
-  end-user install is blocked on cutting the tag.
+  `curl | sh` install for anyone else is blocked on cutting the tag.
 
-- **Runtime settings table (untracked entirely).** STANDARDS.md §98 and the
-  DESIGN.md §13 stack row both specify: *"Runtime-mutable settings live in a
-  SQLite `settings` table; edited via `fletcher settings get|set|list`."* None
-  of it exists - no migration, no table, no queries, no command. Every knob is
-  an env var read once at `serve` startup (`cmd/fletcher/serve.go`), so changing
-  one means editing the systemd unit and restarting. This is the root of the
-  "why do I keep running `systemctl restart`" friction and is the subject of the
-  next phase.
+- **Runtime settings table.** STANDARDS.md §98 and the DESIGN.md §13 stack row
+  both specify a SQLite `settings` table edited via `fletcher settings`. None of
+  it exists; every knob is an env var read once at `serve` startup
+  (`cmd/fletcher/serve.go`), so changing one means editing the systemd unit and
+  restarting. This is the root of the `systemctl restart` friction and is now
+  Milestone 3.
 
-## Next phases (proposed)
+## Execution plan: milestones (post-phase-16)
 
-These are derived from real usage, not speculation - which is the bar DESIGN.md
-§13 sets for going past phase 16 ("anything past them should wait for actual
-usage"). The first deployment surfaced two concrete frictions: config changes
-require a restart, and a restart requires `systemctl`. Phases 17 and 18 address
-exactly those, in that order, because 17 removes most of the need for 18.
+Phases 0-16 were the vertical slice that proved the architecture. These
+milestones are the path from there to a deployment that works *the way users
+will use it*, derived from the first real deployment's friction rather than
+speculation (the bar DESIGN.md §13 sets for going past phase 16). They are
+sequenced by dependency and risk: prove the core loop on the simpler runtime
+first, make it ergonomic, expose it to clients, then upgrade the isolation
+tier. Building Firecracker first would mean debugging the VM layer and an
+unproven job/fork/agent/gateway loop at once.
 
-### Phase 17: Runtime settings in SQLite + hot reload
+### Milestone 1 - Real isolated execution on runc - SHIPPED (`fdc90d3`)
+
+**Goal.** A job runs in a real container fork (runc) on a real copy-on-write
+snapshot (btrfs), instead of the mock driver's bare subprocess.
+
+**Delivered.**
+
+- `fletcher image import <docker-ref>` flattens a built OCI image (e.g.
+  `fletcher-base:dev` from `make image`) into a btrfs subvolume at
+  `<btrfs-root>/images/<name>`, so `fletcher job create --image <name>` has a
+  real rootfs. Plus `fletcher image ls` / `rm`. Interim `docker export` bridge
+  until the firecracker-containerd OCI pull pipeline lands (DESIGN.md §3).
+- The systemd unit grants the daemon `CAP_SYS_ADMIN` (btrfs subvolume
+  create/snapshot, runc namespaces) alongside `CAP_NET_ADMIN`.
+- `docs/TESTING.md` Test 2 documents the flow and the snapshot-root ownership
+  the daemon needs.
+
+**Known debt carried forward:** `CAP_SYS_ADMIN` is broad (hardening to
+rootless-runc + user namespaces is in Backlog); first on-hardware verification
+still pending.
+
+### Milestone 2 - Run a real agent in the fork + prove the gateway - NEXT
+
+**Goal.** An actual agent (claude/codex/pi) runs inside the fork against the
+daemon gateway, with credentials never entering the fork. This is the product:
+private agent compute.
+
+**Anticipated scope.**
+
+- The unit's `MemoryDenyWriteExecute=true` likely breaks Node-based agents
+  (W^X) and `ProtectHome=true` blocks the Phase 12 trusted-credential bind
+  mounts from the operator's home. Both need revisiting for real agents.
+- Verify gateway base-URL injection reaches the agent inside the fork and that
+  `--credential claude` (or an API key via the gateway) works end-to-end.
+
+### Milestone 3 - Ergonomics: no more systemctl - PLANNED
+
+Folds the previously-separate Phase 17 and Phase 18. Removes the operational
+friction the first deployment hit. Part A removes most restarts; Part B covers
+the rest.
+
+#### Part A - Runtime settings in SQLite + hot reload
 
 **Problem.** Operational config (public endpoint, WireGuard port, UPnP on/off,
-log level) is env-only and read once at boot. Changing any value is a
-`systemctl edit` + `systemctl restart`, which (a) demands systemctl knowledge,
-(b) bounces the daemon - dropping in-flight jobs and the WireGuard tunnel - for
-what is often a one-line change, and (c) leaves no record of what was changed.
-
-**Why now.** It is the highest-leverage fix for the observed friction, and it is
-not new scope: STANDARDS.md §98 and DESIGN.md §13 already specify it. This phase
-closes a known gap rather than inventing one.
+log level, driver selection) is env-only and read once at boot. Changing a value
+is `systemctl edit` + `systemctl restart`, which demands systemctl knowledge,
+bounces the daemon (dropping in-flight jobs and the tunnel) for a one-line
+change, and leaves no record.
 
 **Design.**
 
-- Draw the line at STANDARDS §95 vs §98. *Bootstrap* config - where the DB,
-  socket, and age key live, the listen addresses, the driver selection - stays
-  flag/env/TOML, because the daemon needs it to start at all and swapping it on
-  a live process is unsafe or meaningless. *Operational* knobs move into a
+- Draw the line at STANDARDS §95 vs §98. *Bootstrap* config (where the DB,
+  socket, age key live; listen addresses) stays flag/env/TOML - the daemon needs
+  it to start and swapping it live is unsafe. *Operational* knobs move into a
   `settings` table. Only the second set is runtime-mutable.
+- Migration `0007_settings`: `STRICT` `settings(key TEXT PRIMARY KEY, value TEXT
+  NOT NULL, updated_at INTEGER NOT NULL)`. sqlc `GetSetting` / `ListSettings` /
+  `UpsertSetting` / `DeleteSetting`.
+- `internal/settings`: a typed accessor over a registry of known keys. Each key
+  declares name, type, default, description, and a reload class:
+  - **live** - applied immediately (e.g. `log_level`).
+  - **subsystem-bounce** - re-runs one oklog/run actor (e.g. `public_endpoint`,
+    `wireguard_port` bounce the network actor via `bringUpNetwork` / `tryUPnP`).
+  - **on-restart** - persisted but read at next boot; the CLI says so when set.
+  Unknown keys rejected; values validated on `set`.
+- Precedence for runtime-mutable keys: settings-table value if present, else the
+  boot config. Boot config still seeds a fresh install.
+- Surface: a `SettingsService` Connect RPC + `fletcher settings get|set|list`.
+  `list` shows effective value and source.
 
-- Schema: migration `0007_settings` adds a `STRICT` `settings(key TEXT PRIMARY
-  KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)`. sqlc queries
-  `GetSetting` / `ListSettings` / `UpsertSetting` / `DeleteSetting`.
+**Acceptance.** `fletcher settings set public_endpoint ...` brings the tunnel up
+on the new endpoint with no restart and no systemctl; `fletcher settings list`
+reflects it; survives reboot; invalid values rejected.
 
-- `internal/settings`: a typed accessor over the table backed by a registry of
-  known keys. Each registry entry declares name, type, default, a one-line
-  description, and a reload class:
-  - **live** - applied immediately (e.g. `log_level` adjusts the slog level in
-    place).
-  - **subsystem-bounce** - re-runs one oklog/run actor (e.g.
-    `public_endpoint`, `wireguard_port`, `upnp_enabled` bounce only the network
-    actor via the existing `bringUpNetwork` / `tryUPnP` paths).
-  - **on-restart** - persisted but only read at next boot; the CLI says so
-    explicitly when set.
-  Unknown keys are rejected. Values are validated on `set` (a bad endpoint or
-  out-of-range port fails fast, before persistence).
+#### Part B - `fletcher daemon` lifecycle facade over systemd
 
-- Precedence for runtime-mutable keys: effective value = settings-table value if
-  present, else the boot config (flag/env/TOML/default). Boot config still seeds
-  a fresh install; the table overrides live without losing the bootstrap path.
+**Problem.** A few actions genuinely need the init system: enable-on-boot,
+start, stop, restart (binary upgrades, `on-restart` settings), and logs. Users
+should not learn `systemctl` / `journalctl`.
 
-- Surface: a `SettingsService` Connect RPC (mirroring the secrets/approvals
-  services) and a `fletcher settings get|set|list` command. `list` shows the
-  effective value and its source, so `fletcher settings list` doubles as "what
-  is this daemon actually running with".
+**Design.** `cmd/fletcher/daemon.go`: `fletcher daemon start|stop|restart|status|
+logs|enable|disable` shelling out to `systemctl` / `journalctl -u fletcher`,
+prompting for sudo only when needed; degrade gracefully on non-systemd hosts;
+reuse `doctor`'s systemctl remediation strings so the two never drift. systemd
+stays the supervisor - this is a thin facade, not a reimplementation of init
+(which CLAUDE.md and DESIGN §5 rule out).
 
-**Acceptance.** Setting `public_endpoint` with `fletcher settings set` brings the
-tunnel up on the new endpoint with no restart and no systemctl; `fletcher
-settings list` reflects it; the value survives reboot; an invalid value is
-rejected with a categorised error.
-
-**Off-thesis check.** None. Entirely local, no hosting, no metering, no new
-networking plane.
-
-### Phase 18: `fletcher daemon` lifecycle facade over systemd
-
-**Problem.** Even after phase 17, a few actions genuinely need the init system:
-enable-on-boot, start, stop, restart (for `on-restart` settings and binary
-upgrades), and viewing logs. End users should not have to learn `systemctl` /
-`journalctl` to do them.
-
-**Why now / why thin.** systemd stays the supervisor - it owns boot persistence,
-crash-restart, the unit's sandboxing, and the `CAP_NET_ADMIN` grant. Re-creating
-that inside `fletcher serve` (daemonize, pidfile, restart-on-crash, boot
-integration) would reinvent init and put orchestration in core, which CLAUDE.md
-and DESIGN.md §5 rule out. So this phase is a *thin facade*, not a supervisor.
-
-**Design.**
-
-- `cmd/fletcher/daemon.go`: `fletcher daemon start|stop|restart|status|logs|
-  enable|disable` shelling out to `systemctl` / `journalctl -u fletcher`,
-  prompting for sudo only when the action needs it.
-- Detect non-systemd hosts and degrade to printing the manual equivalent rather
-  than failing opaquely.
-- Reuse `doctor`'s existing systemctl remediation strings so the two never drift.
-
-**Acceptance.** A user who has never typed `systemctl` can install, start,
+**Acceptance.** Someone who has never typed `systemctl` can install, start,
 inspect, and tail Fletcher entirely through `fletcher` verbs.
 
-**Off-thesis check.** None.
+### Milestone 4 - Remote client access - PLANNED
+
+**Goal.** A paired client can drive the daemon over the tunnel. Today the
+Connect API is bound to a local Unix socket only (`internal/daemon/daemon.go`
+`listenUnix`); the gateway and MCP listeners are loopback. So a paired phone or
+laptop cannot call the daemon at all - "connect from a client" is not yet true.
+
+**Scope.**
+
+- Expose the Connect API on a TCP listener bound to the WireGuard interface,
+  with authentication (the two networking planes must not leak - CLAUDE.md).
+- Once exposed, even the existing `fletcher` CLI pointed at a remote daemon
+  works; a native/GUI client app is a separate, larger deliverable (Backlog).
+
+### Milestone 5 - Firecracker (real microVMs) - PLANNED
+
+**Goal.** Swap runc for Firecracker microVMs behind the existing `runtime.Driver`
+interface - the intended default isolation tier per the thesis.
+
+**Scope.** The full chunk DESIGN.md §8/§11 describes: OCI image to rootfs via
+firecracker-containerd, VM lifecycle via firecracker-go-sdk, the vsock guest
+agent, MMDS-injected env. Largest and riskiest milestone; needs a KVM host
+(`/dev/kvm` confirmed present on the dev box). Done last, on top of a proven
+loop - the runtime interface seam (DESIGN §10) is exactly what lets it drop in
+without a rewrite.
 
 ## Backlog (not scheduled - awaiting a usage signal)
 
 Per DESIGN.md §13, these wait for real demand rather than being pre-planned.
-Listed so they are visible, not lost:
+Listed so they are visible, not lost. Items that became milestones are above.
 
-- **Cut v0.1.0** - the one thing blocking `curl | sh` install for anyone else.
-- **Image-to-rootfs flatten** - shipped as `fletcher image import`, which
-  flattens a built OCI image into the btrfs `images/<name>` template the
-  runc/btrfs path forks from. This is the interim `docker export` based bridge;
-  it is superseded by the firecracker-containerd OCI pull pipeline (DESIGN.md
-  §3) when that lands, which removes the Docker dependency.
-- **Firecracker driver** - the real-isolation runtime; needs a KVM host to build
-  against (DESIGN.md §11).
-- **Audit log storage** - swap `audit.Noop` for a SQLite recorder.
-- **MCP egress hardening + approvals** - SSRF guard, then policy-gated egress.
-- **Gateway breadth** - streaming in the translation path; a second provider.
-- **DDNS** - for operators on a dynamic public IP.
-- **NAT-PMP / PCP** - port mapping for routers that refuse UPnP.
-- **pi-extension `registerProvider`** - once the `pi` extension API is pinned.
+**Deployment + operability**
+
+- **Cut v0.1.0** - unblocks `curl | sh` install for anyone else (phase 10 gap).
+- **Install-time dependency + storage handling** - `scripts/install.sh` should
+  check/install `btrfs-progs` and `runc`, detect or guide provisioning a btrfs
+  snapshot root, and default Linux installs to the real runtime instead of mock.
+  This is the bulk of "users should not run the manual setup dance."
+- **`doctor` runtime-prereq checks** - when runc/btrfs drivers are selected,
+  verify the `btrfs`/`runc` binaries and a btrfs snapshot root exist, instead of
+  surfacing a raw `command not found` at job time.
+- **Native client app** - the CLI is the only client today; a GUI/native client
+  is a separate deliverable on top of Milestone 4's exposed API.
+
+**Security hardening**
+
+- **`CAP_SYS_ADMIN` hardening** - tighten Milestone 1's broad grant toward
+  rootless-runc + user namespaces and unprivileged btrfs.
+- **Audit log storage** - swap `audit.Noop` for a SQLite recorder (phase 4 seam).
+- **MCP egress hardening + approvals** - SSRF guard, then policy-gated egress
+  (phase 6).
+
+**Networking**
+
+- **DDNS** - for operators on a dynamic public IP (phase 9 gap).
+- **NAT-PMP / PCP** - port mapping for routers that refuse UPnP (phase 9).
+- **Per-peer handshake/transfer visibility** - surface wireguard-go's in-process
+  stats (e.g. `fletcher peer status`) since the userspace tunnel is invisible to
+  `wg show`.
+
+**Agents + gateway**
+
+- **APNs push** - replace approval polling with push (phase 7).
+- **Gateway breadth** - streaming in the translation path; a second provider
+  (phase 5).
+- **pi-extension `registerProvider`** - once the `pi` extension API is pinned
+  (phases 11/14).
