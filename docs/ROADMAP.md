@@ -26,10 +26,11 @@ tunnel, and `fletcher doctor`. The mock runtime executes a job's command as a
 plain host subprocess - no isolation, no image - so it proves the plumbing, not
 the product.
 
-What is newly runnable (Milestone 1, `fdc90d3`) but **not yet verified on
-hardware**: the real **runc + btrfs** path - a job running in a container fork
-on a copy-on-write snapshot, with a base-image rootfs imported via
-`fletcher image import`.
+What works (Milestone 1, `aaeeab8`, **verified on hardware 2026-06-04**): the
+real **runc + btrfs** path - a job ran in a container fork on a copy-on-write
+snapshot, with a base-image rootfs imported via `fletcher image import` (the
+`runc-smoke` job exited 0, which required runc to exec `/bin/sh` from the
+flattened `fletcher-base` rootfs).
 
 What is **not** possible yet, and is the difference between "smoke test" and
 "the way users will use it":
@@ -140,7 +141,7 @@ first, make it ergonomic, expose it to clients, then upgrade the isolation
 tier. Building Firecracker first would mean debugging the VM layer and an
 unproven job/fork/agent/gateway loop at once.
 
-### Milestone 1 - Real isolated execution on runc - SHIPPED (`fdc90d3`)
+### Milestone 1 - Real isolated execution on runc - SHIPPED (`aaeeab8`, verified on hardware 2026-06-04)
 
 **Goal.** A job runs in a real container fork (runc) on a real copy-on-write
 snapshot (btrfs), instead of the mock driver's bare subprocess.
@@ -158,8 +159,7 @@ snapshot (btrfs), instead of the mock driver's bare subprocess.
   the daemon needs.
 
 **Known debt carried forward:** `CAP_SYS_ADMIN` is broad (hardening to
-rootless-runc + user namespaces is in Backlog); first on-hardware verification
-still pending.
+rootless-runc + user namespaces is in Backlog).
 
 ### Milestone 2 - Run a real agent in the fork + prove the gateway - NEXT
 
