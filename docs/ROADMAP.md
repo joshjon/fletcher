@@ -161,19 +161,42 @@ snapshot (btrfs), instead of the mock driver's bare subprocess.
 **Known debt carried forward:** `CAP_SYS_ADMIN` is broad (hardening to
 rootless-runc + user namespaces is in Backlog).
 
-### Milestone 2 - Run a real agent in the fork + prove the gateway - NEXT
+### Milestone 2 - Run a real agent in the fork + prove the gateway - IN PROGRESS
 
 **Goal.** An actual agent (claude/codex/pi) runs inside the fork against the
 daemon gateway, with credentials never entering the fork. This is the product:
 private agent compute.
 
-**Anticipated scope.**
+**Decisions made (2026-06-04):**
 
-- The unit's `MemoryDenyWriteExecute=true` likely breaks Node-based agents
-  (W^X) and `ProtectHome=true` blocks the Phase 12 trusted-credential bind
-  mounts from the operator's home. Both need revisiting for real agents.
-- Verify gateway base-URL injection reaches the agent inside the fork and that
-  `--credential claude` (or an API key via the gateway) works end-to-end.
+- *Fork networking:* veth pair + restricted route - the fork reaches only the
+  daemon's gateway/MCP IP, no default route, no cross-fork path. Correct §5/§6
+  isolation from the start rather than a shared-host-netns shortcut.
+- *Agent auth:* support both - subscription via credential mount (Phase 12) and
+  API key via the gateway - chosen per job.
+
+**Seams found while scoping:**
+
+- Jobs ran as root with `HOME=/root`, but the fletcher-base image is built
+  around its `fletcher` user (uid 1000, `HOME=/home/fletcher`); the agent
+  launchers resolve their versioned install relative to `$HOME`, so root breaks
+  them. (This is what made the `command -v claude` probe return 127.)
+- The fork has its own empty network namespace and the daemon injects
+  `ANTHROPIC_BASE_URL=http://127.0.0.1:11500` - which inside the fork is its own
+  down loopback. So an agent currently has no path to the gateway at all. This
+  is the §6 trust boundary made real for runc, and the core of M2.
+
+**Plan (built in testable steps):**
+
+- **M2a.1 - run jobs as the image's fletcher user** (uid 1000,
+  `HOME=/home/fletcher`, cwd `/workspace`). Shipped; pending hardware test
+  (`claude --version` in a fork should now run).
+- **M2a.2 - veth + restricted route** so the fork reaches the daemon gateway/MCP
+  and nothing else; rebind the gateway to the fork-facing address and inject it.
+  The big networking piece; will iterate on hardware.
+- **M2a.3 - sandbox/auth as the real run requires** - relax
+  `MemoryDenyWriteExecute` only if Node trips it; relax `ProtectHome` only for
+  the credential-mount auth path. No speculative loosening of daemon security.
 
 ### Milestone 3 - Ergonomics: no more systemctl - PLANNED
 

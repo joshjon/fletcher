@@ -121,20 +121,27 @@ func writeOCIConfig(bundle string, spec runtime.Spec) error {
 // minimalOCIConfig builds a small but valid OCI runtime spec for runc.
 // We drop the network namespace and all capabilities by default - jobs
 // reach out via the daemon-mediated MCP/gateway, not directly.
+//
+// Jobs run as the fletcher-base image's `fletcher` user (uid 1000,
+// HOME=/home/fletcher, cwd /workspace): the agent CLIs and their config are
+// installed under that home, and the launcher symlinks resolve their versioned
+// install relative to $HOME - so running as root with HOME=/root breaks them.
+// This assumes the fletcher-base convention; a later pass can read the image's
+// own OCI config (USER / WorkingDir / Env) instead of hard-coding it.
 func minimalOCIConfig(spec runtime.Spec) map[string]any {
 	env := append([]string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"HOME=/root",
+		"HOME=/home/fletcher",
 	}, spec.Env...)
 
 	return map[string]any{
 		"ociVersion": "1.0.2",
 		"process": map[string]any{
 			"terminal": false,
-			"user":     map[string]any{"uid": 0, "gid": 0},
+			"user":     map[string]any{"uid": 1000, "gid": 1000},
 			"args":     []string{"/bin/sh", "-c", spec.Command},
 			"env":      env,
-			"cwd":      "/",
+			"cwd":      "/workspace",
 			"capabilities": map[string]any{
 				"bounding":  []string{},
 				"effective": []string{},
