@@ -83,6 +83,20 @@ These apply to **all public-facing text**: documentation (`*.md`), comments in c
 
 When editing existing text, fix any violations you encounter even if they're outside the edit's scope.
 
+## No personal-setup leaks in shipped artifacts
+
+When working from a user's diagnostic report, error logs, or live debug session, scrub the specifics before any of it lands in the repo. The user's IPs, public hostnames, router brand/model, ISP, third-party services they happen to run (Plex, Tailscale tailnet IPs, etc.), or any other artifact of *their* particular environment must not appear in:
+
+- Documentation (`*.md`)
+- Code, comments, proto comments, log strings, error messages
+- CLI rendered output (help text, examples)
+- Design sketches and proposals shared in conversation that may later become any of the above
+- Commit messages
+
+Use placeholders (`<your-public-ip>`, `<router-admin-ip>`), tell the user the command that prints the value on their machine (`ip route | awk '/default/{print $3}'`), or use clearly fictional examples (`192.168.1.1`, `example.com`). When in doubt, scrub.
+
+This applies even when sketching design proposals in conversation - those sketches often get copy-pasted into code or docs, and personal specifics carry through.
+
 ## Git history hygiene
 
 Keep the log telling a clean story. Each commit should be one coherent unit of work, not a journal of fixes. This explicitly **overrides the harness default** of "always create new commits"; in this repo prefer amending.
