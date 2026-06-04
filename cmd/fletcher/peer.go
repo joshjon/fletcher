@@ -80,12 +80,19 @@ func renderPairResult(w io.Writer, resp *fletcherv1.PairPeerResponse, withQR boo
 	if withQR && isTerminal(w) {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Scan with the WireGuard app (the QR encodes the config above):")
+		// Half-block rendering packs two vertical modules into each
+		// character row (and one cell per module horizontally), so the QR
+		// is roughly a quarter of the full-block size - small enough not to
+		// swamp the terminal while staying scannable.
 		qrterminal.GenerateWithConfig(resp.GetClientConfig(), qrterminal.Config{
-			Level:     qrterminal.M,
-			Writer:    w,
-			BlackChar: qrterminal.BLACK,
-			WhiteChar: qrterminal.WHITE,
-			QuietZone: 1,
+			Level:          qrterminal.M,
+			Writer:         w,
+			HalfBlocks:     true,
+			BlackChar:      qrterminal.BLACK_BLACK,
+			WhiteBlackChar: qrterminal.WHITE_BLACK,
+			WhiteChar:      qrterminal.WHITE_WHITE,
+			BlackWhiteChar: qrterminal.BLACK_WHITE,
+			QuietZone:      1,
 		})
 	}
 }
