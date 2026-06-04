@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -222,6 +222,10 @@ func (s *Supervisor) runOne(jobCtx context.Context, row sqliteq.Job) {
 	}
 	defer s.deleteSnapshot(snap.ID, log)
 
+	// Capture the tail of the job's stdout+stderr so a failure is not
+	// opaque: it is logged and stored in the job's error message. stdout and
+	// stderr share one buffer (interleaved, as a terminal would show them).
+	out := &cappedBuffer{max: 16 << 10}
 	result, err := s.runtime.Run(jobCtx, runtime.Spec{
 		JobID:   row.ID,
 		Image:   row.Image,
@@ -229,7 +233,7 @@ func (s *Supervisor) runOne(jobCtx context.Context, row sqliteq.Job) {
 		WorkDir: snap.Path,
 		Env:     s.jobEnv,
 		Mounts:  mounts,
-	}, io.Discard, io.Discard)
+	}, out, out)
 
 	// Two cancellation paths share ctx.Canceled: targeted CancelRunning
 	// (DB already says "cancelled") vs daemon shutdown (DB still says
@@ -245,8 +249,8 @@ func (s *Supervisor) runOne(jobCtx context.Context, row sqliteq.Job) {
 	}
 
 	if err != nil {
-		log.Error("runtime error", slog.String("err", err.Error()))
-		s.markFailed(row.ID, -1, err.Error())
+		log.Error("runtime error", slog.String("err", err.Error()), slog.String("output", out.String()))
+		s.markFailed(row.ID, -1, joinErrOutput(err.Error(), out.String()))
 		return
 	}
 
@@ -256,8 +260,44 @@ func (s *Supervisor) runOne(jobCtx context.Context, row sqliteq.Job) {
 		return
 	}
 
-	log.Info("job exited non-zero", slog.Int64("exit_code", int64(result.ExitCode)))
-	s.markFailed(row.ID, result.ExitCode, "")
+	log.Info("job exited non-zero",
+		slog.Int64("exit_code", int64(result.ExitCode)),
+		slog.String("output", out.String()))
+	s.markFailed(row.ID, result.ExitCode, out.String())
+}
+
+// cappedBuffer is an io.Writer that retains only the last max bytes written,
+// so a job's output can be surfaced on failure without unbounded memory. It is
+// safe for the concurrent stdout/stderr writes a runtime driver performs.
+type cappedBuffer struct {
+	mu  sync.Mutex
+	max int
+	buf []byte
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.buf = append(c.buf, p...)
+	if len(c.buf) > c.max {
+		c.buf = c.buf[len(c.buf)-c.max:]
+	}
+	return len(p), nil
+}
+
+func (c *cappedBuffer) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.TrimSpace(string(c.buf))
+}
+
+// joinErrOutput combines a driver error with any captured job output for the
+// stored failure message.
+func joinErrOutput(errMsg, output string) string {
+	if output == "" {
+		return errMsg
+	}
+	return errMsg + ": " + output
 }
 
 func (s *Supervisor) markSucceeded(jobID string, exitCode int32) {
