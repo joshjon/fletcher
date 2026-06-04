@@ -37,6 +37,11 @@ install: build ## Developer convenience - mirrors scripts/install.sh using local
 	sudo install $(BIN) $(PREFIX)/bin/fletcher
 	sudo install -m 0644 init/fletcher.service /etc/systemd/system/
 	sudo systemctl daemon-reload
+	@if [ -n "$$USER" ] && [ "$$USER" != "root" ] && ! id -nG "$$USER" 2>/dev/null | grep -qw fletcher; then \
+		echo "==> adding $$USER to the fletcher group (needed to talk to the daemon socket)"; \
+		sudo usermod -aG fletcher "$$USER"; \
+		echo "==> note: log out and back in (or run 'newgrp fletcher' in this shell) for the new group to take effect"; \
+	fi
 	@if systemctl is-active --quiet fletcher; then \
 		echo "==> fletcher is running; restarting"; \
 		sudo systemctl restart fletcher; \

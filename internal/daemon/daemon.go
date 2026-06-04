@@ -353,8 +353,12 @@ func ensureDirs(cfg Config) error {
 }
 
 // listenUnix opens a Unix-domain listener at socketPath, removing any stale
-// file left behind by a previous crash. The socket is chmod'd to 0600 so only
-// the owning user can talk to the daemon.
+// file left behind by a previous crash. The socket is chmod'd to 0660 so the
+// owning user and members of the owning group can talk to the daemon. Under
+// systemd the daemon runs as fletcher:fletcher, so granting the group access
+// is what lets an operator added to the fletcher group reach the socket - a
+// 0600 socket would deny every group member regardless of membership, since
+// connect() on a Unix socket needs write permission on the socket inode.
 func listenUnix(ctx context.Context, socketPath string) (net.Listener, error) {
 	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("remove stale socket: %w", err)
@@ -364,7 +368,7 @@ func listenUnix(ctx context.Context, socketPath string) (net.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen unix %s: %w", socketPath, err)
 	}
-	if err := os.Chmod(socketPath, 0o600); err != nil {
+	if err := os.Chmod(socketPath, 0o660); err != nil { //nolint:gosec // 0660 is deliberate: group members (the operator) must reach the socket
 		_ = ln.Close()
 		return nil, fmt.Errorf("chmod socket: %w", err)
 	}

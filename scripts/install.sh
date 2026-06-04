@@ -100,6 +100,17 @@ fi
 # pre-creating them lets the operator drop in an age key before starting).
 install -d -m 0700 -o fletcher -g fletcher /var/lib/fletcher /etc/fletcher
 
+# Add the invoking operator to the fletcher group so their CLI can talk
+# to the daemon socket. SUDO_USER is the user who invoked sudo;
+# when install.sh runs without sudo (root shell), there's no operator
+# to add, which is fine.
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] \
+		&& ! id -nG "$SUDO_USER" 2>/dev/null | tr ' ' '\n' | grep -qx fletcher; then
+	log "adding $SUDO_USER to the fletcher group (needed to talk to the daemon socket)"
+	usermod -aG fletcher "$SUDO_USER"
+	log "note: log out and back in (or run 'newgrp fletcher') for the new group to take effect"
+fi
+
 if command -v systemctl >/dev/null 2>&1; then
 	systemctl daemon-reload
 	# On upgrade the service is already running - restart so the new

@@ -45,6 +45,14 @@ func TestDaemonServesHealthAndShutsDownCleanly(t *testing.T) {
 	require.Equal(t, "ok", resp.Msg.GetStatus())
 	require.NotZero(t, resp.Msg.GetStartedAt())
 
+	// The socket must be group-accessible (0660), not owner-only: under
+	// systemd the daemon runs as fletcher:fletcher and the operator reaches
+	// it via fletcher-group membership. A 0600 socket would deny every group
+	// member regardless of membership.
+	info, err := os.Stat(cfg.SocketPath)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o660), info.Mode().Perm())
+
 	cancel()
 
 	select {

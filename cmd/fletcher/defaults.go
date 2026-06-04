@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -14,10 +16,19 @@ import (
 // by hand. When no daemon socket exists yet (e.g. first run of
 // `fletcher serve`), falls back to the XDG-based path so the daemon
 // has a sensible place to create one.
+//
+// Permission-denied on Stat (typical when the systemd RuntimeDirectory
+// is mode 0750 and the operator isn't in the fletcher group yet) is
+// treated as "path may exist, try it" - the connect call later gives
+// the operator a clearer error than the lookup silently moving on.
 func defaultSocketPath() string {
 	candidates := socketCandidates()
 	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
+		_, err := os.Stat(c)
+		if err == nil {
+			return c
+		}
+		if errors.Is(err, fs.ErrPermission) {
 			return c
 		}
 	}
