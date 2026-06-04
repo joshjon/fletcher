@@ -239,7 +239,7 @@ restart matter when the unit file has changed in your branch.
 For first install, set the public endpoint via a drop-in override and
 start the service (see [setup.md § Mode A](setup.md#mode-a-built-in-wireguard-recommended-for-most-homelabs)
 for the boilerplate). For testing inside a single LAN, you can skip
-both the port forward and `--public-endpoint` — peers on the same
+both the port forward and `--public-endpoint` - peers on the same
 network reach the daemon via its LAN IP.
 
 ### Deploy-iterate loop
@@ -260,20 +260,122 @@ output).
 
 ### What to verify after a deploy
 
-Most changes only need the macOS smoke test above to gain confidence,
-but some are Linux-only:
+Most changes only need the macOS smoke test above to gain confidence.
+Run `fletcher doctor` first; once it reports `0 issues` the daemon,
+host device, networking, and provider reachability are all green, and
+the only things left to exercise are the two features that cannot run
+on macOS: WireGuard peer pairing and the real runc + btrfs runtime.
 
-- **Phase 15 networking** (UPnP, tunnel up): startup logs should
-  include `upnp port-forward installed` and `wireguard tunnel up`. If
-  UPnP failed, the log says so and `fletcher peer pair` falls back to
-  needing `--public-endpoint` set manually.
-- **Real runtime**: switch the runtime driver from `mock` to `runc`
-  via the systemd drop-in (`Environment=FLETCHER_RUNTIME=runc`), restart,
-  and verify a job runs inside a real OCI container against a btrfs
-  snapshot. Requires `runc` and a btrfs filesystem.
-- **Peer pairing end-to-end**: `fletcher peer pair phone`, scan QR
-  with WireGuard app, toggle on. `sudo wg show` on the server should
-  list the peer with a recent handshake within seconds.
+The tests below assume `make install` has run and `fletcher doctor` is
+clean. Each says what it proves.
+
+### 1. Peer pairing end-to-end (WireGuard)
+
+**What this proves:** the daemon brought its own tunnel up
+(`wireguard-go`, no `wg-quick`), the UPnP forward (or your manual one)
+lets an outside device reach the WireGuard port, and the handshake
+completes. This is the Phase 9 + 15 deliverable and the one thing the
+mock path cannot cover.
+
+On the server, pair a device. The endpoint is taken from the daemon's
+auto-detected public endpoint, so no flags are needed when `doctor` is
+green:
+
+```sh
+fletcher peer pair phone
+```
+
+This prints a QR code and the equivalent `wg-quick` config. Then:
+
+1. Install the **WireGuard** app on the phone, tap **+**, scan the QR.
+2. **Turn wifi off on the phone** (use cellular). This is what proves
+   reachability *through the port forward* from outside the LAN, not
+   just LAN-local routing.
+3. Toggle the tunnel on.
+4. Confirm the handshake on the server:
+
+   ```sh
+   sudo wg show
+   ```
+
+   Success is a `latest handshake: <N> seconds ago` line and non-zero
+   `transfer:` for the peer.
+5. Confirm traffic flows: from the phone, `ping 10.99.0.1` (the
+   server's default tunnel address).
+
+If `wg show` lists the peer but shows **no handshake**, that is a
+router/firewall problem on the WireGuard UDP port, not Fletcher -
+`doctor` having confirmed the forward narrows it to the router actually
+honouring it or an upstream ISP block.
+
+Scope note: the daemon's Connect API (Unix socket) and gateway
+(`127.0.0.1:11500`) are loopback-bound, so a peer cannot reach those
+*over* the tunnel yet - that is the future preview-URL reverse proxy.
+What this test proves is that the tunnel itself carries traffic.
+
+Tear the test peer down when done:
+
+```sh
+fletcher peer list
+fletcher peer delete <peer-id>
+```
+
+### 2. Real runtime (runc + btrfs)
+
+**What this proves:** jobs run inside a real OCI container (runc) against
+a real copy-on-write snapshot (btrfs), instead of the mock driver's bare
+subprocess and plain directory.
+
+Prerequisites: `runc` on `PATH` and a btrfs filesystem for the snapshot
+root. If you do not have a spare btrfs partition, a loopback image is the
+no-hardware dev path:
+
+```sh
+sudo truncate -s 5G /var/lib/fletcher-snap.img
+sudo mkfs.btrfs /var/lib/fletcher-snap.img
+sudo mkdir -p /var/lib/fletcher/snapshots
+sudo mount -o loop /var/lib/fletcher-snap.img /var/lib/fletcher/snapshots
+```
+
+Point the daemon at the real drivers via a systemd drop-in:
+
+```sh
+sudo systemctl edit fletcher
+#   [Service]
+#   Environment=FLETCHER_RUNTIME=runc
+#   Environment=FLETCHER_SNAPSHOT=btrfs
+#   Environment=FLETCHER_BTRFS_ROOT=/var/lib/fletcher/snapshots
+sudo systemctl restart fletcher
+```
+
+Confirm the switch took: the startup log should now read
+`drivers selected runtime=runc snapshot=btrfs`, and `fletcher doctor`
+should still be clean.
+
+**Current limitation - read before running a job.** The btrfs driver runs
+a job against a rootfs template at `<btrfs-root>/images/<image>`. There is
+not yet any tooling to flatten the `fletcher-base` OCI image (from
+`make image`) into that location, so a job with no matching template gets
+an empty subvolume and runc has nothing to `exec`. Until the image-flatten
+step lands (tracked in `ROADMAP.md`), an end-to-end real-agent job is not
+push-button. For a manual smoke test you can populate a rootfs yourself,
+e.g. export a container filesystem into a freshly created subvolume:
+
+```sh
+# Build the base image first (needs Docker): make image
+sudo btrfs subvolume create /var/lib/fletcher/snapshots/images/fletcher-base
+CID=$(docker create fletcher-base:dev)
+docker export "$CID" | sudo tar -x -C /var/lib/fletcher/snapshots/images/fletcher-base
+docker rm "$CID"
+# Then a job with --image fletcher-base has a real rootfs to run in.
+fletcher job create --name runc-smoke --command "echo hi from runc" --image fletcher-base
+sleep 1
+fletcher job get <job-id>   # expect status: succeeded
+```
+
+To revert to the mock drivers, remove the drop-in
+(`sudo systemctl revert fletcher`), restart, and unmount the loopback if
+you created one.
 
 ### Power-user CLI
 
