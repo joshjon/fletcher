@@ -5,17 +5,44 @@ import (
 	"path/filepath"
 )
 
-// defaultSocketPath returns the daemon's default Unix-socket path. Prefers
-// $XDG_RUNTIME_DIR (set on most modern Linux), falls back to $HOME/.fletcher,
-// and finally /tmp for the headless / no-home edge case.
+// defaultSocketPath returns the daemon's default Unix-socket path. It
+// scans the well-known locations in priority order and returns the
+// first path that actually has a daemon socket living there - this
+// lets a CLI run by the regular user automatically find a daemon
+// installed system-wide via systemd (which puts the socket under
+// /run/fletcher/) without the operator having to set FLETCHER_SOCKET
+// by hand. When no daemon socket exists yet (e.g. first run of
+// `fletcher serve`), falls back to the XDG-based path so the daemon
+// has a sensible place to create one.
 func defaultSocketPath() string {
+	candidates := socketCandidates()
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	// None of the candidates exist yet - return the first one (the
+	// XDG-runtime preferred location) so `fletcher serve` has a path
+	// it can create.
+	return candidates[0]
+}
+
+// socketCandidates returns the prioritised list of socket paths the
+// CLI checks at startup. Order matters: a user-level daemon should
+// win over a system one when both are running, because the user-level
+// instance is whichever one the operator started themselves.
+func socketCandidates() []string {
+	out := make([]string, 0, 4)
 	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
-		return filepath.Join(dir, "fletcher", "fletcher.sock")
+		out = append(out, filepath.Join(dir, "fletcher", "fletcher.sock"))
 	}
+	// System path used by init/fletcher.service (RuntimeDirectory=fletcher).
+	out = append(out, "/run/fletcher/fletcher.sock")
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".fletcher", "fletcher.sock")
+		out = append(out, filepath.Join(home, ".fletcher", "fletcher.sock"))
 	}
-	return "/tmp/fletcher.sock"
+	out = append(out, "/tmp/fletcher.sock")
+	return out
 }
 
 // defaultDatabasePath returns the daemon's default SQLite path. Prefers

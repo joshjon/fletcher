@@ -4,6 +4,7 @@ package doctor
 
 import (
 	"fmt"
+	"net"
 
 	"github.com/vishvananda/netlink"
 )
@@ -19,8 +20,10 @@ func defaultRoutes() ([]string, error) {
 	seen := make(map[string]bool)
 	out := make([]string, 0, 2)
 	for _, r := range routes {
-		// A default route has a zero destination prefix.
-		if r.Dst != nil {
+		// A default route has either a nil Dst (older kernels / netlink
+		// versions omit the field entirely) or an explicit 0.0.0.0/0
+		// (newer versions encode it). Accept both.
+		if !isDefaultDst(r.Dst) {
 			continue
 		}
 		link, err := netlink.LinkByIndex(r.LinkIndex)
@@ -35,4 +38,18 @@ func defaultRoutes() ([]string, error) {
 		out = append(out, name)
 	}
 	return out, nil
+}
+
+// isDefaultDst returns true for the two encodings of "no destination
+// constraint" that an IPv4 default route can show up with from
+// netlink: nil, or 0.0.0.0/0.
+func isDefaultDst(dst *net.IPNet) bool {
+	if dst == nil {
+		return true
+	}
+	if dst.IP.IsUnspecified() {
+		ones, _ := dst.Mask.Size()
+		return ones == 0
+	}
+	return false
 }
