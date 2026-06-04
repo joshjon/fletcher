@@ -234,6 +234,31 @@ intend to use Fletcher with.
 
 ## Troubleshooting
 
+**First step: run `fletcher doctor`.** This runs a battery of checks
+against the daemon, the host networking stack, and the upstream
+providers, then prints a prioritised action plan for anything that
+needs attention. Each check explains what failed and gives concrete
+commands to fix it. Re-run after each change to confirm progress.
+
+```sh
+fletcher doctor
+```
+
+The doctor output is also available as JSON for scripting:
+`fletcher doctor -o json`.
+
+Common things the doctor catches:
+
+- Daemon not running or not reachable on the Unix socket
+- `/dev/net/tun` missing (kernel TUN module not loaded)
+- Multiple default routes on the same subnet (causes asymmetric paths)
+- Public IP in the CGNAT range (need a VPN like Tailscale; see Mode B)
+- UPnP not responding (enable it on the router, or use the manual path)
+- Upstream model providers unreachable (DNS / outbound firewall)
+
+If the doctor's plan doesn't resolve your issue, the more specific
+hints below may help.
+
 **`fletcher` command not found after install.** Make sure `/usr/local/bin`
 is on your `$PATH` (`echo $PATH`). Run with the full path:
 `/usr/local/bin/fletcher version`.
@@ -244,8 +269,8 @@ manually (not via systemd), you'll need to run as root or grant the
 capability: `sudo setcap cap_net_admin+ep /usr/local/bin/fletcher`.
 
 **`upnp port-forward unavailable` in logs.** Either UPnP isn't enabled
-on your router, or you're behind CGNAT. See the troubleshooting steps in
-[Mode A](#mode-a-built-in-wireguard-recommended-for-most-homelabs).
+on your router, or you're behind CGNAT. `fletcher doctor` distinguishes
+the two cases and points at the right fix.
 
 **Peer's WireGuard app shows "no handshake".** First check the server:
 `sudo wg show` should list the peer's public key. If yes, the issue is
