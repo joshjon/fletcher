@@ -50,6 +50,7 @@ auto-fixing. Re-run after each change to confirm.`,
 				doctor.CheckDefaultRoutes(),
 				doctor.CheckPublicIP(),
 				doctor.CheckUPnP(cmd.Int("wireguard-port")),
+				doctor.CheckPublicEndpoint(cmd.String("socket")),
 				doctor.CheckProviderReachability(),
 			}
 			results := doctor.Run(ctx, checkers)

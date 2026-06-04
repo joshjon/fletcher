@@ -22,4 +22,10 @@ message HealthResponse {
   string commit = 3;
   // started_at is the daemon's start time as Unix epoch seconds.
   int64 started_at = 4;
+  // public_endpoint is the host:port the daemon will advertise to paired
+  // devices, as resolved at startup (operator-configured, or derived from
+  // UPnP). Empty means peer pairing will fail until it is set. Exposed here
+  // so `fletcher doctor` can catch the case where the endpoint is stale or
+  // missing even though the router probe looks healthy.
+  string public_endpoint = 5;
 }

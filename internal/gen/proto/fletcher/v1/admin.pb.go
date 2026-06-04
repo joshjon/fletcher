@@ -66,9 +66,15 @@ type HealthResponse struct {
 	// commit of the running daemon's build.
 	Commit string `protobuf:"bytes,3,opt,name=commit,proto3" json:"commit,omitempty"`
 	// started_at is the daemon's start time as Unix epoch seconds.
-	StartedAt     int64 `protobuf:"varint,4,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	StartedAt int64 `protobuf:"varint,4,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	// public_endpoint is the host:port the daemon will advertise to paired
+	// devices, as resolved at startup (operator-configured, or derived from
+	// UPnP). Empty means peer pairing will fail until it is set. Exposed here
+	// so `fletcher doctor` can catch the case where the endpoint is stale or
+	// missing even though the router probe looks healthy.
+	PublicEndpoint string `protobuf:"bytes,5,opt,name=public_endpoint,json=publicEndpoint,proto3" json:"public_endpoint,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *HealthResponse) Reset() {
@@ -129,18 +135,26 @@ func (x *HealthResponse) GetStartedAt() int64 {
 	return 0
 }
 
+func (x *HealthResponse) GetPublicEndpoint() string {
+	if x != nil {
+		return x.PublicEndpoint
+	}
+	return ""
+}
+
 var File_fletcher_v1_admin_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_admin_proto_rawDesc = "" +
 	"\n" +
 	"\x17fletcher/v1/admin.proto\x12\vfletcher.v1\"\x0f\n" +
-	"\rHealthRequest\"y\n" +
+	"\rHealthRequest\"\xa2\x01\n" +
 	"\x0eHealthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x03 \x01(\tR\x06commit\x12\x1d\n" +
 	"\n" +
-	"started_at\x18\x04 \x01(\x03R\tstartedAt2S\n" +
+	"started_at\x18\x04 \x01(\x03R\tstartedAt\x12'\n" +
+	"\x0fpublic_endpoint\x18\x05 \x01(\tR\x0epublicEndpoint2S\n" +
 	"\fAdminService\x12C\n" +
 	"\x06Health\x12\x1a.fletcher.v1.HealthRequest\x1a\x1b.fletcher.v1.HealthResponse\"\x00B\xb1\x01\n" +
 	"\x0fcom.fletcher.v1B\n" +

@@ -384,7 +384,7 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	)
 
 	adminPath, adminHandler := fletcherv1connect.NewAdminServiceHandler(
-		api.NewAdminService(startedAt), interceptors,
+		api.NewAdminService(startedAt, deps.peers), interceptors,
 	)
 	mux.Handle(adminPath, adminHandler)
 
