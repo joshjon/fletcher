@@ -474,7 +474,11 @@ integration arrives.
 | 15 | Zero-touch networking | Three in-thesis pieces that collapse the homelab operator's one-time setup to "start the daemon": (a) the daemon embeds `wireguard-go` + netlink so it brings the WireGuard interface up itself (no `wg-quick`, no `/etc/wireguard/fletcher.conf`); (b) UPnP auto-forwards the WireGuard UDP port at boot via the existing `portmap.Map`; (c) the UPnP response's external IP becomes the default `--public-endpoint` when the operator didn't supply one. Together: `sudo fletcher serve` on a normal home connection just works, including phone-from-cellular access. Falls back cleanly when UPnP isn't available (clear log, manual `--public-endpoint` required). Off-thesis users (behind CGNAT, symmetric NAT) point at the user-facing docs that explain bringing their own VPN (Tailscale, Headscale, ZeroTier, plain WG) - which still works because the daemon's listeners are network-agnostic. Requires `CAP_NET_ADMIN` on the daemon process (systemd unit grants it via Ambient). |
 | 16 | `fletcher doctor` (diagnostic + action plan) | When Phase 15's automation doesn't "just work" (router refuses UPnP, host has multi-NIC routing, ISP put the connection behind CGNAT, daemon won't reach upstream providers), the operator should not have to read logs and guess. `fletcher doctor` runs a battery of checks (daemon health, `/dev/net/tun`, default-route count, public IP + CGNAT detection, UPnP probe, upstream provider reachability) and prints a prioritised action plan with concrete copy-pasteable commands. Most fixes are operator-side (router config, ISP, firewall) so the doctor diagnoses + explains rather than auto-fixing. All instructions are generic - no router brand names, no hard-coded IPs; commands print the operator's values at runtime. JSON output (`-o json`) for monitoring / CI; non-zero exit on any failure under `--quiet`. |
 
-Past Phase 16 - don't plan now. Real users reshape priorities. Phases 11–16
+Past Phase 16 - don't plan now. Real users reshape priorities. Phases 11-16
 above are concrete continuations derived from observed homelab / Claude Code
 needs and the exeuntu reference, not speculation; anything past them should
 wait for actual usage.
+
+For live delivery status (what is actually built, what was cut and why, and the
+phases proposed once usage surfaced them), see `docs/ROADMAP.md`. This table is
+the plan of record; that file tracks state against it.
