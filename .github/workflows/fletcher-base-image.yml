@@ -67,5 +67,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # No registry attestations: ghcr is the artifact host, and the
+          # provenance manifest complicates the single-image pull/import path.
+          provenance: false
