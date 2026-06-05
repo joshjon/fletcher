@@ -347,20 +347,28 @@ DESIGN.md §11 and §9.
 
 **Sub-phases.**
 
-- **M5a - VMM provisioning + bundling.** Acquire the `firecracker` binary and a
-  minimal guest `vmlinux`; bundle via `embed.FS`, extract on first run. `doctor`
-  gains a `/dev/kvm` presence + `kvm`-group-membership check for the `fletcher`
-  user. (UX is intrinsic to the runtime, so it lives in the milestone, not a
-  separate one.)
-- **M5b - rootfs pipeline.** Extend the image pipeline to flatten an imported OCI
-  image into an ext4 rootfs template, and CoW-clone it per job (reflink on btrfs)
-  behind `snapshot.Driver`.
-- **M5c - VM lifecycle.** `firecrackerdriver.Run` boots a microVM (bundled kernel
-  + per-job rootfs + vsock), honours ctx cancellation, returns the exit code.
-  Replaces the stub.
-- **M5d - guest agent over vsock.** A tiny in-VM agent that receives
-  `{command, env, workdir}`, runs it, streams stdout/stderr back, returns the exit
-  code - the Firecracker analogue of the runc `fork-run` forwarder.
+- **M5a - VMM provisioning + bundling. DONE.** The `vmm` package embeds the
+  `firecracker` binary (v1.16.0) and a guest `vmlinux` (5.10.225), arch-selected
+  via build constraints, and extracts them to a cache dir on first run
+  (idempotent, atomic). Binaries are gitignored and fetched by `make fetch-vmm`
+  (SHA256-verified); a committed about.txt keeps a fresh checkout compiling.
+  `doctor` gained a `/dev/kvm` presence + `kvm`-group check for the daemon user.
+  Verified: extract test runs `firecracker --version`; doctor flagged the daemon
+  user missing from the `kvm` group on the dev box.
+- **M5b - rootfs pipeline. DONE.** `internal/snapshot/ext4driver` clones a per-job
+  ext4 image from a `<name>.ext4` template (FICLONE reflink on btrfs/xfs, full-copy
+  fallback elsewhere), behind `snapshot.Driver`. `image import --format ext4`
+  builds the template via `mkfs.ext4 -d` over the existing docker-export flatten;
+  `image ls`/`rm` and the `ext4` snapshot setting follow. Verified: imported
+  busybox to a mountable ext4 rootfs and confirmed a clone re-mounts.
+- **M5c - VM lifecycle. IN PROGRESS.** `firecrackerdriver.Run` boots a microVM
+  (bundled kernel + per-job rootfs + vsock), honours ctx cancellation, returns the
+  exit code. Replaces the stub. De-risked: `firecracker-go-sdk` v1.0.0 builds
+  CGO-free and exposes the needed config surface. Best developed together with M5d
+  (a VM that boots but runs nothing is not independently useful).
+- **M5d - guest agent over vsock.** A tiny in-VM agent (the guest init) that
+  receives `{command, env, workdir}`, runs it, streams stdout/stderr back, returns
+  the exit code - the Firecracker analogue of the runc `fork-run` forwarder.
 - **M5e - gateway reachability + no egress.** The guest reaches the daemon gateway
   /MCP only over vsock; the VM has no egress route (preserves §5/§6 - the API key
   never enters the fork). Verified with a no-egress test.
