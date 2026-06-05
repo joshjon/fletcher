@@ -196,6 +196,11 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		return nil, fmt.Errorf("open secrets store: %w", err)
 	}
 
+	// With no explicit choice, pick the runtime by capability: Firecracker on a
+	// KVM host with the VMM bundled, otherwise mock. runc stays an explicit
+	// opt-in (it needs a provisioned btrfs root).
+	resolveRuntimeDefaults(&cfg, logger)
+
 	snapDriver, err := buildSnapshotDriver(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("init snapshot driver: %w", err)
@@ -595,6 +600,46 @@ func signalActor(ctx context.Context) (func() error, func(error)) {
 // defaultDriverKind is the fallback when neither config nor flag selects
 // one. "mock" everywhere so an unconfigured daemon still boots on macOS.
 const defaultDriverKind = "mock"
+
+// resolveRuntimeDefaults picks the runtime and matching snapshot driver when
+// the operator has not chosen one (via flag, env, or `fletcher settings`). On a
+// KVM host with the Firecracker VMM bundled it selects the real microVM tier;
+// otherwise it falls back to the mock driver, which runs everywhere. runc is
+// not auto-selected because it needs a provisioned btrfs snapshot root.
+func resolveRuntimeDefaults(cfg *Config, logger *slog.Logger) {
+	if cfg.RuntimeKind != "" {
+		return // operator chose explicitly
+	}
+	if kvmUsable() && vmm.Available() {
+		cfg.RuntimeKind = "firecracker"
+		if cfg.SnapshotKind == "" {
+			cfg.SnapshotKind = "ext4"
+		}
+		logger.Info("runtime auto-selected",
+			slog.String("runtime", cfg.RuntimeKind),
+			slog.String("snapshot", cfg.SnapshotKind),
+			slog.String("reason", "KVM available and VMM bundled"))
+		return
+	}
+	cfg.RuntimeKind = "mock"
+	if cfg.SnapshotKind == "" {
+		cfg.SnapshotKind = "mock"
+	}
+	logger.Info("runtime auto-selected",
+		slog.String("runtime", cfg.RuntimeKind),
+		slog.String("reason", "no usable /dev/kvm or VMM not bundled; set runtime explicitly for runc"))
+}
+
+// kvmUsable reports whether the daemon can actually open /dev/kvm for the
+// Firecracker runtime (presence plus permission, not just existence).
+func kvmUsable() bool {
+	f, err := os.OpenFile("/dev/kvm", os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
 
 // buildSnapshotDriver constructs the snapshot.Driver chosen by cfg. The
 // btrfs driver is only meaningful on Linux; on darwin it constructs to a

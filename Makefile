@@ -56,6 +56,10 @@ install: build ## Developer convenience - mirrors scripts/install.sh using local
 		sudo useradd --system --home-dir /var/lib/fletcher --shell /usr/sbin/nologin fletcher; \
 	fi
 	sudo install -d -m 0700 -o fletcher -g fletcher /var/lib/fletcher /etc/fletcher
+	@if getent group kvm >/dev/null 2>&1 && ! id -nG fletcher 2>/dev/null | grep -qw kvm; then \
+		echo "==> adding fletcher to the kvm group (needed for the Firecracker runtime)"; \
+		sudo usermod -aG kvm fletcher; \
+	fi
 	sudo install $(BIN) $(PREFIX)/bin/fletcher
 	sudo install -m 0644 init/fletcher.service /etc/systemd/system/
 	sudo systemctl daemon-reload

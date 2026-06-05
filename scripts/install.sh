@@ -100,6 +100,14 @@ fi
 # pre-creating them lets the operator drop in an age key before starting).
 install -d -m 0700 -o fletcher -g fletcher /var/lib/fletcher /etc/fletcher
 
+# Grant the daemon access to /dev/kvm for the Firecracker runtime. The device
+# is owned by the kvm group; the systemd unit's DeviceAllow covers the cgroup
+# side. Only meaningful where /dev/kvm and the kvm group exist (a KVM host).
+if getent group kvm >/dev/null 2>&1 && ! id -nG fletcher 2>/dev/null | tr ' ' '\n' | grep -qx kvm; then
+	log "adding fletcher to the kvm group (needed for the Firecracker runtime)"
+	usermod -aG kvm fletcher
+fi
+
 # Add the invoking operator to the fletcher group so their CLI can talk
 # to the daemon socket. SUDO_USER is the user who invoked sudo;
 # when install.sh runs without sudo (root shell), there's no operator

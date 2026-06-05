@@ -64,9 +64,11 @@ AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
 
 # /dev/net/tun must be reachable for the daemon to create the WG
-# interface. The rest of /dev is left at the default (PrivateDevices=
-# false above already permits the basic set).
+# interface; /dev/kvm for the Firecracker runtime to boot microVMs. Listing
+# any DeviceAllow makes the policy restrictive, so both must be named. Group
+# membership (the kvm group, granted at install) covers the DAC side.
 DeviceAllow=/dev/net/tun rwm
+DeviceAllow=/dev/kvm rwm
 
 # Read/write only the paths the daemon needs.
 ReadWritePaths=/var/lib/fletcher /etc/fletcher /run/fletcher

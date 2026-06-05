@@ -46,15 +46,16 @@ func serveCmd() *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:    "runtime",
-				Usage:   "runtime driver: mock, runc, firecracker (non-mock require Linux)",
+				Usage:   "runtime driver: mock, runc, firecracker (default: auto-select firecracker on a KVM host, else mock)",
 				Sources: cli.EnvVars("FLETCHER_RUNTIME"),
-				Value:   "mock",
+				// Empty means "not chosen": the daemon auto-selects by capability.
+				Value: "",
 			},
 			&cli.StringFlag{
 				Name:    "snapshot",
-				Usage:   "snapshot driver: mock, btrfs (btrfs requires Linux)",
+				Usage:   "snapshot driver: mock, btrfs, ext4 (default: follows the selected runtime)",
 				Sources: cli.EnvVars("FLETCHER_SNAPSHOT"),
-				Value:   "mock",
+				Value:   "",
 			},
 			&cli.StringFlag{
 				Name:    "btrfs-root",
