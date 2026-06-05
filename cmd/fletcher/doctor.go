@@ -47,6 +47,7 @@ auto-fixing. Re-run after each change to confirm.`,
 			checkers := []doctor.Checker{
 				doctor.CheckDaemon(cmd.String("socket")),
 				doctor.CheckTUN(),
+				doctor.CheckKVM(),
 				doctor.CheckDefaultRoutes(),
 				doctor.CheckPublicIP(),
 				doctor.CheckUPnP(cmd.Int("wireguard-port")),

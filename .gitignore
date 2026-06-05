@@ -4,6 +4,12 @@
 build/
 tmp/
 
+# Bundled Firecracker VMM assets - fetched by `make fetch-vmm`, embedded at
+# build time. Kept out of git (multi-megabyte blobs); about.txt is committed so
+# the embed directive still compiles on a fresh checkout.
+internal/runtime/firecrackerdriver/vmm/assets/*/firecracker
+internal/runtime/firecrackerdriver/vmm/assets/*/vmlinux
+
 # Test / coverage
 coverage.out
 coverage.html

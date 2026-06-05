@@ -1,0 +1,12 @@
+This directory holds the bundled Firecracker VMM binary and guest kernel for
+linux/arm64:
+
+  firecracker   the Firecracker VMM (from the firecracker-microvm releases)
+  vmlinux       a minimal guest kernel (from the firecracker CI artifacts)
+
+Both files are gitignored and fetched by `make fetch-vmm`. They are embedded into
+the fletcher binary at build time and extracted to a cache directory on first
+run. This about.txt is committed so the `//go:embed assets/arm64` directive
+compiles on a fresh checkout before the binaries are fetched.
+
+Versions are pinned in scripts/fetch-vmm.sh / the Makefile.
