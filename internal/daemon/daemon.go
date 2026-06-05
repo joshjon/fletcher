@@ -698,6 +698,14 @@ func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logg
 			cfg.LogLevel = v
 		case settings.KeyCredentialsDir:
 			cfg.CredentialsDir = v
+		case settings.KeyNoUPnP:
+			if b, perr := strconv.ParseBool(v); perr == nil {
+				cfg.DisableUPnP = b
+			}
+		case settings.KeyGatewayListen:
+			cfg.GatewayListenAddr = v
+		case settings.KeyMCPListen:
+			cfg.MCPListenAddr = v
 		default:
 			continue // unknown key persisted by an older/newer version; ignore
 		}

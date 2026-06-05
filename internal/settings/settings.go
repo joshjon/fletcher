@@ -1,13 +1,15 @@
 // Package settings stores runtime-mutable operational settings in the daemon's
 // SQLite database. They are edited via `fletcher settings` and applied over the
 // flag/env config at daemon startup; changes take effect on the next restart.
-// Bootstrap config (database, socket, age key, listen addresses) is not managed
-// here. See STANDARDS.md sections 95/98.
+// Bootstrap config (database, socket, age key) is not managed here - it is
+// needed to open the database these settings live in. See STANDARDS.md
+// sections 95/98.
 package settings
 
 import (
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +28,9 @@ const (
 	KeyWireGuardPort  = "wireguard_port"
 	KeyLogLevel       = "log_level"
 	KeyCredentialsDir = "credentials_dir"
+	KeyNoUPnP         = "no_upnp"
+	KeyGatewayListen  = "gateway_listen"
+	KeyMCPListen      = "mcp_listen"
 )
 
 // definition describes a settable key: its help text and an optional validator.
@@ -43,6 +48,9 @@ var registry = []definition{
 	{KeyWireGuardPort, "WireGuard UDP listen port, 1-65535 (restart to apply)", portNumber},
 	{KeyLogLevel, "log level: debug | info | warn | error (restart to apply)", oneOf("debug", "info", "warn", "error")},
 	{KeyCredentialsDir, "host directory for trusted-credential mounts (restart to apply)", nil},
+	{KeyNoUPnP, "disable the automatic UPnP port-forward: true | false (restart to apply)", oneOf("true", "false")},
+	{KeyGatewayListen, "model gateway listen address, host:port (restart to apply)", hostPort},
+	{KeyMCPListen, "MCP server listen address, host:port (restart to apply)", hostPort},
 }
 
 // View is one setting's full picture for `fletcher settings list`.
@@ -149,4 +157,15 @@ func portNumber(v string) error {
 		return fmt.Errorf("must be a port number 1-65535")
 	}
 	return nil
+}
+
+func hostPort(v string) error {
+	host, port, err := net.SplitHostPort(v)
+	if err != nil {
+		return fmt.Errorf("must be host:port, e.g. 0.0.0.0:11500")
+	}
+	if host == "" {
+		return fmt.Errorf("host part is required, e.g. 0.0.0.0:11500")
+	}
+	return portNumber(port)
 }

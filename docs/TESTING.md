@@ -238,10 +238,11 @@ at `/etc/systemd/system/fletcher.service`, reloads systemd, and (if
 the service is already running) restarts it. The `daemon-reload` and
 restart matter when the unit file has changed in your branch.
 
-For first install, set the public endpoint via a drop-in override and
-start the service (see [setup.md § Mode A](setup.md#mode-a-built-in-wireguard-recommended-for-most-homelabs)
-for the boilerplate). For testing inside a single LAN, you can skip
-both the port forward and `--public-endpoint` - peers on the same
+For first install, let UPnP auto-detect the public endpoint, or set it with
+`fletcher settings set public_endpoint <host>:51820` (see
+[setup.md § Mode A](setup.md#mode-a-built-in-wireguard-recommended-for-most-homelabs)),
+then `fletcher daemon enable`. For testing inside a single LAN, you can skip
+both the port forward and the endpoint - peers on the same
 network reach the daemon via its LAN IP.
 
 ### Deploy-iterate loop

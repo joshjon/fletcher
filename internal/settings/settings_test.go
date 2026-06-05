@@ -49,6 +49,14 @@ func TestSetValidatesEnumAndPort(t *testing.T) {
 	require.Error(t, s.Set(context.Background(), KeyWireGuardPort, "0"))
 	require.Error(t, s.Set(context.Background(), KeyWireGuardPort, "abc"))
 	require.NoError(t, s.Set(context.Background(), KeyWireGuardPort, "51820"))
+
+	require.Error(t, s.Set(context.Background(), KeyNoUPnP, "yes"))    // not true/false
+	require.NoError(t, s.Set(context.Background(), KeyNoUPnP, "true")) // valid
+
+	require.Error(t, s.Set(context.Background(), KeyGatewayListen, "11500"))         // no host
+	require.Error(t, s.Set(context.Background(), KeyGatewayListen, "0.0.0.0:bogus")) // bad port
+	require.NoError(t, s.Set(context.Background(), KeyGatewayListen, "0.0.0.0:11500"))
+	require.NoError(t, s.Set(context.Background(), KeyMCPListen, "127.0.0.1:11600"))
 }
 
 func TestDescribeCoversAllKeysAndReflectsSet(t *testing.T) {

@@ -90,28 +90,17 @@ If you see all three, you're done with setup. Skip to
 
 **If you'd rather skip UPnP** and forward the port manually (e.g. for
 security reasons or because UPnP is unreliable on your router): set your
-public endpoint explicitly and disable the auto-attempt.
+public endpoint explicitly and turn off the auto-attempt.
 
 ```sh
-sudo systemctl edit fletcher
+fletcher settings set public_endpoint your-host-or-ip:51820
+fletcher settings set no_upnp true
 ```
 
-Paste:
-
-```
-[Service]
-Environment=FLETCHER_PUBLIC_ENDPOINT=your-host-or-ip:51820
-Environment=FLETCHER_NO_UPNP=true
-```
-
-Save it, then forward UDP 51820 manually in your router (look for "Port
-Forwarding", "Virtual Server", or "NAT/Gaming"). Protocol: UDP, External
-port: 51820, Internal port: 51820, Destination: the LAN IP of this machine
-(`ip -4 addr` shows it). Then start the daemon: `fletcher daemon enable`.
-
-(The endpoint alone is also a `fletcher settings` key -
-`fletcher settings set public_endpoint <host>:51820` - but `FLETCHER_NO_UPNP`
-has no settings equivalent yet, so the drop-in is the way to set both.)
+Then forward UDP 51820 manually in your router (look for "Port Forwarding",
+"Virtual Server", or "NAT/Gaming"). Protocol: UDP, External port: 51820,
+Internal port: 51820, Destination: the LAN IP of this machine (`ip -4 addr`
+shows it). Then start the daemon: `fletcher daemon enable`.
 
 ### Mode B: bring your own VPN
 
@@ -124,25 +113,18 @@ right choice if:
 - You already run a VPN on your devices and don't want a second tunnel
 - You'd rather not expose any port on the public internet at all
 
-Fletcher's services (the Connect-RPC API, the model gateway, the MCP
-server) bind to `127.0.0.1` by default. To make them reachable over your
-existing VPN, bind them to the VPN interface or to all interfaces:
+Fletcher's services (the model gateway and the MCP server) bind to
+`127.0.0.1` by default. To make them reachable over your existing VPN, bind
+them to the VPN interface or to all interfaces, and turn off the built-in
+tunnel (there's nothing for it to do here):
 
 ```sh
-sudo systemctl edit fletcher
+fletcher settings set gateway_listen 0.0.0.0:11500
+fletcher settings set mcp_listen 0.0.0.0:11600
+fletcher settings set no_upnp true
 ```
 
-Paste:
-
-```
-[Service]
-Environment=FLETCHER_GATEWAY_LISTEN=0.0.0.0:11500
-Environment=FLETCHER_MCP_LISTEN=0.0.0.0:11600
-Environment=FLETCHER_NO_UPNP=true
-```
-
-The `FLETCHER_NO_UPNP=true` is important - there's nothing for the
-built-in tunnel to do here. Save, then start the daemon: `fletcher daemon enable`.
+Then start the daemon: `fletcher daemon enable`.
 
 For example, **with Tailscale** on the server and on the device you want
 to connect from:
@@ -314,9 +296,10 @@ fletcher settings unset log_level        # revert to the flag/env default
 ```
 
 Settable keys include `runtime`, `snapshot`, `btrfs_root`, `public_endpoint`,
-`wireguard_port`, `log_level`, and `credentials_dir`. Bootstrap config (where
-the database, socket, and keys live, and the listen addresses) stays in the
-flag/env layer.
+`wireguard_port`, `no_upnp`, `gateway_listen`, `mcp_listen`, `log_level`, and
+`credentials_dir`. Only bootstrap config - where the database, socket, and age
+key live - stays in the flag/env layer, because it's needed to open the
+database these settings live in.
 
 ## Managing the daemon
 
