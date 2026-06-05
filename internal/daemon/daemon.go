@@ -40,6 +40,7 @@ import (
 	"github.com/joshjon/fletcher/internal/settings"
 	"github.com/joshjon/fletcher/internal/snapshot"
 	"github.com/joshjon/fletcher/internal/snapshot/btrfsdriver"
+	"github.com/joshjon/fletcher/internal/snapshot/ext4driver"
 	snapmock "github.com/joshjon/fletcher/internal/snapshot/mockdriver"
 	"github.com/joshjon/fletcher/internal/sqlite"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
@@ -612,6 +613,14 @@ func buildSnapshotDriver(cfg Config) (snapshot.Driver, error) {
 			root = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
 		}
 		return btrfsdriver.New(btrfsdriver.Options{RootDir: root})
+	case "ext4":
+		// The Firecracker rootfs substrate: per-job ext4 image clones. Shares
+		// the btrfs root so clones are cheap reflinks (a full copy elsewhere).
+		root := cfg.BtrfsRoot
+		if root == "" {
+			root = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
+		}
+		return ext4driver.New(ext4driver.Options{RootDir: root})
 	default:
 		return nil, fmt.Errorf("unknown snapshot kind %q", cfg.SnapshotKind)
 	}

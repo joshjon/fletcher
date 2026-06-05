@@ -37,7 +37,7 @@ type definition struct {
 
 var registry = []definition{
 	{KeyRuntime, "runtime driver: mock | runc | firecracker (restart to apply)", oneOf("mock", "runc", "firecracker")},
-	{KeySnapshot, "snapshot driver: mock | btrfs (restart to apply)", oneOf("mock", "btrfs")},
+	{KeySnapshot, "snapshot driver: mock | btrfs | ext4 (restart to apply)", oneOf("mock", "btrfs", "ext4")},
 	{KeyBtrfsRoot, "btrfs snapshot root directory (restart to apply)", nil},
 	{KeyPublicEndpoint, "host:port peers dial to reach this daemon (restart to apply)", nil},
 	{KeyWireGuardPort, "WireGuard UDP listen port, 1-65535 (restart to apply)", portNumber},
