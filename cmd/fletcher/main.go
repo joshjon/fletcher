@@ -55,6 +55,7 @@ func newApp() *cli.Command {
 			imageCmd(),
 			forkRunCmd(),
 			modelCmd(),
+			settingsCmd(),
 			secretCmd(),
 			approvalCmd(),
 			peerCmd(),

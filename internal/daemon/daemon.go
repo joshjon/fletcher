@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/oklog/run"
@@ -35,6 +36,7 @@ import (
 	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
 	"github.com/joshjon/fletcher/internal/runtime/runcdriver"
 	"github.com/joshjon/fletcher/internal/secrets"
+	"github.com/joshjon/fletcher/internal/settings"
 	"github.com/joshjon/fletcher/internal/snapshot"
 	"github.com/joshjon/fletcher/internal/snapshot/btrfsdriver"
 	snapmock "github.com/joshjon/fletcher/internal/snapshot/mockdriver"
@@ -137,7 +139,13 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	logger.Info("migrations up to date")
 
-	svcs, err := buildServices(ctx, cfg, sqliteq.New(db), logger)
+	queries := sqliteq.New(db)
+	if err := applySettings(ctx, &cfg, settings.NewStore(queries), logger); err != nil {
+		return err
+	}
+	logger = newLogger(cfg.LogLevel) // reflect a log_level setting
+
+	svcs, err := buildServices(ctx, cfg, queries, logger)
 	if err != nil {
 		return err
 	}
@@ -260,6 +268,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		serverKey: wgKeyProvider,
 		models:    gatewayCatalog{baseURL: gatewayURL},
 		peerSync:  &tunnelPeerSyncer{peers: peerSvc, tunnel: netSetup.Tunnel, logger: logger},
+		settings:  settings.NewStore(queries),
 	}
 	return &services{
 		cfg:            cfg,
@@ -291,6 +300,7 @@ type connectDeps struct {
 	serverKey api.ServerKeyProvider
 	models    api.CatalogBuilder
 	peerSync  api.PeerSyncer
+	settings  api.SettingsBackend
 }
 
 // tunnelPeerSyncer is the production PeerSyncer: it pulls the current
@@ -433,6 +443,11 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		api.NewPeersService(deps.peers, deps.serverKey, deps.peerSync), interceptors,
 	)
 	mux.Handle(peersPath, peersHandler)
+
+	settingsPath, settingsHandler := fletcherv1connect.NewSettingsServiceHandler(
+		api.NewSettingsService(deps.settings), interceptors,
+	)
+	mux.Handle(settingsPath, settingsHandler)
 
 	modelsPath, modelsHandler := fletcherv1connect.NewModelServiceHandler(
 		api.NewModelsService(deps.models), interceptors,
@@ -577,6 +592,40 @@ func buildSnapshotDriver(cfg Config) (snapshot.Driver, error) {
 	default:
 		return nil, fmt.Errorf("unknown snapshot kind %q", cfg.SnapshotKind)
 	}
+}
+
+// applySettings overlays the stored runtime settings onto cfg, so an operator's
+// `fletcher settings set` overrides the flag/env default. Bootstrap config
+// (database, socket, age key, listen addresses) is not settable and untouched.
+func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logger *slog.Logger) error {
+	vals, err := store.Values(ctx)
+	if err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
+	for k, v := range vals {
+		switch k {
+		case settings.KeyRuntime:
+			cfg.RuntimeKind = v
+		case settings.KeySnapshot:
+			cfg.SnapshotKind = v
+		case settings.KeyBtrfsRoot:
+			cfg.BtrfsRoot = v
+		case settings.KeyPublicEndpoint:
+			cfg.PublicEndpoint = v
+		case settings.KeyWireGuardPort:
+			if n, perr := strconv.Atoi(v); perr == nil {
+				cfg.WireGuardListenPort = n
+			}
+		case settings.KeyLogLevel:
+			cfg.LogLevel = v
+		case settings.KeyCredentialsDir:
+			cfg.CredentialsDir = v
+		default:
+			continue // unknown key persisted by an older/newer version; ignore
+		}
+		logger.Info("applied setting", slog.String("key", k), slog.String("value", v))
+	}
+	return nil
 }
 
 // gatewaySocketPath and mcpSocketPath are the daemon-side unix sockets the

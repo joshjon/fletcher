@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// SettingsService manages runtime-mutable operational settings stored in the
+// daemon's SQLite database and edited via `fletcher settings`. Settings are
+// applied over the flag/env config at startup; changes take effect on the next
+// restart. Bootstrap config (database path, socket, age key, listen addresses)
+// is not managed here. See STANDARDS.md sections 95/98.
+service SettingsService {
+  rpc SetSetting(SetSettingRequest) returns (SetSettingResponse) {}
+  rpc DeleteSetting(DeleteSettingRequest) returns (DeleteSettingResponse) {}
+  rpc ListSettings(ListSettingsRequest) returns (ListSettingsResponse) {}
+}
+
+message SetSettingRequest {
+  string key = 1;
+  string value = 2;
+}
+message SetSettingResponse {}
+
+message DeleteSettingRequest {
+  string key = 1;
+}
+message DeleteSettingResponse {
+  bool existed = 1;
+}
+
+message ListSettingsRequest {}
+message ListSettingsResponse {
+  repeated Setting settings = 1;
+}
+
+message Setting {
+  // key is the setting name (e.g. "runtime").
+  string key = 1;
+  // value is the stored value, empty when unset.
+  string value = 2;
+  // description is the one-line help for the key.
+  string description = 3;
+  // set is true when an explicit value is stored (vs relying on the default).
+  bool set = 4;
+}
