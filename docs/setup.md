@@ -360,29 +360,37 @@ network API binds to the tunnel interface only and requires the token; the
 local Unix socket needs neither (it is gated by file permissions). Revoke a
 device with `fletcher peer delete <id>`.
 
-## Running real agents in a fork (runc + btrfs)
+## Running real agents in a microVM
 
-The default `mock` runtime runs a job's command as a plain host subprocess -
-fine for a smoke test, but not isolated. To run a real agent (Claude Code,
-Codex, pi) inside an isolated **rootless runc + btrfs fork** - reaching models
-only through the daemon's gateway, with no egress - you need the runc runtime,
-a btrfs snapshot root, and a base-image rootfs.
+On a host with KVM, the daemon defaults to the **Firecracker** runtime: each job
+boots a hardware-isolated microVM from its own kernel and a copy-on-write ext4
+rootfs, reaching models only through the daemon's gateway and with no network
+egress at all (the VM has no NIC - just a vsock channel to the daemon). On a host
+without `/dev/kvm` the daemon falls back to the mock runtime; **runc** is
+available as an explicit, shared-kernel fallback (`fletcher settings set runtime
+runc`). Confirm what you have with `fletcher doctor` (it checks `/dev/kvm` and the
+bundled VMM).
 
-This currently requires building the `fletcher-base` image from the source
-repo (a shipped image is pending), so the step-by-step lives in the developer
-guide: see [`TESTING.md`](TESTING.md) "Real runtime (runc + btrfs)". In short:
+Running an agent needs a base-image rootfs. This currently requires building the
+`fletcher-base` image from the source repo (a shipped/pullable image is pending).
+For the Firecracker default:
 
-1. Point the daemon at the real drivers and a btrfs snapshot root:
-   `fletcher settings set runtime runc`, `... snapshot btrfs`,
-   `... btrfs_root /var/lib/fletcher/snapshots`, then `fletcher daemon restart`.
-2. Import a base image: `make image` then `sudo fletcher image import
-   fletcher-base:dev --btrfs-root /var/lib/fletcher/snapshots --name fletcher-base`.
-3. Give the daemon an Anthropic key so the gateway can reach models:
+1. Build and import a base image as an ext4 rootfs:
+   `make image`, then `sudo fletcher image import fletcher-base:dev --format ext4
+   --btrfs-root /var/lib/fletcher/snapshots --name fletcher-base`. (The importer
+   injects the microVM init; the snapshot root only needs to be writable, and is
+   cheapest on btrfs where clones are reflinks.)
+2. Give the daemon an Anthropic key so the gateway can reach models:
    `fletcher secret set anthropic_api_key sk-ant-...`.
-4. Run an agent as a job:
+3. Run an agent as a job:
    `fletcher job create --image fletcher-base --command "claude -p 'say hi'"`.
 
-The agent runs as an unprivileged user inside the fork, reaches Anthropic only
-through the daemon gateway (the key never enters the fork), and has no other
-network egress. Browse what the gateway can route to with `fletcher model
-list`. Every command has `--help` with more detail.
+The agent runs inside the microVM, reaches Anthropic only through the daemon
+gateway (the key never enters the VM), and has no other network egress. Browse
+what the gateway can route to with `fletcher model list`. Every command has
+`--help` with more detail.
+
+> For the runc fallback instead, set `runtime runc` / `snapshot btrfs`, provision
+> a btrfs snapshot root, and import with `--format subvolume` (the default). The
+> trust properties are the same; the isolation is a shared-kernel container
+> rather than a VM.

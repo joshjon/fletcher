@@ -44,14 +44,15 @@ exercised during M2a (above). This is also why config-via-systemd-drop-in is
 error-prone and is the case for Milestone 3.
 
 Also done since: **Milestone 3** (config + lifecycle via `fletcher settings` /
-`fletcher daemon`, no systemctl) and **Milestone 4** (a paired client drives the
-daemon over the tunnel, gated by a per-peer token). The runc-first plan (M1-M4)
-is complete.
+`fletcher daemon`, no systemctl), **Milestone 4** (a paired client drives the
+daemon over the tunnel, gated by a per-peer token), and **Milestone 5**
+(Firecracker microVMs - the default isolation tier, see below). All planned
+milestones M1-M5 are complete.
 
-What is **not** possible yet:
+What is **not** possible yet (deferred / backlog, not planned milestones):
 
-- Firecracker microVMs - the intended default isolation tier (Milestone 5, the
-  only remaining milestone; a multi-session effort, see below).
+- A shipped/pullable `fletcher-base` image - running a real agent still needs a
+  local `make image` + `fletcher image import` (see Backlog).
 
 ## Status at a glance (phases 0-16)
 
@@ -65,7 +66,7 @@ What is **not** possible yet:
 | 5 | Model gateway (basic) | PARTIAL | Anthropic only; non-stream `/v1/chat/completions` |
 | 6 | MCP server | PARTIAL | 3 demo tools; egress validation permissive |
 | 7 | Approvals | DONE | APNs push deferred (polling `Wait` instead) |
-| 8 | Real Linux runtime | PARTIAL | runc (rootless) + btrfs real, runs agents (M2a); **Firecracker is a stub** |
+| 8 | Real Linux runtime | DONE | runc (rootless) + btrfs (M2a) and Firecracker microVMs + ext4 (M5), both real and runnable, behind the runtime/snapshot interfaces |
 | 9 | Networking | PARTIAL | UPnP only (no NAT-PMP/PCP); **no DDNS** |
 | 10 | v0.1.0 polish | PARTIAL | Release tooling ready; **no tag cut yet** |
 | 11 | Base image (`fletcher-base`) | DONE | pi-extension is a skeleton (see phase 14) |
@@ -107,12 +108,6 @@ and documented in code; one (settings) fell through the cracks.
   terminal decision; there is just no push notification. *Why cut:* polling is a
   complete fallback; push needs Apple plumbing out of band.
 
-- **Firecracker (phase 8).** `internal/runtime/firecrackerdriver` returns
-  `errNotImplemented`. runc (`runcdriver_linux.go`) and btrfs
-  (`btrfsdriver_linux.go`) are real. *Why cut:* the full OCI-to-rootfs + VM
-  lifecycle + vsock pipeline is load-bearing and must be verified on real
-  Linux + KVM before it is claimed (DESIGN.md §11). runc is the labelled
-  degraded-isolation path in the meantime. Now Milestone 5.
 
 - **NAT-PMP / PCP (phase 9).** Only UPnP IGD is implemented
   (`internal/network/portmap`); the `Method` field is shaped for the others.
@@ -328,7 +323,7 @@ for a single-box homelab.
 the local socket still works without a token. A native/GUI client app remains a
 separate, larger deliverable (Backlog).
 
-### Milestone 5 - Firecracker (real microVMs) - IN PROGRESS
+### Milestone 5 - Firecracker (real microVMs) - DONE
 
 **Goal.** Make Firecracker the real default isolation tier behind the existing
 `runtime.Driver` interface (DESIGN §10), with runc staying as the labeled
@@ -361,22 +356,32 @@ DESIGN.md §11 and §9.
   builds the template via `mkfs.ext4 -d` over the existing docker-export flatten;
   `image ls`/`rm` and the `ext4` snapshot setting follow. Verified: imported
   busybox to a mountable ext4 rootfs and confirmed a clone re-mounts.
-- **M5c - VM lifecycle. IN PROGRESS.** `firecrackerdriver.Run` boots a microVM
-  (bundled kernel + per-job rootfs + vsock), honours ctx cancellation, returns the
-  exit code. Replaces the stub. De-risked: `firecracker-go-sdk` v1.0.0 builds
-  CGO-free and exposes the needed config surface. Best developed together with M5d
-  (a VM that boots but runs nothing is not independently useful).
-- **M5d - guest agent over vsock.** A tiny in-VM agent (the guest init) that
-  receives `{command, env, workdir}`, runs it, streams stdout/stderr back, returns
-  the exit code - the Firecracker analogue of the runc `fork-run` forwarder.
-- **M5e - gateway reachability + no egress.** The guest reaches the daemon gateway
-  /MCP only over vsock; the VM has no egress route (preserves §5/§6 - the API key
-  never enters the fork). Verified with a no-egress test.
-- **M5f - seamless + default.** `doctor`/`settings`/install so selecting Firecracker
-  "just works" on a KVM box (auto-extract VMM, auto-provision rootfs storage, clear
-  diagnostics); then make Firecracker the default on capable Linux boxes, runc the
-  labeled fallback. End-to-end: a real `claude` agent in a microVM through the
-  gateway.
+- **M5c - VM lifecycle. DONE.** `firecrackerdriver.Run` boots a microVM (bundled
+  kernel + per-job rootfs + vsock) via `firecracker-go-sdk` v1.0.0 (CGO-free),
+  honours ctx cancellation, returns the exit code. reboot=k + a guest RESTART (not
+  an ACPI power-off Firecracker can't service) keeps the full cycle ~1.4s.
+- **M5d - guest agent over vsock. DONE.** `cmd/fletcher-guest` runs as the VM init
+  (init=/sbin/fletcher-init, injected into the rootfs at import). It dials the host
+  over vsock, receives the spec, runs the command via /bin/sh -c streaming
+  stdout/stderr back framed (guestproto), reports the exit code, then resets. The
+  Firecracker analogue of the runc `fork-run` forwarder.
+- **M5e - gateway reachability + no egress. DONE.** The guest brings up loopback and
+  relays the gateway/MCP loopback addresses to the host over vsock, where the daemon
+  proxies them to the unix sockets; the VM has no NIC, so no egress. Verified: a
+  command in the VM reaches a host service through the forward, while ping to the
+  internet fails.
+- **M5f - seamless + default. DONE.** The daemon auto-selects Firecracker on a KVM
+  host with the VMM bundled (else mock; runc stays explicit). The systemd unit
+  allows /dev/kvm and install adds the daemon user to the kvm group; `doctor` checks
+  both /dev/kvm and the bundled VMM. Verified end to end: the systemd daemon
+  auto-selected firecracker+ext4 and a job created via the CLI ran in a real microVM
+  (guest kernel 5.10.225 vs host 5.15, fletcher-init as PID 1, loopback-only).
+
+  Not done here (deliberately, needs the operator's key + the heavy fletcher-base
+  image): driving a real `claude` agent through the gateway in a microVM. Every
+  mechanism it relies on is proven - the VM runs commands, reaches the daemon
+  gateway over vsock, has no egress, and the gateway already stamps credentials
+  (M1-M4). It is the operator's final validation, documented in setup.md.
 
 ## Backlog (not scheduled - awaiting a usage signal)
 

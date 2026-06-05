@@ -13,15 +13,15 @@ the snapshots - everything runs on metal you control.
 
 ## Status
 
-Pre-v0.1.0, but the core loop works end to end on a real Linux box: a job
-runs a real agent (Claude Code) inside an isolated **rootless runc + btrfs
-fork**, reaching models *only* through the daemon's gateway (the API key never
-enters the fork, and the fork has no other network egress). You configure and
-manage it entirely with `fletcher` verbs - `fletcher settings`,
-`fletcher daemon` - with no systemctl, and you can drive the daemon from a
-paired device over the tunnel with a per-peer token. The **Firecracker**
-microVM runtime (the intended default isolation tier) is the remaining piece
-and is still stubbed.
+Pre-v0.1.0, but the core loop works end to end on a real Linux box. A job runs
+inside a **Firecracker microVM** (the default on a KVM host) - or a rootless
+**runc** fork as the no-KVM fallback - reaching models *only* through the
+daemon's gateway (the API key never enters the VM, and the VM has no network
+egress at all - only a vsock channel to the daemon). You configure and manage it
+entirely with `fletcher` verbs - `fletcher settings`, `fletcher daemon` - with no
+systemctl, and you can drive the daemon from a paired device over the tunnel with
+a per-peer token. The remaining gap to a one-command experience is a
+shipped/pullable base image (today you build it once with `make image`).
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for exactly what is built, verified,
 and pending.
@@ -37,21 +37,22 @@ curl -fsSL https://raw.githubusercontent.com/joshjon/fletcher/main/scripts/insta
 # 2. Enable + start the daemon:
 sudo systemctl enable --now fletcher
 
-# 3. Talk to it:
+# 3. Check it's healthy:
 fletcher health
-fletcher job create --name hello --command "echo hi" --image mock
-fletcher job list
+fletcher doctor          # checks /dev/kvm, the bundled VMM, networking, ...
 
 # 4. Pair your phone (scan the QR with the WireGuard app):
 fletcher peer pair phone
 ```
 
-That runs against the default mock runtime (a plain host subprocess - good
-for a smoke test). Running a *real agent in an isolated fork* needs the
-runc + btrfs runtime and a base image; the full walkthrough - including
-`fletcher settings`, `fletcher daemon`, running Claude Code in a fork, and
-driving the daemon from a paired device - is in
-[`docs/setup.md`](docs/setup.md).
+On a KVM host the daemon defaults to the **Firecracker** runtime, so running a
+job needs a base image first: build one with `make image` and import it with
+`fletcher image import --format ext4`, then `fletcher job create --image
+<name> --command "..."`. The full walkthrough - building/importing the image,
+running an agent in a microVM, `fletcher settings` / `fletcher daemon`, and
+driving the daemon from a paired device - is in [`docs/setup.md`](docs/setup.md).
+(No KVM? The daemon falls back to the mock runtime, where
+`fletcher job create --command "echo hi"` runs as a plain subprocess.)
 
 The daemon brings up its own WireGuard interface and asks your router to
 forward the listening port via UPnP - on most home connections that's
