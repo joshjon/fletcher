@@ -48,6 +48,7 @@ func newApp() *cli.Command {
 		Version: buildinfo.Version,
 		Commands: []*cli.Command{
 			serveCmd(),
+			daemonCmd(),
 			healthCmd(),
 			doctorCmd(),
 			jobCmd(),
