@@ -41,16 +41,16 @@ type definition struct {
 }
 
 var registry = []definition{
-	{KeyRuntime, "runtime driver: mock | runc | firecracker (restart to apply)", oneOf("mock", "runc", "firecracker")},
-	{KeySnapshot, "snapshot driver: mock | btrfs | ext4 (restart to apply)", oneOf("mock", "btrfs", "ext4")},
-	{KeyBtrfsRoot, "btrfs snapshot root directory (restart to apply)", nil},
-	{KeyPublicEndpoint, "host:port peers dial to reach this daemon (restart to apply)", nil},
-	{KeyWireGuardPort, "WireGuard UDP listen port, 1-65535 (restart to apply)", portNumber},
-	{KeyLogLevel, "log level: debug | info | warn | error (restart to apply)", oneOf("debug", "info", "warn", "error")},
-	{KeyCredentialsDir, "host directory for trusted-credential mounts (restart to apply)", nil},
-	{KeyNoUPnP, "disable the automatic UPnP port-forward: true | false (restart to apply)", oneOf("true", "false")},
-	{KeyGatewayListen, "model gateway listen address, host:port (restart to apply)", hostPort},
-	{KeyMCPListen, "MCP server listen address, host:port (restart to apply)", hostPort},
+	{KeyRuntime, "runtime driver: mock | runc | firecracker", oneOf("mock", "runc", "firecracker")},
+	{KeySnapshot, "snapshot driver: mock | btrfs | ext4", oneOf("mock", "btrfs", "ext4")},
+	{KeyBtrfsRoot, "btrfs snapshot root directory", nil},
+	{KeyPublicEndpoint, "host:port peers dial to reach this daemon", nil},
+	{KeyWireGuardPort, "WireGuard UDP listen port, 1-65535", portNumber},
+	{KeyLogLevel, "log level: debug | info | warn | error", oneOf("debug", "info", "warn", "error")},
+	{KeyCredentialsDir, "host directory for trusted-credential mounts", nil},
+	{KeyNoUPnP, "disable the automatic UPnP port-forward: true | false", oneOf("true", "false")},
+	{KeyGatewayListen, "model gateway listen address, host:port", hostPort},
+	{KeyMCPListen, "MCP server listen address, host:port", hostPort},
 }
 
 // View is one setting's full picture for `fletcher settings list`.

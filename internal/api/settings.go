@@ -22,11 +22,15 @@ type SettingsBackend interface {
 type SettingsService struct {
 	fletcherv1connect.UnimplementedSettingsServiceHandler
 	backend SettingsBackend
+	// defaults maps each key to the daemon's resolved default value, surfaced
+	// for unset keys so a caller sees the effective value, not just "(default)".
+	defaults map[string]string
 }
 
-// NewSettingsService wires a SettingsService to a backend.
-func NewSettingsService(backend SettingsBackend) *SettingsService {
-	return &SettingsService{backend: backend}
+// NewSettingsService wires a SettingsService to a backend and the daemon's
+// resolved per-key defaults.
+func NewSettingsService(backend SettingsBackend, defaults map[string]string) *SettingsService {
+	return &SettingsService{backend: backend, defaults: defaults}
 }
 
 // SetSetting validates and stores key=value.
@@ -54,9 +58,14 @@ func (s *SettingsService) ListSettings(ctx context.Context, _ *connect.Request[f
 	}
 	out := make([]*fletcherv1.Setting, len(views))
 	for i, v := range views {
+		value := v.Value
+		if !v.Set {
+			// Not explicitly set: report the daemon's effective default.
+			value = s.defaults[v.Key]
+		}
 		out[i] = &fletcherv1.Setting{
 			Key:         v.Key,
-			Value:       v.Value,
+			Value:       value,
 			Description: v.Description,
 			Set:         v.Set,
 		}

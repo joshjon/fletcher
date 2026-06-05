@@ -280,14 +280,15 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	})
 
 	connectDeps := connectDeps{
-		jobs:      job.NewService(queries, supervisor),
-		secrets:   secretsStore,
-		approvals: approvalSvc,
-		peers:     peerSvc,
-		serverKey: wgKeyProvider,
-		models:    gatewayCatalog{baseURL: gatewayURL},
-		peerSync:  &tunnelPeerSyncer{peers: peerSvc, tunnel: netSetup.Tunnel, logger: logger},
-		settings:  settings.NewStore(queries),
+		jobs:             job.NewService(queries, supervisor),
+		secrets:          secretsStore,
+		approvals:        approvalSvc,
+		peers:            peerSvc,
+		serverKey:        wgKeyProvider,
+		models:           gatewayCatalog{baseURL: gatewayURL},
+		peerSync:         &tunnelPeerSyncer{peers: peerSvc, tunnel: netSetup.Tunnel, logger: logger},
+		settings:         settings.NewStore(queries),
+		settingsDefaults: settingsDefaults(cfg),
 	}
 
 	connectSrv := newHTTPServer(startedAt.Unix(), connectDeps, logger)
@@ -327,6 +328,9 @@ type connectDeps struct {
 	models    api.CatalogBuilder
 	peerSync  api.PeerSyncer
 	settings  api.SettingsBackend
+	// settingsDefaults maps each setting key to the daemon's resolved default,
+	// so `fletcher settings list` shows the effective value, not just "(default)".
+	settingsDefaults map[string]string
 }
 
 // tunnelPeerSyncer is the production PeerSyncer: it pulls the current
@@ -475,7 +479,7 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	mux.Handle(peersPath, peersHandler)
 
 	settingsPath, settingsHandler := fletcherv1connect.NewSettingsServiceHandler(
-		api.NewSettingsService(deps.settings), interceptors,
+		api.NewSettingsService(deps.settings, deps.settingsDefaults), interceptors,
 	)
 	mux.Handle(settingsPath, settingsHandler)
 
@@ -639,6 +643,29 @@ func kvmUsable() bool {
 	}
 	_ = f.Close()
 	return true
+}
+
+// settingsDefaults maps each settings key to the daemon's resolved default value
+// (what it falls back to when the key is not explicitly set), so the settings
+// service can show the effective value rather than a bare "(default)". cfg is
+// already fully resolved here, so for an unset key it holds exactly that default.
+func settingsDefaults(cfg Config) map[string]string {
+	btrfsRoot := cfg.BtrfsRoot
+	if btrfsRoot == "" {
+		btrfsRoot = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
+	}
+	return map[string]string{
+		settings.KeyRuntime:        cfg.RuntimeKind,
+		settings.KeySnapshot:       cfg.SnapshotKind,
+		settings.KeyBtrfsRoot:      btrfsRoot,
+		settings.KeyPublicEndpoint: cfg.PublicEndpoint,
+		settings.KeyWireGuardPort:  strconv.Itoa(cfg.WireGuardListenPort),
+		settings.KeyLogLevel:       cfg.LogLevel,
+		settings.KeyCredentialsDir: cfg.CredentialsDir,
+		settings.KeyNoUPnP:         strconv.FormatBool(cfg.DisableUPnP),
+		settings.KeyGatewayListen:  cfg.GatewayListenAddr,
+		settings.KeyMCPListen:      cfg.MCPListenAddr,
+	}
 }
 
 // buildSnapshotDriver constructs the snapshot.Driver chosen by cfg. The

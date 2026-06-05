@@ -42,13 +42,25 @@ func settingsListCmd() *cli.Command {
 			w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 			fmt.Fprintln(w, "KEY\tVALUE\tDESCRIPTION")
 			for _, s := range resp.Msg.GetSettings() {
+				// Show the effective value. Mark it "(default)" when it is not
+				// explicitly set; if there is no concrete default (auto/none),
+				// show just "(default)".
 				value := s.GetValue()
-				if !s.GetSet() {
+				switch {
+				case s.GetSet():
+					// explicit value, shown as-is
+				case value == "":
 					value = "(default)"
+				default:
+					value += " (default)"
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\n", s.GetKey(), value, s.GetDescription())
 			}
-			return w.Flush()
+			if err := w.Flush(); err != nil {
+				return err
+			}
+			fmt.Println("\nChanges take effect on the next `fletcher daemon restart`.")
+			return nil
 		},
 	}
 }
