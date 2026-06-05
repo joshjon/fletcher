@@ -26,12 +26,14 @@ tunnel, and `fletcher doctor`. The mock runtime executes a job's command as a
 plain host subprocess - no isolation, no image - so it proves the plumbing, not
 the product.
 
-What works (verified on hardware 2026-06-05): a **real agent runs in a rootless
-runc + btrfs fork**. `fletcher image import` flattens `fletcher-base` into a
-btrfs template; the daemon CoW-snapshots it per job and runs the command in a
-rootless runc container; `claude --version` and `pi --version` exit 0 inside the
-fork, with the daemon unprivileged and its systemd sandbox intact. The hard part
-of Milestone 2 (an agent executing in the fork) is done.
+What works (verified on hardware 2026-06-05): **the full private-agent-compute
+loop - Milestone 2 is done.** `fletcher image import` flattens `fletcher-base`
+into a btrfs template; the daemon CoW-snapshots it per job and runs the command
+in a rootless runc fork; the fork reaches the daemon gateway/MCP over a unix
+socket (and nothing else - zero egress); and a `claude -p` job completes a real
+Anthropic model call through that gateway, exit 0. The agent runs isolated and
+unprivileged, the API key never enters the fork, and egress goes only through
+the daemon. That is the thesis working end to end.
 
 Correction to the earlier record: Milestone 1's "verified on hardware" claim was
 wrong. The daemon was silently on the **mock** runtime the whole time - the
@@ -43,10 +45,7 @@ error-prone and is the case for Milestone 3.
 
 What is **not** possible yet:
 
-- A real agent completing a **model call through the gateway** - the fork has no
-  network path to the daemon gateway (Milestone 2 part 2, `veth` + restricted
-  route).
-- Changing config or lifecycle without `systemctl` (Milestone 3).
+- Changing config or lifecycle without `systemctl` (Milestone 3, next).
 - A remote client reaching the daemon over the tunnel - the API is bound to a
   local Unix socket only (Milestone 4).
 - Firecracker microVMs - the intended default isolation tier (Milestone 5).
@@ -171,19 +170,22 @@ snapshot (btrfs), instead of the mock driver's bare subprocess.
 **Known debt carried forward:** `CAP_SYS_ADMIN` is broad (hardening to
 rootless-runc + user namespaces is in Backlog).
 
-### Milestone 2 - Run a real agent in the fork + prove the gateway - IN PROGRESS
+### Milestone 2 - Run a real agent in the fork + prove the gateway - DONE (verified 2026-06-05)
 
-**Goal.** An actual agent (claude/codex/pi) runs inside the fork against the
-daemon gateway, with credentials never entering the fork. This is the product:
-private agent compute.
+**Goal (met).** An actual agent runs inside the fork against the daemon gateway,
+with credentials never entering the fork. This is the product: private agent
+compute. A `claude -p` job completed a real Anthropic call through the gateway
+from an isolated rootless fork with zero egress.
 
-**Decisions made (2026-06-04):**
+**Decisions made:**
 
-- *Fork networking:* veth pair + restricted route - the fork reaches only the
-  daemon's gateway/MCP IP, no default route, no cross-fork path. Correct §5/§6
-  isolation from the start rather than a shared-host-netns shortcut.
+- *Fork networking:* originally chosen as veth + restricted route; after the
+  rootless discovery (the daemon is unprivileged) the operator chose the simpler,
+  equally-isolating **unix-socket forwarder** instead - the fork has only
+  loopback and reaches the daemon through bind-mounted sockets. Same property
+  (reach only the daemon, no egress), far simpler under rootless.
 - *Agent auth:* support both - subscription via credential mount (Phase 12) and
-  API key via the gateway - chosen per job.
+  API key via the gateway (verified) - chosen per job.
 
 **Seams found while scoping:**
 
@@ -213,14 +215,19 @@ private agent compute.
     job's error. This is what made the rootless errors debuggable.
   - **Import truncation fix** (`2982976`): `image import` used `cmd.StdoutPipe()`
     + early `Wait`, truncating the tar and dropping the agents' install dirs.
-- **M2a.2 - veth + restricted route - NEXT.** The fork still has no network path
-  to the gateway (its own empty netns; injected URL is `127.0.0.1`). Give it a
-  veth to a daemon-reachable address with no default route, rebind the gateway,
-  inject that address. The chosen networking design from above.
-- **M2a.3 - auth end to end** - a real `claude -p "..."` model call through the
-  gateway, via credential mount or gateway API key. `ProtectHome` will need
-  relaxing for the credential-mount path. (`MemoryDenyWriteExecute` turned out
-  not to need relaxing - the native claude binary runs fine under it.)
+- **M2a.2 - fork reaches the gateway, no egress - DONE (`4320c86`).** Unix-socket
+  forwarder: the gateway/MCP also listen on unix sockets; the runc driver
+  bind-mounts those sockets plus the daemon's `fletcher` binary into the fork and
+  wraps the command with `fletcher fork-run`, which relays the fork's loopback
+  calls to the sockets. The fork keeps an empty netns (loopback only), so it
+  reaches only the daemon. Verified: fork curls the gateway OK, cannot resolve
+  the public internet.
+- **M2a.3 - real model call end to end - DONE (`ee4136b`).** A `claude -p` job
+  completes a real Anthropic generation through the gateway, exit 0. Took a
+  gateway fix: `/v1/messages` now forwards the client's headers (it had dropped
+  `anthropic-beta`, so Claude Code's `context_management` requests 400'd). Auth
+  used the gateway API-key path; the credential-mount path (needs `ProtectHome`
+  relaxed) is still untested. (`MemoryDenyWriteExecute` did not need relaxing.)
 
 ### Milestone 3 - Ergonomics: no more systemctl - PLANNED
 
