@@ -52,6 +52,7 @@ func newApp() *cli.Command {
 			doctorCmd(),
 			jobCmd(),
 			imageCmd(),
+			forkRunCmd(),
 			modelCmd(),
 			secretCmd(),
 			approvalCmd(),

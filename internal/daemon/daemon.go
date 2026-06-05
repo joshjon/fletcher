@@ -161,6 +161,10 @@ type services struct {
 	connectLn      net.Listener
 	gatewayLn      net.Listener
 	mcpLn          net.Listener
+	gatewayUnixLn  net.Listener
+	mcpUnixLn      net.Listener
+	gatewayUnix    string
+	mcpUnix        string
 	gatewayBaseURL string
 	mcpBaseURL     string
 	tunnel         wireguard.Tunnel
@@ -202,6 +206,19 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	if err != nil {
 		return nil, err
 	}
+	// The gateway and MCP also listen on unix sockets so a fork (loopback
+	// only) can reach them via bind-mounted sockets + the in-fork forwarder.
+	gatewayUnix := gatewaySocketPath(cfg)
+	gatewayUnixLn, err := listenUnix(ctx, gatewayUnix)
+	if err != nil {
+		return nil, fmt.Errorf("gateway unix listener: %w", err)
+	}
+	mcpUnix := mcpSocketPath(cfg)
+	mcpUnixLn, err := listenUnix(ctx, mcpUnix)
+	if err != nil {
+		return nil, fmt.Errorf("mcp unix listener: %w", err)
+	}
+
 	approvalSvc := approval.NewService(queries, approval.ServiceOptions{})
 	peerSvc := peer.NewService(queries, peer.Options{
 		PublicEndpoint: cfg.PublicEndpoint,
@@ -253,6 +270,10 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		connectLn:      connectLn,
 		gatewayLn:      gatewayLn,
 		mcpLn:          mcpLn,
+		gatewayUnixLn:  gatewayUnixLn,
+		mcpUnixLn:      mcpUnixLn,
+		gatewayUnix:    gatewayUnix,
+		mcpUnix:        mcpUnix,
 		gatewayBaseURL: gatewayURL,
 		mcpBaseURL:     mcpURL,
 		tunnel:         netSetup.Tunnel,
@@ -317,6 +338,11 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	g.Add(httpServeActor(logger, "gateway", s.gatewaySrv, s.gatewayLn, s.gatewayBaseURL))
 	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
 	g.Add(httpServeActor(logger, "mcp", s.mcpSrv, s.mcpLn, s.mcpBaseURL))
+	// The same gateway/MCP servers also serve their unix sockets (for forks).
+	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
+	g.Add(httpServeActor(logger, "gateway-unix", s.gatewaySrv, s.gatewayUnixLn, "unix:"+s.gatewayUnix))
+	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
+	g.Add(httpServeActor(logger, "mcp-unix", s.mcpSrv, s.mcpUnixLn, "unix:"+s.mcpUnix))
 	g.Add(supervisorActor(ctx, s.supervisor))
 	if s.tunnel != nil {
 		g.Add(tunnelActor(ctx, logger, s.tunnel))
@@ -553,6 +579,18 @@ func buildSnapshotDriver(cfg Config) (snapshot.Driver, error) {
 	}
 }
 
+// gatewaySocketPath and mcpSocketPath are the daemon-side unix sockets the
+// gateway and MCP also listen on (next to the Connect socket), so a fork -
+// which has only loopback - can reach them through bind-mounted sockets and
+// the in-fork forwarder.
+func gatewaySocketPath(cfg Config) string {
+	return filepath.Join(filepath.Dir(cfg.SocketPath), "gateway.sock")
+}
+
+func mcpSocketPath(cfg Config) string {
+	return filepath.Join(filepath.Dir(cfg.SocketPath), "mcp.sock")
+}
+
 // buildRuntimeDriver constructs the runtime.Driver chosen by cfg.
 func buildRuntimeDriver(cfg Config) (runtime.Driver, error) {
 	kind := cfg.RuntimeKind
@@ -563,7 +601,18 @@ func buildRuntimeDriver(cfg Config) (runtime.Driver, error) {
 	case "mock":
 		return runtimemock.New(), nil
 	case "runc":
-		return runcdriver.New(runcdriver.Options{Binary: cfg.RuncBinary})
+		self, err := os.Executable()
+		if err != nil {
+			return nil, fmt.Errorf("resolve daemon binary for fork forwarder: %w", err)
+		}
+		return runcdriver.New(runcdriver.Options{
+			Binary:          cfg.RuncBinary,
+			ForwarderBinary: self,
+			Forwards: []runcdriver.Forward{
+				{Listen: cfg.GatewayListenAddr, HostSocket: gatewaySocketPath(cfg)},
+				{Listen: cfg.MCPListenAddr, HostSocket: mcpSocketPath(cfg)},
+			},
+		})
 	case "firecracker":
 		return firecrackerdriver.New(firecrackerdriver.Options{})
 	default:

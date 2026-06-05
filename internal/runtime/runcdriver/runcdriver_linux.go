@@ -32,10 +32,23 @@ import (
 
 // Driver is a runtime.Driver that runs jobs as OCI containers via runc.
 type Driver struct {
-	binary    string
-	bundleDir string
-	stateDir  string
-	counter   atomic.Uint64
+	binary       string
+	bundleDir    string
+	stateDir     string
+	forwarderBin string
+	forwards     []Forward
+	counter      atomic.Uint64
+}
+
+// Forward describes one TCP-listen -> unix-socket relay the fork runs so an
+// agent can reach a daemon service (gateway, MCP). The fork has only loopback,
+// so this is its single path to the daemon - and thus no general egress.
+type Forward struct {
+	// Listen is the loopback address the in-fork forwarder binds, matching the
+	// base-URL injected into the job (e.g. "127.0.0.1:11500").
+	Listen string
+	// HostSocket is the daemon-side unix socket the relay connects to.
+	HostSocket string
 }
 
 // Options configures a Driver.
@@ -46,6 +59,12 @@ type Options struct {
 	// BundleDir is the directory under which transient OCI bundles are
 	// materialised before each run. Defaults to a fresh subdir of os.TempDir.
 	BundleDir string
+	// ForwarderBinary is the host path to a `fletcher` binary bind-mounted
+	// into the fork to run the in-fork forwarders (`fletcher fork-run`). When
+	// empty, or Forwards is empty, the job command runs without forwarders.
+	ForwarderBinary string
+	// Forwards are the daemon services the fork should reach.
+	Forwards []Forward
 }
 
 // New constructs a Driver. Returns an error if the runc binary is not
@@ -75,7 +94,13 @@ func New(opts Options) (*Driver, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return nil, fmt.Errorf("ensure runc state dir: %w", err)
 	}
-	return &Driver{binary: binary, bundleDir: bundleDir, stateDir: stateDir}, nil
+	return &Driver{
+		binary:       binary,
+		bundleDir:    bundleDir,
+		stateDir:     stateDir,
+		forwarderBin: opts.ForwarderBinary,
+		forwards:     opts.Forwards,
+	}, nil
 }
 
 // Run materialises a bundle for spec, executes 'runc run', and returns
@@ -88,7 +113,8 @@ func (d *Driver) Run(ctx context.Context, spec runtime.Spec, stdout, stderr io.W
 	}
 	defer func() { _ = os.RemoveAll(bundle) }()
 
-	if err := writeOCIConfig(bundle, spec); err != nil {
+	args, mounts := d.jobArgsAndMounts(spec)
+	if err := writeOCIConfig(bundle, spec, args, mounts); err != nil {
 		return runtime.Result{}, fmt.Errorf("write config: %w", err)
 	}
 
@@ -112,13 +138,47 @@ func (d *Driver) Run(ctx context.Context, spec runtime.Spec, stdout, stderr io.W
 	return runtime.Result{ExitCode: 0}, nil
 }
 
-// writeOCIConfig produces a minimal-but-valid config.json inside bundle
-// that runs spec.Command via /bin/sh -c inside spec.WorkDir as rootfs.
-func writeOCIConfig(bundle string, spec runtime.Spec) error {
+// forkBinPath is where the daemon's `fletcher` binary is bind-mounted inside
+// the fork to run the forwarders. fwdSocketPath returns the in-fork path the
+// i-th daemon socket is bind-mounted at; both live under dirs the base image
+// already has so runc can create the mountpoints.
+const forkBinPath = "/usr/local/bin/fletcher-forward"
+
+func fwdSocketPath(i int) string {
+	return fmt.Sprintf("/run/.fletcher-fwd-%d.sock", i)
+}
+
+// jobArgsAndMounts builds the container process args and bind-mount list. When
+// forwarding is configured, the command is wrapped with `fletcher fork-run`
+// (bind-mounted in) plus the daemon sockets, so the agent reaches the daemon
+// over loopback with no egress; otherwise the command runs directly.
+func (d *Driver) jobArgsAndMounts(spec runtime.Spec) ([]string, []runtime.Mount) {
+	command := []string{"/bin/sh", "-c", spec.Command}
+	mounts := spec.Mounts
+
+	if d.forwarderBin == "" || len(d.forwards) == 0 {
+		return command, mounts
+	}
+
+	mounts = append(mounts, runtime.Mount{Source: d.forwarderBin, Destination: forkBinPath, ReadOnly: true})
+	args := []string{forkBinPath, "fork-run"}
+	for i, f := range d.forwards {
+		sock := fwdSocketPath(i)
+		mounts = append(mounts, runtime.Mount{Source: f.HostSocket, Destination: sock, ReadOnly: false})
+		args = append(args, "--forward", f.Listen+"="+sock)
+	}
+	args = append(args, "--")
+	args = append(args, command...)
+	return args, mounts
+}
+
+// writeOCIConfig produces a minimal-but-valid config.json inside bundle that
+// runs args inside spec.WorkDir as rootfs with the given bind mounts.
+func writeOCIConfig(bundle string, spec runtime.Spec, args []string, mounts []runtime.Mount) error {
 	if spec.WorkDir == "" {
 		return errors.New("spec.WorkDir is required (must point at the snapshot rootfs)")
 	}
-	cfg := minimalOCIConfig(spec)
+	cfg := ociConfig(spec, args, mounts)
 	b, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -138,7 +198,7 @@ func writeOCIConfig(bundle string, spec runtime.Spec) error {
 // host. For that to own the rootfs, `fletcher image import` chowns the
 // template to the daemon user; HOME=/home/fletcher and cwd /workspace match
 // the fletcher-base image so the agent launchers resolve their install.
-func minimalOCIConfig(spec runtime.Spec) map[string]any {
+func ociConfig(spec runtime.Spec, args []string, mounts []runtime.Mount) map[string]any {
 	env := append([]string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME=/home/fletcher",
@@ -152,7 +212,7 @@ func minimalOCIConfig(spec runtime.Spec) map[string]any {
 		"process": map[string]any{
 			"terminal": false,
 			"user":     map[string]any{"uid": 0, "gid": 0},
-			"args":     []string{"/bin/sh", "-c", spec.Command},
+			"args":     args,
 			"env":      env,
 			"cwd":      "/workspace",
 			"capabilities": map[string]any{
@@ -168,7 +228,7 @@ func minimalOCIConfig(spec runtime.Spec) map[string]any {
 			"readonly": false,
 		},
 		"hostname": "fletcher-job",
-		"mounts":   buildMounts(spec.Mounts),
+		"mounts":   buildMounts(mounts),
 		"linux": map[string]any{
 			"namespaces": []map[string]any{
 				{"type": "pid"},
