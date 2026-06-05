@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v3"
+
+	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestagent"
 )
 
 // daemonUser is the system user the daemon runs as. Imported rootfs templates
@@ -265,6 +267,14 @@ func importImageExt4(ctx context.Context, root, ref, name string, force bool) er
 
 	if err := exportDockerRootfs(ctx, ref, staging); err != nil {
 		return err
+	}
+	// Inject the guest agent as the microVM init (init=/sbin/fletcher-init).
+	initDest := filepath.Join(staging, guestagent.InitPath)
+	if err := os.MkdirAll(filepath.Dir(initDest), 0o755); err != nil { //nolint:gosec // standard /sbin perms inside the rootfs
+		return fmt.Errorf("create init dir in rootfs: %w", err)
+	}
+	if err := guestagent.WriteTo(initDest); err != nil {
+		return fmt.Errorf("inject guest agent: %w", err)
 	}
 	if err := buildExt4Image(ctx, staging, target); err != nil {
 		_ = os.Remove(target)

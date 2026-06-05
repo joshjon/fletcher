@@ -34,6 +34,7 @@ import (
 	"github.com/joshjon/fletcher/internal/peer"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver"
+	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/vmm"
 	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
 	"github.com/joshjon/fletcher/internal/runtime/runcdriver"
 	"github.com/joshjon/fletcher/internal/secrets"
@@ -764,7 +765,18 @@ func buildRuntimeDriver(cfg Config) (runtime.Driver, error) {
 			},
 		})
 	case "firecracker":
-		return firecrackerdriver.New(firecrackerdriver.Options{})
+		// Extract the bundled VMM (firecracker binary + guest kernel) on first
+		// use, then point the driver at the extracted paths.
+		stateDir := filepath.Dir(cfg.DatabasePath)
+		bundle, err := vmm.Extract(filepath.Join(stateDir, "vmm"))
+		if err != nil {
+			return nil, fmt.Errorf("extract firecracker VMM: %w", err)
+		}
+		return firecrackerdriver.New(firecrackerdriver.Options{
+			FirecrackerBinary: bundle.FirecrackerPath,
+			KernelPath:        bundle.KernelPath,
+			RunDir:            filepath.Join(stateDir, "firecracker"),
+		})
 	default:
 		return nil, fmt.Errorf("unknown runtime kind %q", cfg.RuntimeKind)
 	}

@@ -1,0 +1,194 @@
+//go:build linux
+
+// Command fletcher-guest is the init process inside a Firecracker microVM. It
+// is injected into the rootfs as /sbin/fletcher-init and booted via the kernel
+// init= argument. It mounts the basic pseudo-filesystems, dials the daemon over
+// vsock, receives the job spec, runs the command while streaming its output
+// back, reports the exit code, and powers the VM off.
+//
+// It is deliberately tiny and dependency-light: it is PID 1, so anything it
+// pulls in ships in every rootfs and runs as init.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/mdlayher/vsock"
+	"golang.org/x/sys/unix"
+
+	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestproto"
+)
+
+func main() {
+	mountBasics()
+	code := run()
+	// PID 1 must not simply return (the kernel panics). Trigger a reboot so the
+	// VMM exits and the host's Wait returns. Firecracker has no ACPI, so a
+	// power-off would hang; with reboot=k the kernel does a keyboard-controller
+	// reset, which Firecracker intercepts and exits on.
+	shutdown()
+	os.Exit(code) // unreachable once shutdown succeeds
+}
+
+// run dials the host, executes the job, and returns the exit code to report.
+func run() int {
+	conn, err := dialHost()
+	if err != nil {
+		// Nothing to report to; surface on the console for debugging.
+		fmt.Fprintf(os.Stderr, "fletcher-guest: dial host: %v\n", err)
+		return 1
+	}
+	defer func() { _ = conn.Close() }()
+
+	spec, err := guestproto.ReadSpec(conn)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: read spec: %v\n", err)
+		return 1
+	}
+
+	fc := &frameConn{w: conn}
+	code := runCommand(spec, fc)
+
+	if err := fc.write(guestproto.KindExit, guestproto.EncodeExit(int32(code))); err != nil { //nolint:gosec // exit codes are 0-255
+		fmt.Fprintf(os.Stderr, "fletcher-guest: send exit: %v\n", err)
+	}
+	return code
+}
+
+// runCommand runs the job command with its stdout/stderr framed back over fc.
+func runCommand(spec guestproto.Spec, fc *frameConn) int {
+	workDir := spec.WorkDir
+	if workDir == "" {
+		workDir = "/"
+	}
+	// Ensure the working directory exists (e.g. /workspace on a minimal rootfs);
+	// fall back to / if it cannot be created.
+	if err := os.MkdirAll(workDir, 0o755); err != nil { //nolint:gosec // standard rootfs dir perms inside the VM
+		workDir = "/"
+	}
+	// The host tears down the whole VM to cancel, so an in-guest context adds
+	// nothing; Background satisfies the lint that wants a context-aware call.
+	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-c", spec.Command) //nolint:gosec // running the job is the entire purpose
+	cmd.Dir = workDir
+	cmd.Env = withDefaults(spec.Env)
+	cmd.Stdout = streamWriter{fc: fc, kind: guestproto.KindStdout}
+	cmd.Stderr = streamWriter{fc: fc, kind: guestproto.KindStderr}
+
+	err := cmd.Run()
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if ee.ExitCode() >= 0 {
+			return ee.ExitCode()
+		}
+		return 1 // killed by signal
+	}
+	// Couldn't start the command at all (e.g. no /bin/sh).
+	_ = fc.write(guestproto.KindStderr, []byte(fmt.Sprintf("fletcher-guest: %v\n", err)))
+	return 127
+}
+
+// dialHost connects to the daemon over vsock, retrying while the VM finishes
+// bringing up its vsock device.
+func dialHost() (net.Conn, error) {
+	var lastErr error
+	for range 50 {
+		conn, err := vsock.Dial(guestproto.HostCID, guestproto.Port, nil)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil, lastErr
+}
+
+// frameConn serialises frame writes from the concurrent stdout/stderr streams.
+type frameConn struct {
+	mu sync.Mutex
+	w  net.Conn
+}
+
+func (c *frameConn) write(kind byte, payload []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return guestproto.WriteFrame(c.w, kind, payload)
+}
+
+// streamWriter frames each Write as one output frame of its kind.
+type streamWriter struct {
+	fc   *frameConn
+	kind byte
+}
+
+func (s streamWriter) Write(p []byte) (int, error) {
+	if err := s.fc.write(s.kind, p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// withDefaults ensures the command has a usable PATH and HOME even if the spec
+// did not set them.
+func withDefaults(env []string) []string {
+	out := append([]string(nil), env...)
+	if !hasKey(out, "PATH") {
+		out = append(out, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	}
+	if !hasKey(out, "HOME") {
+		out = append(out, "HOME=/root")
+	}
+	return out
+}
+
+func hasKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// mountBasics mounts the pseudo-filesystems most programs expect. Best-effort:
+// a missing mount point or an already-mounted fs should not stop the job.
+func mountBasics() {
+	type m struct{ source, target, fstype string }
+	for _, mt := range []m{
+		{"proc", "/proc", "proc"},
+		{"sysfs", "/sys", "sysfs"},
+		{"tmpfs", "/tmp", "tmpfs"},
+		{"devpts", "/dev/pts", "devpts"},
+	} {
+		_ = os.MkdirAll(mt.target, 0o755) //nolint:gosec // standard mountpoint perms inside the VM
+		if err := unix.Mount(mt.source, mt.target, mt.fstype, 0, ""); err != nil {
+			fmt.Fprintf(os.Stderr, "fletcher-guest: mount %s: %v\n", mt.target, err)
+		}
+	}
+}
+
+// shutdown flushes and resets the VM so Firecracker exits. As PID 1 we hold
+// CAP_SYS_BOOT. RESTART (with the kernel's reboot=k) does a keyboard-controller
+// reset that Firecracker intercepts; POWER_OFF would need ACPI, which
+// Firecracker does not provide, and would hang.
+func shutdown() {
+	unix.Sync()
+	if err := unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART); err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: reboot: %v\n", err)
+		for {
+			_ = unix.Reboot(unix.LINUX_REBOOT_CMD_HALT)
+			time.Sleep(time.Second)
+		}
+	}
+}

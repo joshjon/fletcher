@@ -19,7 +19,17 @@ FC_KERNEL    ?= vmlinux-5.10.225
 FC_KERNEL_CI ?= v1.11
 VMM_ASSETS   := internal/runtime/firecrackerdriver/vmm/assets
 
-.PHONY: help build build-linux build-linux-amd64 build-linux-arm64 \
+# Guest agent (the microVM init): built from cmd/fletcher-guest for the target
+# arch and embedded. build-guest($arch) builds it into the embed tree.
+GUEST_ASSETS := internal/runtime/firecrackerdriver/guestagent/assets
+HOST_GOARCH  := $(shell $(GO) env GOARCH)
+define build-guest
+	@mkdir -p $(GUEST_ASSETS)/$(1)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(1) $(GO) build -trimpath -ldflags "-s -w" \
+		-o $(GUEST_ASSETS)/$(1)/fletcher-guest ./cmd/fletcher-guest
+endef
+
+.PHONY: help build build-guest build-linux build-linux-amd64 build-linux-arm64 \
 	test test-integration lint fmt check cover generate generate-check \
 	tools clean image image-amd64 image-arm64 install fetch-vmm
 
@@ -29,8 +39,11 @@ help: ## Show this help
 
 ## --- Build ---
 
-build: ## Build the local fletcher binary
+build: build-guest ## Build the local fletcher binary
 	CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -o $(BIN) ./cmd/fletcher
+
+build-guest: ## Build the microVM guest init for the host arch into the embed tree
+	$(call build-guest,$(HOST_GOARCH))
 
 fetch-vmm: ## Download the bundled Firecracker VMM + guest kernel (needed before building the firecracker runtime)
 	@scripts/fetch-vmm.sh "$(FC_VERSION)" "$(FC_KERNEL)" "$(FC_KERNEL_CI)" "$(VMM_ASSETS)"
@@ -61,9 +74,11 @@ install: build ## Developer convenience - mirrors scripts/install.sh using local
 build-linux: build-linux-amd64 build-linux-arm64 ## Cross-compile both Linux targets
 
 build-linux-amd64: ## Cross-compile linux/amd64
+	$(call build-guest,amd64)
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -o bin/fletcher-linux-amd64 ./cmd/fletcher
 
 build-linux-arm64: ## Cross-compile linux/arm64
+	$(call build-guest,arm64)
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -o bin/fletcher-linux-arm64 ./cmd/fletcher
 
 ## --- Test ---

@@ -1,0 +1,7 @@
+This directory holds the linux/amd64 fletcher-guest binary - the microVM init
+injected into ext4 rootfs templates and booted via init=/sbin/fletcher-init.
+
+It is built from cmd/fletcher-guest by `make build` (which builds the guest for
+the target arch before building fletcher), is gitignored, and is embedded into
+the fletcher binary. This about.txt is committed so `//go:embed assets/amd64`
+compiles on a fresh checkout before the binary is built.
