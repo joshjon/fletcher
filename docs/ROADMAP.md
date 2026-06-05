@@ -406,24 +406,33 @@ disk** (the ext4 image / btrfs subvolume), not a running process. So `/workspace
 a `git clone`, edits, and the agent's on-disk session survive across
 disconnects, stops, and daemon restarts.
 
-**Persistence model: disk-first; hibernate by stopping the VM, not snapshotting
-RAM.** The robust, simple path on a single box (and what DESIGN §5 already
-commits to):
+**Persistence model: two sequenced layers, both in scope.** Disk is always the
+source of truth (DESIGN §5); a saved snapshot is only ever a faster way back to a
+state the disk already holds, so durability never depends on it (DESIGN §11).
+Idle auto-stop (a configurable timeout, only after real work finishes - see the
+lifecycle question below) reclaims the box's RAM/CPU either way.
 
-- Idle/stopped session = **VM stopped, fork kept on disk.** Stopping reclaims all
-  RAM/CPU; nothing in memory is load-bearing.
-- Wake = **boot a fresh microVM against the persisted fork**, and resume the agent
-  from its on-disk session (e.g. `claude --resume <id>`) - durability comes from
-  disk, never from a live process. This is exactly DESIGN §5's "resume = restart
-  the agent pointed at its on-disk session," now realised for sessions.
-- **Idle auto-hibernate** (a configurable timeout) stops idle sessions so many can
-  coexist on one box without holding RAM - the standard resource-reclaim pattern.
-- **Firecracker memory snapshot/restore is a later, optional instant-wake
-  optimisation, not a dependency** (DESIGN §11). It buys sub-second wake with a
-  live process tree, but on a single box it is the hard path: the guest memory
-  file must stay resident for the VM's lifetime, pause cost scales with RAM, and
-  reclaiming that RAM needs balloon/page-out tricks. Disk-first sidesteps all of
-  it; we add memory-snapshot only if cold-wake latency proves to be a real pain.
+- **Layer 1 - cold boot (the foundation, and the permanent fallback).** Sleep =
+  stop the VM, keep the fork on disk; nothing in memory is load-bearing. Wake =
+  boot a fresh microVM against the persisted fork and resume the agent from its
+  on-disk session (e.g. `claude --resume <id>`). This is required regardless: it
+  is how a session starts the *first* time (no snapshot exists yet) and the
+  fallback whenever a saved snapshot can't be used (see Layer 2). DESIGN §5's
+  "resume = restart the agent pointed at its on-disk session," realised.
+
+- **Layer 2 - hibernate (committed next step, built on Layer 1).** This is the
+  Firecracker memory snapshot/restore path, and it behaves like laptop hibernate,
+  not sleep: on stop we write the VM's memory to a file in the fork and **the VM
+  process exits, freeing the host RAM** (a common misconception is that it holds
+  RAM resident - it does not; at rest a hibernated session costs only disk). On
+  wake we restore that file and the VM resumes **exactly where it was, with the
+  live process tree intact** - the instant-reconnect experience IDE attach wants.
+  Known work that makes it robust (the real cost, not the snapshot call itself):
+  re-establishing the daemon<->VM vsock channel after a restore; **falling back to
+  Layer 1 whenever a snapshot is stale** (snapshots are tied to the Firecracker
+  version + guest kernel, so a Fletcher upgrade invalidates them); the extra disk
+  a sleeping session's memory file costs; and testing both wake paths. Sequenced
+  *after* Layer 1 because it sits on top of it - not deferred to "someday."
 
 **Interactive access: brokered, never a direct route into VM-land.** Same trust
 boundary as everything else - the client is a WireGuard peer to the daemon; the
@@ -451,14 +460,21 @@ with `long_running` + the persistence/transport above.
 **Open design questions to whiteboard** (some of these the broader ecosystem
 does not document, so they are genuinely ours to decide):
 
-- Agent-conversation resume: re-spawn against the on-disk session (the §5 bet,
-  durability-correct) vs keep a live process via a memory snapshot (instant but
-  the hard path). Lead with re-spawn; treat snapshot as the optimisation.
+- Agent-conversation resume: both paths are in scope (Layer 1 re-spawns against
+  the on-disk session; Layer 2 restores the live process from the snapshot). The
+  open detail is the handoff between them - e.g. ensuring the agent's on-disk
+  session is always current enough that a Layer-1 fallback after a stale snapshot
+  loses no real work.
 - One brokered channel or two: does a single vsock exec channel cover PTY +
   resize + signals + `scp`/`sftp` + port-forward, or do IDE/file-transfer flows
   want the brokered-SSH path as a second channel?
-- Lifecycle semantics: what counts as "idle" for auto-hibernate; does a job's
-  trigger flip, or is a session a distinct row referencing the same fork.
+- Lifecycle semantics: "idle" is **decided** to mean *no work in flight*, not *no
+  user input* - a session stays up while its task/agent is still running and only
+  starts the auto-stop countdown once that finishes, so a long unattended run is
+  never killed mid-task. Open: the detection signal (the daemon already tracks the
+  launched process; what about a genuinely *stuck* process - a max-lifetime cap or
+  a long zero-CPU watchdog), and whether a session is a flipped job trigger or a
+  distinct row referencing the same fork.
 - Storage growth: persistent forks are full ext4 images (a few GB each); per-job
   reflink clones are cheap, but long-lived divergent sessions are not - quota /
   prune policy.
