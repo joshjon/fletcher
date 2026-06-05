@@ -189,7 +189,9 @@ flowchart LR
 - **Durable state lives on disk, not in an engine.** Resume state = the agent's
   own persisted session/history inside the fork + the fork snapshot. The daemon's
   job is only to *decide* to resume; "resume" = restart the agent process pointed
-  at its on-disk session on the restored snapshot.
+  at its on-disk session on the restored snapshot. The concrete plan for realising
+  this as interactive, persistent sessions is sketched in `docs/ROADMAP.md`
+  Milestone 6.
 - **Side effects that *escape* the fork are the real gates.** Writing the real
   Postgres, pushing to the real remote, promoting a fork to "real" - a small,
   enumerable set. Gate by **capability, not by intercepting intent:** the fork has

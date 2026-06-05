@@ -478,9 +478,9 @@ message listing what's using space** rather than auto-deleting anything;
 intentional; and an opt-in auto-clean of long-untouched sleeping sessions (with a
 warning and grace period) ships **off by default**.
 
-**Remaining open questions** (the whiteboard settled the model above; these are
-implementation details still to decide, some of which the broader ecosystem does
-not document):
+**Remaining open questions - resolve while building M6** (the whiteboard settled
+the model above; these are the implementation details still to decide, some of
+which the broader ecosystem does not document, so do not skip past them):
 
 - Agent-conversation resume handoff: both wake paths are in scope (Layer 1
   re-spawns against the on-disk session; Layer 2 restores the live process from
@@ -492,10 +492,12 @@ not document):
 - Session representation in the data model: a job row with its trigger flipped to
   `long_running`, or a distinct row referencing the same persistent fork.
 
-This sketch is informed by how durable, interactive sandbox/dev-environment
-systems handle persistence vs hibernation and brokered access generally; the
-choices above are Fletcher's own, derived from the single-box, daemon-gated,
-no-route-into-VM-land constraints.
+This sketch is informed by a prior-art survey of how durable, interactive
+sandbox/dev-environment systems handle persistence vs hibernation and brokered
+access - the patterns, mechanics, and source links are in
+[`docs/research/durable-sessions.md`](research/durable-sessions.md), worth
+re-reading at build time. The choices above are Fletcher's own, derived from the
+single-box, daemon-gated, no-route-into-VM-land constraints.
 
 ## Backlog (not scheduled - awaiting a usage signal)
 
