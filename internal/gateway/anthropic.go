@@ -37,10 +37,12 @@ func (a *AnthropicBackend) Complete(req OpenAIRequest, apiKey string) (OpenAIRes
 }
 
 // ForwardMessages proxies a raw Anthropic Messages request body to the
-// upstream endpoint, stamping the x-api-key header from the secrets
-// store. The returned response is the raw upstream response - including
-// streaming SSE bodies - and is the caller's responsibility to close.
-func (a *AnthropicBackend) ForwardMessages(ctx context.Context, body []byte, apiKey string) (*http.Response, error) {
+// upstream endpoint. It passes the client's request headers through (so beta
+// features carried by anthropic-beta and the client's own anthropic-version
+// reach the upstream) and stamps the x-api-key from the secrets store. The
+// returned response is the raw upstream response - including streaming SSE
+// bodies - and is the caller's responsibility to close.
+func (a *AnthropicBackend) ForwardMessages(ctx context.Context, body []byte, apiKey string, header http.Header) (*http.Response, error) {
 	// gosec flags this as SSRF because the body is user-controlled. The
 	// endpoint URL (a.Endpoint) is operator-configured at daemon start, not
 	// user-controlled - forwarding agent requests to a fixed upstream is
@@ -49,14 +51,42 @@ func (a *AnthropicBackend) ForwardMessages(ctx context.Context, body []byte, api
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
 	}
-	req.Header.Set("content-type", "application/json")
+	for k, vv := range header {
+		if skipForwardedHeader(k) {
+			continue
+		}
+		for _, v := range vv {
+			req.Header.Add(k, v)
+		}
+	}
+	if req.Header.Get("content-type") == "" {
+		req.Header.Set("content-type", "application/json")
+	}
+	if req.Header.Get("anthropic-version") == "" {
+		req.Header.Set("anthropic-version", a.APIVersion)
+	}
+	// Auth is the gateway's job: stamp our key and drop any client-supplied
+	// auth (agents send a placeholder).
 	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", a.APIVersion)
+	req.Header.Del("authorization")
+
 	resp, err := a.HTTPClient.Do(req) //nolint:gosec // see above; fixed upstream
 	if err != nil {
 		return nil, fmt.Errorf("call anthropic: %w", err)
 	}
 	return resp, nil
+}
+
+// skipForwardedHeader reports whether a client request header must not be
+// copied to the upstream: auth we re-stamp, and hop-by-hop / framing headers
+// the http client manages itself.
+func skipForwardedHeader(key string) bool {
+	switch http.CanonicalHeaderKey(key) {
+	case "X-Api-Key", "Authorization", "Host", "Content-Length", "Connection", "Accept-Encoding":
+		return true
+	default:
+		return false
+	}
 }
 
 // CompleteContext is the ctx-aware variant of Complete. Most callers go

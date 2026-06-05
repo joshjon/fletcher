@@ -44,11 +44,12 @@ type Backend interface {
 
 // MessagesForwarder proxies Anthropic-native Messages requests through to
 // the upstream without translation. The caller (the Gateway's /v1/messages
-// handler) hands over the raw request body; the forwarder stamps the
-// x-api-key header from the secrets store and returns the upstream
-// response untouched, including streaming SSE bodies.
+// handler) hands over the raw request body and the client's request headers;
+// the forwarder passes the client headers through (so beta features like
+// anthropic-beta work), stamps the x-api-key header from the secrets store,
+// and returns the upstream response untouched, including streaming SSE bodies.
 type MessagesForwarder interface {
-	ForwardMessages(ctx context.Context, body []byte, apiKey string) (*http.Response, error)
+	ForwardMessages(ctx context.Context, body []byte, apiKey string, header http.Header) (*http.Response, error)
 }
 
 // Upstream is what a Gateway needs from its provider implementation: both
@@ -152,7 +153,7 @@ func (g *Gateway) messages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := g.upstream.ForwardMessages(r.Context(), body, apiKey)
+	resp, err := g.upstream.ForwardMessages(r.Context(), body, apiKey, r.Header)
 	if err != nil {
 		g.logger.ErrorContext(r.Context(), "forward messages", slog.String("err", err.Error()))
 		writeError(w, http.StatusBadGateway, "upstream_error", err.Error())

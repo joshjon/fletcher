@@ -40,13 +40,14 @@ func newSecrets(t *testing.T, apiKey string) *secrets.Store {
 // it can be plugged into gateway.New (both /v1/chat/completions and
 // /v1/messages routes share one upstream).
 type captureBackend struct {
-	gotKey  string
-	gotReq  gateway.OpenAIRequest
-	resp    gateway.OpenAIResponse
-	err     error
-	gotBody []byte
-	fwdResp *http.Response
-	fwdErr  error
+	gotKey    string
+	gotReq    gateway.OpenAIRequest
+	resp      gateway.OpenAIResponse
+	err       error
+	gotBody   []byte
+	gotHeader http.Header
+	fwdResp   *http.Response
+	fwdErr    error
 }
 
 func (c *captureBackend) Complete(req gateway.OpenAIRequest, apiKey string) (gateway.OpenAIResponse, error) {
@@ -55,9 +56,10 @@ func (c *captureBackend) Complete(req gateway.OpenAIRequest, apiKey string) (gat
 	return c.resp, c.err
 }
 
-func (c *captureBackend) ForwardMessages(_ context.Context, body []byte, apiKey string) (*http.Response, error) {
+func (c *captureBackend) ForwardMessages(_ context.Context, body []byte, apiKey string, header http.Header) (*http.Response, error) {
 	c.gotKey = apiKey
 	c.gotBody = body
+	c.gotHeader = header
 	if c.fwdErr != nil {
 		return nil, c.fwdErr
 	}
@@ -222,11 +224,13 @@ func TestAnthropicBackendForwardMessagesPassesBodyAndKey(t *testing.T) {
 	var captured struct {
 		key     string
 		version string
+		beta    string
 		body    []byte
 	}
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		captured.key = r.Header.Get("x-api-key")
 		captured.version = r.Header.Get("anthropic-version")
+		captured.beta = r.Header.Get("anthropic-beta")
 		captured.body, _ = io.ReadAll(r.Body)
 		_ = r.Body.Close()
 		w.Header().Set("content-type", "application/json")
@@ -240,16 +244,25 @@ func TestAnthropicBackendForwardMessagesPassesBodyAndKey(t *testing.T) {
 		APIVersion: "2023-06-01",
 	}
 
+	// The client (e.g. Claude Code) sends its own anthropic-version, a beta
+	// header, and a placeholder x-api-key. The gateway must forward the first
+	// two and replace the auth with the real key.
+	clientHeader := http.Header{}
+	clientHeader.Set("anthropic-version", "2099-01-01")
+	clientHeader.Set("anthropic-beta", "context-management-2025-06-27")
+	clientHeader.Set("x-api-key", "placeholder-from-agent")
+
 	in := []byte(`{"model":"claude-opus-4-7","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}`)
-	resp, err := backend.ForwardMessages(context.Background(), in, "sk-ant-real")
+	resp, err := backend.ForwardMessages(context.Background(), in, "sk-ant-real", clientHeader)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	out, _ := io.ReadAll(resp.Body)
 	require.Contains(t, string(out), `"msg_xyz"`)
-	require.Equal(t, "sk-ant-real", captured.key)
-	require.Equal(t, "2023-06-01", captured.version)
+	require.Equal(t, "sk-ant-real", captured.key, "real key must replace the agent's placeholder")
+	require.Equal(t, "context-management-2025-06-27", captured.beta, "anthropic-beta must pass through")
+	require.Equal(t, "2099-01-01", captured.version, "client anthropic-version must pass through")
 	require.JSONEq(t, string(in), string(captured.body))
 }
 
