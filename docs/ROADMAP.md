@@ -409,8 +409,10 @@ disconnects, stops, and daemon restarts.
 **Persistence model: two sequenced layers, both in scope.** Disk is always the
 source of truth (DESIGN §5); a saved snapshot is only ever a faster way back to a
 state the disk already holds, so durability never depends on it (DESIGN §11).
-Idle auto-stop (a configurable timeout, only after real work finishes - see the
-lifecycle question below) reclaims the box's RAM/CPU either way.
+Idle auto-stop reclaims the box's RAM/CPU either way - where **"idle" means no
+work in flight, not no user input**: a session stays up while its task/agent is
+still running and only starts the (configurable) auto-stop countdown once that
+finishes, so a long unattended run is never killed mid-task.
 
 - **Layer 1 - cold boot (the foundation, and the permanent fallback).** Sleep =
   stop the VM, keep the fork on disk; nothing in memory is load-bearing. Wake =
@@ -438,15 +440,22 @@ lifecycle question below) reclaims the box's RAM/CPU either way.
 boundary as everything else - the client is a WireGuard peer to the daemon; the
 daemon brokers into vsock-land (DESIGN §5/§6). Building on the M5d guest agent:
 
-- **`fletcher session exec` / `shell`** - an interactive command/PTY in the running
-  session, streamed client -> tunnel -> daemon -> vsock -> guest agent (extends
-  M5d from "run one command, capture output" to "PTY, stdin, window-resize,
-  signals").
-- **Brokered SSH (optional, for IDE attach)** - run `sshd` in the session VM (the
-  base image already plans host keys generated at boot) and have the daemon proxy
-  SSH over vsock, so editors that speak Remote-SSH can attach. This is the
-  preview-URL reverse-proxy generalised from HTTP to SSH; the VM stays
-  unroutable.
+Two access paths, decided, with distinct roles:
+
+- **`fletcher session shell` - the zero-config, always-available terminal (and
+  rescue path).** An interactive PTY straight through daemon -> vsock -> guest
+  agent (extends the M5d guest agent from "run one command, capture output" to
+  PTY + stdin + window-resize + signals). Needs nothing installed in the VM, so it
+  works the instant a session exists and is the way back in when SSH will not come
+  up. Can only carry a terminal, not files/ports.
+- **Brokered SSH - the primary, rich path.** `sshd` in the session VM (the base
+  image already plans host keys generated at boot), with the daemon proxying SSH
+  over vsock. This is what unlocks the standard toolbox in one move: your own
+  `ssh`, IDE Remote-SSH attach, `scp`/`sftp`, and port-forwarding. `fletcher
+  session ssh <name>` sets up the keys and your SSH config so it "just works," and
+  connecting to a *sleeping* session wakes it first. The daemon's tunnel + token
+  auth stays the outer gate (defense in depth); the VM stays unroutable - this is
+  the preview-URL reverse-proxy generalised from HTTP to SSH.
 - **Preview ports** - reuse the gateway-forward machinery in reverse to expose a
   port the session is serving as a daemon-brokered URL.
 
@@ -457,27 +466,31 @@ verbs that mirror the lifecycle: `session create` (boot a persistent VM),
 `session delete` (destroy the fork). Under the hood these are the one job model
 with `long_running` + the persistence/transport above.
 
-**Open design questions to whiteboard** (some of these the broader ecosystem
-does not document, so they are genuinely ours to decide):
+**Storage and limits: free RAM automatically, never free disk automatically.**
+The deliberate asymmetry - RAM is rebuildable, so stop/hibernate reclaims it
+freely; a session's disk holds real, unrecoverable work (repos, edits, the
+agent's history), so Fletcher never deletes it on its own. Concretely: session
+disks are sized more generously than an ephemeral job's (ideally grow-on-demand),
+with a configurable cap on session count / total GB (a `fletcher settings` key)
+defaulted conservatively; hitting the cap **refuses new sessions with a clear
+message listing what's using space** rather than auto-deleting anything;
+`session list` shows each session's disk use and last-touched time so pruning is
+intentional; and an opt-in auto-clean of long-untouched sleeping sessions (with a
+warning and grace period) ships **off by default**.
 
-- Agent-conversation resume: both paths are in scope (Layer 1 re-spawns against
-  the on-disk session; Layer 2 restores the live process from the snapshot). The
-  open detail is the handoff between them - e.g. ensuring the agent's on-disk
-  session is always current enough that a Layer-1 fallback after a stale snapshot
-  loses no real work.
-- One brokered channel or two: does a single vsock exec channel cover PTY +
-  resize + signals + `scp`/`sftp` + port-forward, or do IDE/file-transfer flows
-  want the brokered-SSH path as a second channel?
-- Lifecycle semantics: "idle" is **decided** to mean *no work in flight*, not *no
-  user input* - a session stays up while its task/agent is still running and only
-  starts the auto-stop countdown once that finishes, so a long unattended run is
-  never killed mid-task. Open: the detection signal (the daemon already tracks the
-  launched process; what about a genuinely *stuck* process - a max-lifetime cap or
-  a long zero-CPU watchdog), and whether a session is a flipped job trigger or a
-  distinct row referencing the same fork.
-- Storage growth: persistent forks are full ext4 images (a few GB each); per-job
-  reflink clones are cheap, but long-lived divergent sessions are not - quota /
-  prune policy.
+**Remaining open questions** (the whiteboard settled the model above; these are
+implementation details still to decide, some of which the broader ecosystem does
+not document):
+
+- Agent-conversation resume handoff: both wake paths are in scope (Layer 1
+  re-spawns against the on-disk session; Layer 2 restores the live process from
+  the snapshot). The detail is keeping the agent's on-disk session current enough
+  that a Layer-1 fallback after a stale snapshot loses no real work.
+- Idle detection signal: the daemon already tracks the launched process, but how
+  to catch a genuinely *stuck* process (a max-lifetime cap, or a long zero-CPU
+  watchdog) so it does not pin a VM forever.
+- Session representation in the data model: a job row with its trigger flipped to
+  `long_running`, or a distinct row referencing the same persistent fork.
 
 This sketch is informed by how durable, interactive sandbox/dev-environment
 systems handle persistence vs hibernation and brokered access generally; the
