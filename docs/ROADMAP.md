@@ -26,16 +26,26 @@ tunnel, and `fletcher doctor`. The mock runtime executes a job's command as a
 plain host subprocess - no isolation, no image - so it proves the plumbing, not
 the product.
 
-What works (Milestone 1, `aaeeab8`, **verified on hardware 2026-06-04**): the
-real **runc + btrfs** path - a job ran in a container fork on a copy-on-write
-snapshot, with a base-image rootfs imported via `fletcher image import` (the
-`runc-smoke` job exited 0, which required runc to exec `/bin/sh` from the
-flattened `fletcher-base` rootfs).
+What works (verified on hardware 2026-06-05): a **real agent runs in a rootless
+runc + btrfs fork**. `fletcher image import` flattens `fletcher-base` into a
+btrfs template; the daemon CoW-snapshots it per job and runs the command in a
+rootless runc container; `claude --version` and `pi --version` exit 0 inside the
+fork, with the daemon unprivileged and its systemd sandbox intact. The hard part
+of Milestone 2 (an agent executing in the fork) is done.
 
-What is **not** possible yet, and is the difference between "smoke test" and
-"the way users will use it":
+Correction to the earlier record: Milestone 1's "verified on hardware" claim was
+wrong. The daemon was silently on the **mock** runtime the whole time - the
+operator's `runc`/`btrfs` systemd drop-in had its `Environment=` lines pasted as
+comments, so they never took effect. `runc-smoke`'s `echo` succeeded on mock
+(a host subprocess), not in a fork. The runc + btrfs path was only genuinely
+exercised during M2a (above). This is also why config-via-systemd-drop-in is
+error-prone and is the case for Milestone 3.
 
-- A real agent (claude/codex/pi) verified running inside a fork (Milestone 2).
+What is **not** possible yet:
+
+- A real agent completing a **model call through the gateway** - the fork has no
+  network path to the daemon gateway (Milestone 2 part 2, `veth` + restricted
+  route).
 - Changing config or lifecycle without `systemctl` (Milestone 3).
 - A remote client reaching the daemon over the tunnel - the API is bound to a
   local Unix socket only (Milestone 4).
@@ -53,7 +63,7 @@ What is **not** possible yet, and is the difference between "smoke test" and
 | 5 | Model gateway (basic) | PARTIAL | Anthropic only; non-stream `/v1/chat/completions` |
 | 6 | MCP server | PARTIAL | 3 demo tools; egress validation permissive |
 | 7 | Approvals | DONE | APNs push deferred (polling `Wait` instead) |
-| 8 | Real Linux runtime | PARTIAL | runc + btrfs real (runnable as of M1); **Firecracker is a stub** |
+| 8 | Real Linux runtime | PARTIAL | runc (rootless) + btrfs real, runs agents (M2a); **Firecracker is a stub** |
 | 9 | Networking | PARTIAL | UPnP only (no NAT-PMP/PCP); **no DDNS** |
 | 10 | v0.1.0 polish | PARTIAL | Release tooling ready; **no tag cut yet** |
 | 11 | Base image (`fletcher-base`) | DONE | pi-extension is a skeleton (see phase 14) |
@@ -188,15 +198,29 @@ private agent compute.
 
 **Plan (built in testable steps):**
 
-- **M2a.1 - run jobs as the image's fletcher user** (uid 1000,
-  `HOME=/home/fletcher`, cwd `/workspace`). Shipped; pending hardware test
-  (`claude --version` in a fork should now run).
-- **M2a.2 - veth + restricted route** so the fork reaches the daemon gateway/MCP
-  and nothing else; rebind the gateway to the fork-facing address and inject it.
-  The big networking piece; will iterate on hardware.
-- **M2a.3 - sandbox/auth as the real run requires** - relax
-  `MemoryDenyWriteExecute` only if Node trips it; relax `ProtectHome` only for
-  the credential-mount auth path. No speculative loosening of daemon security.
+- **M2a.1 - run a real agent in the fork - DONE (`22351b7`, verified
+  2026-06-05).** The hard part. What it took, found by debugging on the server:
+  - Run as the image's user. (Superseded by the rootless mapping below: the job
+    runs as container root, which maps to the unprivileged daemon user.)
+  - **Rootless runc.** The unprivileged daemon makes runc rootless, which needs
+    a user namespace. Chosen mapping (no `/etc/subuid`/`newuidmap`): container
+    uid/gid 0 -> the daemon's own euid/egid (single-ID self-map). `image import`
+    chowns the template to the daemon user so container root owns the rootfs;
+    the driver passes `runc --root <daemon-writable dir>` (default `/run/runc`
+    is root-only). `MemoryDenyWriteExecute` and the rest of the sandbox stay on.
+  - **Job output capture** (`705d829`): the supervisor discarded stdout/stderr,
+    making every failure opaque; it now keeps the tail and stores it in the
+    job's error. This is what made the rootless errors debuggable.
+  - **Import truncation fix** (`2982976`): `image import` used `cmd.StdoutPipe()`
+    + early `Wait`, truncating the tar and dropping the agents' install dirs.
+- **M2a.2 - veth + restricted route - NEXT.** The fork still has no network path
+  to the gateway (its own empty netns; injected URL is `127.0.0.1`). Give it a
+  veth to a daemon-reachable address with no default route, rebind the gateway,
+  inject that address. The chosen networking design from above.
+- **M2a.3 - auth end to end** - a real `claude -p "..."` model call through the
+  gateway, via credential mount or gateway API key. `ProtectHome` will need
+  relaxing for the credential-mount path. (`MemoryDenyWriteExecute` turned out
+  not to need relaxing - the native claude binary runs fine under it.)
 
 ### Milestone 3 - Ergonomics: no more systemctl - PLANNED
 
@@ -299,11 +323,27 @@ Listed so they are visible, not lost. Items that became milestones are above.
 
 **Security hardening**
 
-- **`CAP_SYS_ADMIN` hardening** - tighten Milestone 1's broad grant toward
-  rootless-runc + user namespaces and unprivileged btrfs.
+- **`CAP_SYS_ADMIN` scope** - the daemon holds it for btrfs subvolume ops and
+  the WireGuard tunnel. runc is already rootless (M2a), so this is now only
+  about btrfs; unprivileged-btrfs (or a narrower mechanism) would let it go.
 - **Audit log storage** - swap `audit.Noop` for a SQLite recorder (phase 4 seam).
 - **MCP egress hardening + approvals** - SSRF guard, then policy-gated egress
   (phase 6).
+
+**Agents + image**
+
+- **codex launcher missing in `fletcher-base`** - `command -v codex` fails in the
+  fork: the image's `~/.local/bin/codex` symlink targets
+  `~/.codex/packages/standalone/current/bin/codex`, which is absent even in a
+  clean `docker export` of the image. A codex-install quirk in the Dockerfile,
+  separate from the import truncation fix. claude and pi work.
+
+**Tooling**
+
+- **Lint is blind to `_linux.go` on macOS** - `//go:build linux` files (runc,
+  btrfs, wireguard drivers) are not compiled on the Mac dev box, so `make lint`
+  there never sees their issues. Several only surfaced when linting on the Linux
+  server. CI (or a pre-release check) should lint with `GOOS=linux`.
 
 **Networking**
 
