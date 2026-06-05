@@ -23,13 +23,29 @@ import (
 )
 
 const (
-	// Port is the vsock port the guest dials on the host. Arbitrary but fixed.
+	// Port is the vsock port the guest dials on the host for the control
+	// connection (spec + output). Arbitrary but fixed.
 	Port = 1024
+	// ForwardPortBase is the first vsock port used for service forwards; the
+	// host assigns ForwardPortBase, +1, +2, ... one per Forward.
+	ForwardPortBase = 1100
 	// HostCID is the well-known vsock context ID of the host (VMADDR_CID_HOST).
 	HostCID = 2
 	// GuestCID is the context ID assigned to the microVM's vsock device.
 	GuestCID = 3
 )
+
+// Forward is a loopback service inside the VM relayed to the host over vsock.
+// The agent connects to ListenAddr (e.g. the gateway base-URL host:port); the
+// guest relays each connection to the host on VsockPort, where the daemon
+// proxies it to the matching unix socket. This is how an agent reaches the
+// model gateway and MCP server without the VM having any network egress.
+type Forward struct {
+	// ListenAddr is the TCP address the guest listens on inside the VM.
+	ListenAddr string `json:"listenAddr"`
+	// VsockPort is the host vsock port the guest relays accepted connections to.
+	VsockPort uint32 `json:"vsockPort"`
+}
 
 // Spec is the job description the host sends the guest.
 type Spec struct {
@@ -39,6 +55,8 @@ type Spec struct {
 	Env []string `json:"env"`
 	// WorkDir is the working directory; defaults to "/" if empty.
 	WorkDir string `json:"workDir"`
+	// Forwards are loopback services to relay to the host before running.
+	Forwards []Forward `json:"forwards,omitempty"`
 }
 
 // Frame kinds.

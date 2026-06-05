@@ -44,6 +44,14 @@ const guestWorkDir = "/workspace"
 // reports its exit code before forcing the VMM down.
 const shutdownGrace = 20 * time.Second
 
+// Forward is a loopback service inside the VM proxied to a host unix socket.
+// ListenAddr is the in-VM TCP address the agent uses (the gateway/MCP base
+// URL); HostSocket is the daemon-side unix socket connections are relayed to.
+type Forward struct {
+	ListenAddr string
+	HostSocket string
+}
+
 // Driver is the Firecracker-backed runtime.Driver.
 type Driver struct {
 	firecrackerBinary string
@@ -51,6 +59,7 @@ type Driver struct {
 	runDir            string
 	vcpuCount         int64
 	memSizeMib        int64
+	forwards          []Forward
 	log               *logrus.Entry
 }
 
@@ -60,6 +69,8 @@ type Options struct {
 	FirecrackerBinary string
 	KernelPath        string
 	RunDir            string
+	// Forwards are the loopback services (gateway, MCP) relayed into each VM.
+	Forwards []Forward
 	// VcpuCount defaults to 1, MemSizeMib to 512 when zero.
 	VcpuCount  int64
 	MemSizeMib int64
@@ -100,6 +111,7 @@ func New(opts Options) (*Driver, error) {
 		runDir:            opts.RunDir,
 		vcpuCount:         vcpu,
 		memSizeMib:        mem,
+		forwards:          opts.Forwards,
 		log:               logrus.NewEntry(logger),
 	}, nil
 }
@@ -132,6 +144,25 @@ func (d *Driver) Run(ctx context.Context, spec fcruntime.Spec, stdout, stderr io
 	}
 	defer func() { _ = ln.Close() }()
 
+	// Set up the host side of the service forwards (gateway, MCP) and the
+	// matching guest forward descriptors for the spec.
+	gforwards := make([]guestproto.Forward, 0, len(d.forwards))
+	for i, f := range d.forwards {
+		port := uint32(guestproto.ForwardPortBase + i)
+		proxyLn, perr := startForwardProxy(ctx, fmt.Sprintf("%s_%d", vsockUDS, port), f.HostSocket)
+		if perr != nil {
+			return fcruntime.Result{}, fmt.Errorf("firecracker: forward proxy %s: %w", f.ListenAddr, perr)
+		}
+		defer func() { _ = proxyLn.Close() }()
+		gforwards = append(gforwards, guestproto.Forward{ListenAddr: f.ListenAddr, VsockPort: port})
+	}
+	gspec := guestproto.Spec{
+		Command:  spec.Command,
+		Env:      spec.Env,
+		WorkDir:  guestWorkDir,
+		Forwards: gforwards,
+	}
+
 	console := &capWriter{max: 32 << 10}
 	cfg := d.machineConfig(apiSock, vsockUDS, rootfs)
 	fcCmd := firecracker.VMCommandBuilder{}.
@@ -155,7 +186,7 @@ func (d *Driver) Run(ctx context.Context, spec fcruntime.Spec, stdout, stderr io
 	// Ensure the VMM is gone on every exit path.
 	defer func() { _ = machine.StopVMM() }()
 
-	exitCode, err := d.serveJob(ctx, ln, spec, stdout, stderr)
+	exitCode, err := d.serveJob(ctx, ln, gspec, stdout, stderr)
 	if err != nil {
 		return fcruntime.Result{}, fmt.Errorf("firecracker: %w%s", err, console.suffix())
 	}
@@ -175,7 +206,7 @@ func (d *Driver) Run(ctx context.Context, spec fcruntime.Spec, stdout, stderr io
 // serveJob accepts the guest's vsock connection, sends the spec, and demuxes
 // the streamed output back to stdout/stderr until the guest reports its exit
 // code. It honours ctx cancellation by closing the connection.
-func (d *Driver) serveJob(ctx context.Context, ln net.Listener, spec fcruntime.Spec, stdout, stderr io.Writer) (int32, error) {
+func (d *Driver) serveJob(ctx context.Context, ln net.Listener, gspec guestproto.Spec, stdout, stderr io.Writer) (int32, error) {
 	conn, err := acceptCtx(ctx, ln)
 	if err != nil {
 		return 0, fmt.Errorf("accept guest: %w", err)
@@ -186,7 +217,6 @@ func (d *Driver) serveJob(ctx context.Context, ln net.Listener, spec fcruntime.S
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 
-	gspec := guestproto.Spec{Command: spec.Command, Env: spec.Env, WorkDir: guestWorkDir}
 	if err := guestproto.WriteSpec(conn, gspec); err != nil {
 		return 0, fmt.Errorf("send spec: %w", err)
 	}
@@ -270,6 +300,44 @@ func acceptCtx(ctx context.Context, ln net.Listener) (net.Conn, error) {
 	case r := <-ch:
 		return r.conn, r.err
 	}
+}
+
+// startForwardProxy listens on a vsock UDS port and proxies each connection
+// (relayed from inside the VM) to the host unix socket at hostSocket - the
+// daemon's gateway or MCP listener.
+func startForwardProxy(ctx context.Context, listenPath, hostSocket string) (net.Listener, error) {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "unix", listenPath)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		for {
+			conn, aerr := ln.Accept()
+			if aerr != nil {
+				return // listener closed when the VM is torn down
+			}
+			go proxyToUnix(conn, hostSocket)
+		}
+	}()
+	return ln, nil
+}
+
+// proxyToUnix splices a relayed connection to a host unix socket, closing both
+// ends when either direction finishes.
+func proxyToUnix(client net.Conn, socketPath string) {
+	upstream, err := net.Dial("unix", socketPath) //nolint:noctx // short-lived proxy dial; the conn lifetime governs it
+	if err != nil {
+		_ = client.Close()
+		return
+	}
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(upstream, client); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(client, upstream); done <- struct{}{} }()
+	<-done
+	_ = client.Close()
+	_ = upstream.Close()
+	<-done
 }
 
 func ptr[T any](v T) *T { return &v }

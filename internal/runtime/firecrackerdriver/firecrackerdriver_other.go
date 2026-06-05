@@ -17,11 +17,18 @@ import (
 // Driver is the cross-platform shim satisfying runtime.Driver.
 type Driver struct{}
 
+// Forward matches the Linux build's surface so call sites need no build guards.
+type Forward struct {
+	ListenAddr string
+	HostSocket string
+}
+
 // Options matches the Linux build's surface so call sites need no build guards.
 type Options struct {
 	FirecrackerBinary string
 	KernelPath        string
 	RunDir            string
+	Forwards          []Forward
 	VcpuCount         int64
 	MemSizeMib        int64
 }

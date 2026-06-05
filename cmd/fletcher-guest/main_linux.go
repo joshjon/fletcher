@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -29,6 +30,7 @@ import (
 
 func main() {
 	mountBasics()
+	setupLoopback()
 	code := run()
 	// PID 1 must not simply return (the kernel panics). Trigger a reboot so the
 	// VMM exits and the host's Wait returns. Firecracker has no ACPI, so a
@@ -53,6 +55,11 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "fletcher-guest: read spec: %v\n", err)
 		return 1
 	}
+
+	// Bring up the loopback service relays (gateway, MCP) before running, so the
+	// agent's calls to them succeed. The VM has no NIC, so this vsock relay is
+	// its only path off-box - and it reaches only the daemon, never the internet.
+	startForwards(spec.Forwards)
 
 	fc := &frameConn{w: conn}
 	code := runCommand(spec, fc)
@@ -159,6 +166,81 @@ func hasKey(env []string, key string) bool {
 		}
 	}
 	return false
+}
+
+// startForwards launches a TCP->vsock relay for each forward. The agent inside
+// the VM connects to f.ListenAddr (loopback); each connection is relayed to the
+// host on f.VsockPort, where the daemon proxies it to the matching unix socket.
+func startForwards(forwards []guestproto.Forward) {
+	for _, f := range forwards {
+		if err := startForward(f); err != nil {
+			fmt.Fprintf(os.Stderr, "fletcher-guest: forward %s: %v\n", f.ListenAddr, err)
+		}
+	}
+}
+
+func startForward(f guestproto.Forward) error {
+	ln, err := net.Listen("tcp", f.ListenAddr) //nolint:noctx // lifetime is the VM; closed at poweroff
+	if err != nil {
+		return err
+	}
+	go func() {
+		for {
+			client, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go relayToVsock(client, f.VsockPort)
+		}
+	}()
+	return nil
+}
+
+func relayToVsock(client net.Conn, vsockPort uint32) {
+	upstream, err := vsock.Dial(guestproto.HostCID, vsockPort, nil)
+	if err != nil {
+		_ = client.Close()
+		return
+	}
+	splice(client, upstream)
+}
+
+// splice copies bidirectionally between two connections, closing both when
+// either direction ends so half-closed HTTP/SSE streams terminate.
+func splice(a, b net.Conn) {
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(a, b); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(b, a); done <- struct{}{} }()
+	<-done
+	_ = a.Close()
+	_ = b.Close()
+	<-done
+}
+
+// setupLoopback brings the loopback interface up so the agent (and the forward
+// relays) can use 127.0.0.1. Firecracker gives the guest a lo device but does
+// not bring it up.
+func setupLoopback() {
+	if err := ifup("lo"); err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: bring up lo: %v\n", err)
+	}
+}
+
+func ifup(name string) error {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = unix.Close(fd) }()
+	ifr, err := unix.NewIfreq(name)
+	if err != nil {
+		return err
+	}
+	if err := unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, ifr); err != nil {
+		return err
+	}
+	ifr.SetUint16(ifr.Uint16() | unix.IFF_UP | unix.IFF_RUNNING)
+	return unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, ifr)
 }
 
 // mountBasics mounts the pseudo-filesystems most programs expect. Best-effort:

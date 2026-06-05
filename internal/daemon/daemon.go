@@ -776,6 +776,12 @@ func buildRuntimeDriver(cfg Config) (runtime.Driver, error) {
 			FirecrackerBinary: bundle.FirecrackerPath,
 			KernelPath:        bundle.KernelPath,
 			RunDir:            filepath.Join(stateDir, "firecracker"),
+			// Same loopback services as runc, relayed over vsock instead of a
+			// bind-mounted socket: the agent reaches only the daemon, no egress.
+			Forwards: []firecrackerdriver.Forward{
+				{ListenAddr: cfg.GatewayListenAddr, HostSocket: gatewaySocketPath(cfg)},
+				{ListenAddr: cfg.MCPListenAddr, HostSocket: mcpSocketPath(cfg)},
+			},
 		})
 	default:
 		return nil, fmt.Errorf("unknown runtime kind %q", cfg.RuntimeKind)
