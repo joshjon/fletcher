@@ -319,19 +319,60 @@ the unit sandbox); these are just friendlier verbs.
 
 ## Driving the daemon from another device
 
-A paired device drives the daemon over the tunnel using the API token from
-`fletcher peer pair` (see "Pair your first device"). Point any command at the
-remote daemon:
+Once a device is paired, you can drive the daemon over the WireGuard tunnel -
+submit jobs, run agents, manage settings - as if you were on the server. The
+work still happens on the server (a job spins up its microVM there); your laptop
+is just a thin client talking to the daemon over the tunnel.
+
+You need three things on the device:
+
+1. **It's paired.** Run `fletcher peer pair laptop` on the server (see
+   [Pair your first device](#pair-your-first-device)); the output includes the
+   WireGuard config, an **API token**, and a ready-made
+   `fletcher --remote <addr> --token <token>` line.
+2. **The tunnel is up.** Import that WireGuard config on the device and connect,
+   so it can reach the daemon's tunnel address `10.99.0.1`.
+3. **The `fletcher` CLI.** It's the same binary; the client half runs anywhere.
+   There's no macOS release yet, so on a Mac build it from source (`make build`)
+   and use `./bin/fletcher`.
+
+Then point any command at the remote daemon (the token can also come from the
+`FLETCHER_TOKEN` environment variable):
 
 ```sh
-fletcher --remote 10.99.0.1:11700 --token <token> health
+fletcher --remote 10.99.0.1:11700 --token <token> health     # -> status: ok
 fletcher --remote 10.99.0.1:11700 --token <token> job list
 ```
 
-The token can also come from the `FLETCHER_TOKEN` environment variable. The
-network API binds to the tunnel interface only and requires the token; the
-local Unix socket needs neither (it is gated by file permissions). Revoke a
-device with `fletcher peer delete <id>`.
+**Spin up a microVM remotely.** A `job create` runs its command inside a
+Firecracker microVM on the server (assuming the Firecracker runtime and an
+imported base image - see [Running real agents](#running-real-agents-in-a-microvm)):
+
+```sh
+fletcher --remote 10.99.0.1:11700 --token <token> \
+  job create --name remote-vm --image fletcher-base \
+  --command "echo KERNEL=\$(uname -r); cat /proc/1/comm; exit 3"
+fletcher --remote 10.99.0.1:11700 --token <token> job get <job-id>
+```
+
+The `exit 3` makes the job fail so its captured output lands in the job's error
+field, which `job get` shows remotely - you'll see the guest kernel version and
+`fletcher-init` as PID 1, confirming it ran inside a microVM on the server.
+
+> **Tip:** before troubleshooting WireGuard on the device, sanity-check the
+> remote API from the server itself - `10.99.0.1` is a local interface there, so
+> `fletcher --remote 10.99.0.1:11700 --token <token> health` works locally. If it
+> does, any failure from the device is tunnel reachability, not the API.
+
+The network API binds to the tunnel interface only and requires the token; the
+local Unix socket needs neither (it's gated by file permissions). Revoke a
+device any time with `fletcher peer delete <id>` - that drops both its tunnel
+access and its token.
+
+**From a phone:** the phone can join the tunnel (it's a WireGuard peer), but
+there's no client to drive the daemon from iOS yet - that's the native app,
+still to come. So today the tunnel works from the phone, but control is
+laptop-only.
 
 ## Running real agents in a microVM
 
