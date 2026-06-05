@@ -43,12 +43,15 @@ comments, so they never took effect. `runc-smoke`'s `echo` succeeded on mock
 exercised during M2a (above). This is also why config-via-systemd-drop-in is
 error-prone and is the case for Milestone 3.
 
+Also done since: **Milestone 3** (config + lifecycle via `fletcher settings` /
+`fletcher daemon`, no systemctl) and **Milestone 4** (a paired client drives the
+daemon over the tunnel, gated by a per-peer token). The runc-first plan (M1-M4)
+is complete.
+
 What is **not** possible yet:
 
-- Changing config or lifecycle without `systemctl` (Milestone 3, next).
-- A remote client reaching the daemon over the tunnel - the API is bound to a
-  local Unix socket only (Milestone 4).
-- Firecracker microVMs - the intended default isolation tier (Milestone 5).
+- Firecracker microVMs - the intended default isolation tier (Milestone 5, the
+  only remaining milestone; a multi-session effort, see below).
 
 ## Status at a glance (phases 0-16)
 
@@ -299,19 +302,30 @@ stays the supervisor - this is a thin facade, not a reimplementation of init
 **Acceptance.** Someone who has never typed `systemctl` can install, start,
 inspect, and tail Fletcher entirely through `fletcher` verbs.
 
-### Milestone 4 - Remote client access - PLANNED
+### Milestone 4 - Remote client access - DONE (`c4cad1f`, verified 2026-06-05)
 
-**Goal.** A paired client can drive the daemon over the tunnel. Today the
-Connect API is bound to a local Unix socket only (`internal/daemon/daemon.go`
-`listenUnix`); the gateway and MCP listeners are loopback. So a paired phone or
-laptop cannot call the daemon at all - "connect from a client" is not yet true.
+**Goal (met).** A paired client can drive the daemon over the tunnel.
 
-**Scope.**
+**Auth model (decided): defense in depth - tunnel transport + per-peer token.**
+Tunnel-membership-alone was rejected: a privileged, secrets-holding API needs
+per-client identity (the Docker-over-TCP-without-TLS lesson), and a misbinding
+or leaked peer key must not mean open admin. Bearer tokens, not mTLS - lighter
+for a single-box homelab.
 
-- Expose the Connect API on a TCP listener bound to the WireGuard interface,
-  with authentication (the two networking planes must not leak - CLAUDE.md).
-- Once exposed, even the existing `fletcher` CLI pointed at a remote daemon
-  works; a native/GUI client app is a separate, larger deliverable (Backlog).
+**Delivered.**
+
+- `fletcher peer pair` mints a 256-bit per-peer token (only the SHA-256 is
+  stored; migration 0008) and returns it once with the API endpoint.
+- A TCP Connect listener bound to the WireGuard server tunnel IP
+  (`10.99.0.1:11700`) so only tunnel peers reach it, behind an auth middleware
+  that requires a valid token. The local unix socket stays auth-free
+  (file-permission gated).
+- CLI: persistent `--remote host:port --token` (or `FLETCHER_TOKEN`) routes any
+  command to a remote daemon; pairing prints the exact command line.
+
+**Verified:** remote call with a valid token succeeds; wrong/missing token 401s;
+the local socket still works without a token. A native/GUI client app remains a
+separate, larger deliverable (Backlog).
 
 ### Milestone 5 - Firecracker (real microVMs) - PLANNED
 
@@ -369,6 +383,10 @@ Listed so they are visible, not lost. Items that became milestones are above.
   btrfs, wireguard drivers) are not compiled on the Mac dev box, so `make lint`
   there never sees their issues. Several only surfaced when linting on the Linux
   server. CI (or a pre-release check) should lint with `GOOS=linux`.
+- **M3 commit `95161ab` is missing its generated sqlc files** - they were not
+  staged and landed in M4 (`c4cad1f`), so M3 does not build standalone. The tip
+  is correct; a history tidy (rebase to move the generated files into M3) would
+  fix it. Low priority - generated code, single contributor.
 
 **Networking**
 
