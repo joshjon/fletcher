@@ -229,11 +229,26 @@ from an isolated rootless fork with zero egress.
   used the gateway API-key path; the credential-mount path (needs `ProtectHome`
   relaxed) is still untested. (`MemoryDenyWriteExecute` did not need relaxing.)
 
-### Milestone 3 - Ergonomics: no more systemctl - PLANNED
+### Milestone 3 - Ergonomics: no more systemctl - DONE (verified 2026-06-05)
 
-Folds the previously-separate Phase 17 and Phase 18. Removes the operational
-friction the first deployment hit. Part A removes most restarts; Part B covers
-the rest.
+Folds the previously-separate Phase 17 and Phase 18. The whole config/lifecycle
+loop is now `fletcher` verbs - no systemctl.
+
+- **Part A - runtime settings in SQLite (`95161ab`).** Migration 0007 + sqlc
+  `settings` table; an `internal/settings` Store with a validated registry of
+  known keys; a `SettingsService` RPC and `fletcher settings list|set|unset`.
+  The daemon overlays stored settings onto its flag/env config at startup
+  (bootstrap config stays env-only); changes apply on restart. Validation
+  rejects unknown keys and bad values. *Scoped down from the original spec:*
+  applied on restart, no live hot-reload yet (subsystem-bounce is a backlog
+  refinement).
+- **Part B - `fletcher daemon` facade (`b661091`).** `start|stop|restart|
+  enable|disable|status|logs` shelling to systemd; degrades on non-systemd
+  hosts. systemd stays the supervisor.
+
+Verified on the server: `fletcher settings set log_level debug` +
+`fletcher daemon restart` applies it, with no systemctl; invalid values are
+rejected.
 
 #### Part A - Runtime settings in SQLite + hot reload
 
@@ -327,6 +342,9 @@ Listed so they are visible, not lost. Items that became milestones are above.
   surfacing a raw `command not found` at job time.
 - **Native client app** - the CLI is the only client today; a GUI/native client
   is a separate deliverable on top of Milestone 4's exposed API.
+- **Settings live hot-reload** - M3 settings apply on restart; the original spec
+  also wanted live application (slog level in place, bounce the network actor for
+  endpoint/port changes) so some changes need no restart at all.
 
 **Security hardening**
 
