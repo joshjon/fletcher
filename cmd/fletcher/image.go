@@ -14,6 +14,11 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// daemonUser is the system user the daemon runs as. Imported rootfs templates
+// are chowned to it so rootless runc (which maps the container's root to this
+// user) can own and run them. Matches User= in init/fletcher.service.
+const daemonUser = "fletcher"
+
 // imageCmd manages the btrfs rootfs templates the runc/btrfs runtime forks
 // from. A job's --image names a template under <btrfs-root>/images/<name>;
 // the snapshot driver CoW-snapshots it per run. Until the
@@ -185,6 +190,17 @@ func importImage(ctx context.Context, root, ref, name string, force bool) error 
 		// so it still runs when the failure was ctx cancellation.
 		_ = runBtrfs(context.Background(), "subvolume", "delete", target) //nolint:contextcheck // cleanup must run even when ctx is cancelled
 		return err
+	}
+	// The daemon runs runc rootless and maps the container's root to its own
+	// (fletcher) user, so the rootfs must be owned by that user for the job
+	// process to own its files. chown the template once; CoW snapshots inherit
+	// it. -h chowns symlinks in place rather than dereferencing them.
+	chown := exec.CommandContext(ctx, "chown", "-R", "-h", daemonUser+":"+daemonUser, target) //nolint:gosec // fixed args + the operator's btrfs path
+	chown.Stdout = os.Stderr
+	chown.Stderr = os.Stderr
+	if err := chown.Run(); err != nil {
+		_ = runBtrfs(context.Background(), "subvolume", "delete", target) //nolint:contextcheck // cleanup must run even when ctx is cancelled
+		return fmt.Errorf("chown rootfs to %q: %w", daemonUser, err)
 	}
 	fmt.Printf("imported %s into %s\n", ref, target)
 	fmt.Printf("run it with: fletcher job create --image %s --command \"...\"\n", name)

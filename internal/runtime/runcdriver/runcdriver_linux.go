@@ -34,6 +34,7 @@ import (
 type Driver struct {
 	binary    string
 	bundleDir string
+	stateDir  string
 	counter   atomic.Uint64
 }
 
@@ -68,7 +69,13 @@ func New(opts Options) (*Driver, error) {
 	if err := os.MkdirAll(bundleDir, 0o700); err != nil {
 		return nil, fmt.Errorf("ensure bundle dir: %w", err)
 	}
-	return &Driver{binary: binary, bundleDir: bundleDir}, nil
+	// runc's default state root (/run/runc) is root-only; the unprivileged
+	// daemon needs a writable one of its own for rootless containers.
+	stateDir := filepath.Join(bundleDir, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return nil, fmt.Errorf("ensure runc state dir: %w", err)
+	}
+	return &Driver{binary: binary, bundleDir: bundleDir, stateDir: stateDir}, nil
 }
 
 // Run materialises a bundle for spec, executes 'runc run', and returns
@@ -85,7 +92,8 @@ func (d *Driver) Run(ctx context.Context, spec runtime.Spec, stdout, stderr io.W
 		return runtime.Result{}, fmt.Errorf("write config: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, d.binary, "run", "--bundle", bundle, id)
+	//nolint:gosec // d.binary is the configured runc; state/bundle/id are daemon-generated
+	cmd := exec.CommandContext(ctx, d.binary, "--root", d.stateDir, "run", "--bundle", bundle, id)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
@@ -122,23 +130,28 @@ func writeOCIConfig(bundle string, spec runtime.Spec) error {
 // We drop the network namespace and all capabilities by default - jobs
 // reach out via the daemon-mediated MCP/gateway, not directly.
 //
-// Jobs run as the fletcher-base image's `fletcher` user (uid 1000,
-// HOME=/home/fletcher, cwd /workspace): the agent CLIs and their config are
-// installed under that home, and the launcher symlinks resolve their versioned
-// install relative to $HOME - so running as root with HOME=/root breaks them.
-// This assumes the fletcher-base convention; a later pass can read the image's
-// own OCI config (USER / WorkingDir / Env) instead of hard-coding it.
+// The daemon runs unprivileged (the `fletcher` user), so runc is rootless and
+// needs a user namespace. We use the simplest mapping that needs no
+// /etc/subuid or newuidmap: container uid/gid 0 maps to the daemon's own
+// uid/gid (a single-ID self-map runc can write directly). The job process runs
+// as container root, which is the confined unprivileged daemon user on the
+// host. For that to own the rootfs, `fletcher image import` chowns the
+// template to the daemon user; HOME=/home/fletcher and cwd /workspace match
+// the fletcher-base image so the agent launchers resolve their install.
 func minimalOCIConfig(spec runtime.Spec) map[string]any {
 	env := append([]string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME=/home/fletcher",
 	}, spec.Env...)
 
+	hostUID := os.Geteuid()
+	hostGID := os.Getegid()
+
 	return map[string]any{
 		"ociVersion": "1.0.2",
 		"process": map[string]any{
 			"terminal": false,
-			"user":     map[string]any{"uid": 1000, "gid": 1000},
+			"user":     map[string]any{"uid": 0, "gid": 0},
 			"args":     []string{"/bin/sh", "-c", spec.Command},
 			"env":      env,
 			"cwd":      "/workspace",
@@ -162,7 +175,14 @@ func minimalOCIConfig(spec runtime.Spec) map[string]any {
 				{"type": "ipc"},
 				{"type": "uts"},
 				{"type": "mount"},
+				{"type": "user"},
 				{"type": "network"},
+			},
+			"uidMappings": []map[string]any{
+				{"containerID": 0, "hostID": hostUID, "size": 1},
+			},
+			"gidMappings": []map[string]any{
+				{"containerID": 0, "hostID": hostGID, "size": 1},
 			},
 		},
 	}
@@ -172,6 +192,7 @@ func minimalOCIConfig(spec runtime.Spec) map[string]any {
 // pseudo-mounts every container needs plus any caller-supplied bind
 // mounts (trusted-credential dirs, per DESIGN.md §5 Phase 12).
 func buildMounts(extra []runtime.Mount) []map[string]any {
+	//nolint:prealloc // small fixed base list; readability over a capacity hint
 	out := []map[string]any{
 		{"destination": "/proc", "type": "proc", "source": "proc"},
 		{"destination": "/dev", "type": "tmpfs", "source": "tmpfs", "options": []string{"nosuid", "strictatime", "mode=755", "size=65536k"}},
