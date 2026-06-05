@@ -7,6 +7,14 @@ before:
     # Make sure generated code is in sync with sources before cutting a
     # release; goreleaser refuses to proceed if generate-check would fail.
     - make generate-check
+    # Bundle the Firecracker runtime into the release binary. These assets are
+    # gitignored and arch-specific, so they must be fetched/built for every
+    # release arch before goreleaser compiles - otherwise the binary embeds
+    # nothing, vmm.Available() is false, and the daemon silently falls back to
+    # mock instead of Firecracker. fetch-vmm pulls both arches; build-guest-all
+    # builds the guest init for both.
+    - make fetch-vmm
+    - make build-guest-all
 
 builds:
   - id: fletcher

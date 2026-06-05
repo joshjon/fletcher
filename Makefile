@@ -29,9 +29,9 @@ define build-guest
 		-o $(GUEST_ASSETS)/$(1)/fletcher-guest ./cmd/fletcher-guest
 endef
 
-.PHONY: help build build-guest build-linux build-linux-amd64 build-linux-arm64 \
-	test test-integration lint fmt check cover generate generate-check \
-	tools clean image image-amd64 image-arm64 install fetch-vmm
+.PHONY: help build build-guest build-guest-all build-linux build-linux-amd64 \
+	build-linux-arm64 test test-integration lint fmt check cover generate \
+	generate-check tools clean image image-amd64 image-arm64 install fetch-vmm
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -44,6 +44,10 @@ build: build-guest ## Build the local fletcher binary
 
 build-guest: ## Build the microVM guest init for the host arch into the embed tree
 	$(call build-guest,$(HOST_GOARCH))
+
+build-guest-all: ## Build the guest init for every release arch (used by goreleaser)
+	$(call build-guest,amd64)
+	$(call build-guest,arm64)
 
 fetch-vmm: ## Download the bundled Firecracker VMM + guest kernel (needed before building the firecracker runtime)
 	@scripts/fetch-vmm.sh "$(FC_VERSION)" "$(FC_KERNEL)" "$(FC_KERNEL_CI)" "$(VMM_ASSETS)"

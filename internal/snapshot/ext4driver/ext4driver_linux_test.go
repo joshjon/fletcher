@@ -67,6 +67,17 @@ func TestCreateClonesTemplate(t *testing.T) {
 	}
 }
 
+func TestNewCreatesMissingRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "snapshots") // does not exist yet
+	if _, err := ext4driver.New(ext4driver.Options{RootDir: root}); err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	fi, err := os.Stat(root)
+	if err != nil || !fi.IsDir() {
+		t.Fatalf("New did not create the root dir: %v", err)
+	}
+}
+
 func TestCreateMissingTemplate(t *testing.T) {
 	d, err := ext4driver.New(ext4driver.Options{RootDir: t.TempDir()})
 	if err != nil {

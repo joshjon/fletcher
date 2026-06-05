@@ -55,6 +55,12 @@ func New(opts Options) (*Driver, error) {
 	if opts.RootDir == "" {
 		return nil, errors.New("ext4: RootDir is required")
 	}
+	// Ensure the root exists and is owned by the daemon user (we run as it), so
+	// a fresh install can write per-job clones here without any manual chown.
+	// Unlike btrfs, this works on any filesystem, so no provisioning is needed.
+	if err := os.MkdirAll(opts.RootDir, 0o750); err != nil {
+		return nil, fmt.Errorf("ext4: create root dir %s: %w", opts.RootDir, err)
+	}
 	imagesDir := opts.ImagesDir
 	if imagesDir == "" {
 		imagesDir = filepath.Join(opts.RootDir, "images")
