@@ -105,6 +105,7 @@ func (d *Driver) Delete(ctx context.Context, id string) error {
 }
 
 func (d *Driver) runBtrfs(ctx context.Context, args ...string) error {
+	//nolint:gosec // d.btrfsBinary is the configured btrfs CLI; subvolume paths/ids are daemon-generated
 	cmd := exec.CommandContext(ctx, d.btrfsBinary, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

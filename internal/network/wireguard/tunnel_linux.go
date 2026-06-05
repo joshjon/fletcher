@@ -62,7 +62,7 @@ func (t *LinuxTunnel) Start(_ context.Context, cfg TunnelConfig) error {
 		return errors.New("ListenPort is required")
 	}
 	if cfg.Address == "" {
-		return errors.New("Address is required")
+		return errors.New("address is required")
 	}
 
 	tdev, err := wgtun.CreateTUN(cfg.InterfaceName, cfg.MTU)
