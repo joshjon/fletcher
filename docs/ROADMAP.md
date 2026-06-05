@@ -163,8 +163,9 @@ snapshot (btrfs), instead of the mock driver's bare subprocess.
 - `fletcher image import <docker-ref>` flattens a built OCI image (e.g.
   `fletcher-base:dev` from `make image`) into a btrfs subvolume at
   `<btrfs-root>/images/<name>`, so `fletcher job create --image <name>` has a
-  real rootfs. Plus `fletcher image ls` / `rm`. Interim `docker export` bridge
-  until the firecracker-containerd OCI pull pipeline lands (DESIGN.md §3).
+  real rootfs. Plus `fletcher image ls` / `rm`. The `docker export` bridge is
+  the chosen self-built pipeline (DESIGN.md §11), not an interim hack; Milestone 5
+  extends it to also emit an ext4 rootfs image for Firecracker.
 - The systemd unit grants the daemon `CAP_SYS_ADMIN` (btrfs subvolume
   create/snapshot, runc namespaces) alongside `CAP_NET_ADMIN`.
 - `docs/TESTING.md` Test 2 documents the flow and the snapshot-root ownership
@@ -327,17 +328,47 @@ for a single-box homelab.
 the local socket still works without a token. A native/GUI client app remains a
 separate, larger deliverable (Backlog).
 
-### Milestone 5 - Firecracker (real microVMs) - PLANNED
+### Milestone 5 - Firecracker (real microVMs) - IN PROGRESS
 
-**Goal.** Swap runc for Firecracker microVMs behind the existing `runtime.Driver`
-interface - the intended default isolation tier per the thesis.
+**Goal.** Make Firecracker the real default isolation tier behind the existing
+`runtime.Driver` interface (DESIGN §10), with runc staying as the labeled
+degraded fallback. Largest and riskiest milestone; needs a KVM host (`/dev/kvm`
+confirmed present and read/write accessible on the dev box).
 
-**Scope.** The full chunk DESIGN.md §8/§11 describes: OCI image to rootfs via
-firecracker-containerd, VM lifecycle via firecracker-go-sdk, the vsock guest
-agent, MMDS-injected env. Largest and riskiest milestone; needs a KVM host
-(`/dev/kvm` confirmed present on the dev box). Done last, on top of a proven
-loop - the runtime interface seam (DESIGN §10) is exactly what lets it drop in
-without a rewrite.
+**Architecture decision (resolved).** We use **`firecracker-go-sdk` directly with
+a self-built ext4 rootfs**, *not* `firecracker-containerd`. The toolkit would have
+meant running a containerd daemon + shim as supervised services and provisioning a
+devmapper thin-pool - a second always-on process and a second storage dance, both
+off-thesis (single static binary) and against the seamless-setup goal. Its
+registry-pull / layer-caching features are unneeded (`fletcher image import`
+already covers our flow). The `snapshot.Driver` seam means firecracker-containerd
+could still be added later as an alternative driver without a rewrite. Recorded in
+DESIGN.md §11 and §9.
+
+**Sub-phases.**
+
+- **M5a - VMM provisioning + bundling.** Acquire the `firecracker` binary and a
+  minimal guest `vmlinux`; bundle via `embed.FS`, extract on first run. `doctor`
+  gains a `/dev/kvm` presence + `kvm`-group-membership check for the `fletcher`
+  user. (UX is intrinsic to the runtime, so it lives in the milestone, not a
+  separate one.)
+- **M5b - rootfs pipeline.** Extend the image pipeline to flatten an imported OCI
+  image into an ext4 rootfs template, and CoW-clone it per job (reflink on btrfs)
+  behind `snapshot.Driver`.
+- **M5c - VM lifecycle.** `firecrackerdriver.Run` boots a microVM (bundled kernel
+  + per-job rootfs + vsock), honours ctx cancellation, returns the exit code.
+  Replaces the stub.
+- **M5d - guest agent over vsock.** A tiny in-VM agent that receives
+  `{command, env, workdir}`, runs it, streams stdout/stderr back, returns the exit
+  code - the Firecracker analogue of the runc `fork-run` forwarder.
+- **M5e - gateway reachability + no egress.** The guest reaches the daemon gateway
+  /MCP only over vsock; the VM has no egress route (preserves §5/§6 - the API key
+  never enters the fork). Verified with a no-egress test.
+- **M5f - seamless + default.** `doctor`/`settings`/install so selecting Firecracker
+  "just works" on a KVM box (auto-extract VMM, auto-provision rootfs storage, clear
+  diagnostics); then make Firecracker the default on capable Linux boxes, runc the
+  labeled fallback. End-to-end: a real `claude` agent in a microVM through the
+  gateway.
 
 ## Backlog (not scheduled - awaiting a usage signal)
 

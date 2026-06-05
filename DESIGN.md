@@ -339,8 +339,8 @@ attack surface that directly contradicts a trust-positioned product.
 | Runtime (default) | Firecracker + `firecracker-go-sdk` | KVM microVM; own kernel; right isolation for LLM-authored code. |
 | Runtime (fallback) | `runc` / containerd | Labeled degraded-isolation path for no-KVM (Pi, nested-virt-less Proxmox). |
 | Runtime abstraction | Pluggable interface | Keeps Linux-only impl details below the seam; lets Cloud Hypervisor (and later macOS VZ) slot in for one driver's cost. |
-| Image pipeline | `firecracker-containerd` | OCI image → rootfs at provision time. The real "microVM tax." |
-| Fork/snapshot | btrfs subvolumes (or dm-thin), behind a snapshot interface | Instant CoW clone of a 10GB env; space-shared. |
+| Image pipeline | self-built: `docker build` → flattened ext4 rootfs image | OCI image → rootfs at import time. Avoids a containerd daemon + devmapper thin-pool; see the §11 decision. |
+| Fork/snapshot | btrfs subvolumes (runc) / reflinked ext4 images (Firecracker), behind a snapshot interface | Instant CoW clone of a 10GB env; space-shared. |
 | Job engine | bespoke (job = env + payload + trigger + sink) | §4. One model; trigger has three values. |
 | Resume / supervision | bespoke supervisor + reconciliation loop | §5. Reads active jobs from SQLite on boot, restarts agent processes. |
 | Approvals | `pending_approval` rows in SQLite + APNs | §5. Survives reboot because the row persists. |
@@ -410,8 +410,18 @@ appliance (which needs M3+/macOS 15 and adds overhead).
 
 Load-bearing and fast-moving; check the actual repos/tools before betting on them:
 
-- **`firecracker-containerd` current state** - the OCI→rootfs ergonomics for
-  "configure a VM with an image/deps" ride on this.
+- **`firecracker-containerd` - RESOLVED (Milestone 5), not used.** We verified the
+  trade and chose against it. It would require running a containerd daemon plus the
+  firecracker shim as supervised services and provisioning a devmapper thin-pool -
+  a second always-on process and a second storage-provisioning step, both of which
+  cut against the single-static-binary thesis and the "no manual setup dance" goal.
+  Its registry-pull / layer-caching features are ones we do not need (`fletcher
+  image import` already covers our flow). Instead the image pipeline is self-built:
+  flatten the OCI image to an ext4 rootfs once, then CoW-clone it per job behind the
+  existing `snapshot.Driver` seam (reflink on btrfs), with VM lifecycle via
+  `firecracker-go-sdk` directly. The seam means firecracker-containerd could still
+  be added later as an *alternative* image/snapshot driver without a rewrite, so
+  this is not a one-way door.
 - **Firecracker snapshot/restore maturity** - underpins hibernate/wake. Note: live
   memory-snapshot restore is for *instant-wake UX only*; it is **not** load-bearing
   for durability correctness (that comes from restarting the agent against its
@@ -462,12 +472,12 @@ integration arrives.
 | 3 | Mock runtime + supervisor | `runtime.MockDriver`, `snapshot.MockDriver`, supervisor that picks queued jobs and runs them. Resume-on-boot. |
 | 4 | Trust boundary plumbing | `internal/errs` + Connect interceptor; `background.Go` + `fname`; audit middleware seam (wrapper exists, no storage yet). |
 | 5 | Model gateway (basic) | Daemon-local OpenAI-compatible endpoint, one backend (Anthropic), age secrets, base-URL injected. |
-| 6 | MCP server | `mark3labs/mcp-go` in daemon; 1–2 trivial privileged tools; routed through audit seam. |
+| 6 | MCP server | `mark3labs/mcp-go` in daemon; 1-2 trivial privileged tools; routed through audit seam. |
 | 7 | Approvals | `pending_approvals` table + RPCs + CLI. (APNs push deferred.) |
 | 8 | Real Linux runtime | Real Firecracker + runc + btrfs drivers behind same interfaces. Requires UTM dev VM. Mocks stay forever. |
 | 9 | Networking | WireGuard peers + UPnP/NAT-PMP/PCP + DDNS. Large standalone chunk. |
 | 10 | v0.1.0 polish | Install script, systemd unit, README quickstart, goreleaser config, first tagged release. |
-| 11 | Base image (`fletcher-base`) | A Fletcher-blessed OCI image built from a Dockerfile in-repo (reference pattern: exe.dev's "exeuntu"). Variants named `fletcher-base:debian-13`, `fletcher-base:ubuntu-24.04`, etc. - descriptive, not portmanteau. Ships with: three agent CLIs pre-installed (`claude` from Anthropic, `codex` from OpenAI, `pi` from Earendil - `pi` is the recommended default for users without a strong agent preference, because its extensions system enables Phase 14's deeper integration, but all three are first-class so users can keep existing workflows); their config directories pre-created at the well-known paths Phase 12's bind-mounts target; a single `AGENTS.md` symlinked into each agent's expected location (one source of truth for shared instructions); a `fletcher` user (UID 1000, NOPASSWD sudo, linger enabled for systemd-user services); dev essentials (git, gh, jq, ripgrep, vim, build-essential, Node, Go, Python, uv); the daemon contract baked into env defaults (gateway base-URL, MCP URL, `/workspace` mount point) so agents don't need per-job env configuration; `wireguard-tools` - **not** Tailscale, which is off-thesis (hosted control plane); no baked SSH host keys (generated at VM creation); `x-systemd.growfs` in `/etc/fstab` for first-boot rootfs expansion. Built via standard `docker build`; flattened into a btrfs subvolume by the snapshot driver at `<snapshots>/images/<name>` until the `firecracker-containerd` OCI pull pipeline per §3 lands. Substrate for phases 12, 13, 14. |
+| 11 | Base image (`fletcher-base`) | A Fletcher-blessed OCI image built from a Dockerfile in-repo (reference pattern: exe.dev's "exeuntu"). Variants named `fletcher-base:debian-13`, `fletcher-base:ubuntu-24.04`, etc. - descriptive, not portmanteau. Ships with: three agent CLIs pre-installed (`claude` from Anthropic, `codex` from OpenAI, `pi` from Earendil - `pi` is the recommended default for users without a strong agent preference, because its extensions system enables Phase 14's deeper integration, but all three are first-class so users can keep existing workflows); their config directories pre-created at the well-known paths Phase 12's bind-mounts target; a single `AGENTS.md` symlinked into each agent's expected location (one source of truth for shared instructions); a `fletcher` user (UID 1000, NOPASSWD sudo, linger enabled for systemd-user services); dev essentials (git, gh, jq, ripgrep, vim, build-essential, Node, Go, Python, uv); the daemon contract baked into env defaults (gateway base-URL, MCP URL, `/workspace` mount point) so agents don't need per-job env configuration; `wireguard-tools` - **not** Tailscale, which is off-thesis (hosted control plane); no baked SSH host keys (generated at VM creation); `x-systemd.growfs` in `/etc/fstab` for first-boot rootfs expansion. Built via standard `docker build`; flattened by the snapshot driver into a btrfs subvolume (runc) or an ext4 rootfs image (Firecracker) at `<snapshots>/images/<name>`, per the self-built image-pipeline decision in §11. Substrate for phases 12, 13, 14. |
 | 12 | Trusted-credential mode | Per-job opt-in to bind-mount named credential directories (`~/.claude`, `~/.codex`, `~/.config/gemini`) into the fork. Enables subscription-auth agents (Claude Max, ChatGPT Plus, Gemini Advanced) - the primary audience - at the documented §5 "Credential modes" cost. |
 | 13 | Anthropic-native gateway inbound | Gateway accepts `POST /v1/messages` directly; daemon injects `ANTHROPIC_BASE_URL` alongside `OPENAI_BASE_URL`. Closes the API-key path for Claude Code so users with an Anthropic console key can run it in a fork without §5 boundary breaks. Secondary to phase 12 by audience size but cheaper to ship. |
 | 14 | Model catalog + per-agent integration | Gateway exposes a model-discovery endpoint (`GET /catalog.json` or equivalent) listing available providers and models - Anthropic, OpenAI passthrough, locally-served Ollama, etc. Surfaces through (a) a Fletcher CLI command (`fletcher models list`) for humans, and (b) a Fletcher-authored extension for `pi` (the Earendil agent baked into Phase 11) that pre-fetches the catalog and registers providers on startup - mirroring how exe.dev's `exe-dev` pi-extension does this for their gateway. Agents *without* an extensions system (Claude Code, Codex) continue to work via the env-var injection from Phase 13; no agent-side auto-discovery is possible for them and that is fine - Phase 12's trusted-credential mode is what those users actually need. The gateway becomes a model-discovery surface for humans and extension-capable agents, not a universal magic layer. |

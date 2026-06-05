@@ -22,8 +22,8 @@ Private agent compute on hardware the user owns. A single Go binary on one Linux
 
 - API: `connectrpc.com/connect-go` (one handler → gRPC, HTTP/JSON, gRPC-Web)
 - Runtime: Firecracker + `firecracker-go-sdk` (default); `runc`/containerd (labeled degraded-isolation fallback)
-- Image pipeline: `firecracker-containerd`
-- Fork/snapshot: btrfs subvolumes behind a snapshot interface
+- Image pipeline: self-built (`docker build` -> flattened ext4 rootfs image, CoW-cloned per job behind the snapshot interface); `firecracker-containerd` was evaluated and rejected (§11)
+- Fork/snapshot: btrfs subvolumes (runc) / reflinked ext4 images (Firecracker) behind a snapshot interface
 - State: `modernc.org/sqlite` + `sqlc` + `golang-migrate` (migrations embedded)
 - Codegen: `sqlc` + `buf`/`connect-go` + `mockery` v3 (matryer template); single `make generate`
 - Validation: `bufbuild/protovalidate-go` (rules in `.proto`, Connect interceptor enforces)
@@ -55,7 +55,7 @@ Private agent compute on hardware the user owns. A single Go binary on one Linux
 ## Open questions to verify before betting on
 
 Listed in §11; check actual repos/tools before designing around them:
-- `firecracker-containerd` current state
+- `firecracker-containerd` - RESOLVED (M5): evaluated and rejected for a self-built ext4 pipeline (§11)
 - Firecracker snapshot/restore maturity (note: live memory-snapshot is *instant-wake UX only*, not load-bearing for durability)
 - Agent resume ergonomics - that the chosen agent(s) can be restarted against a persisted session
 - Base-URL override per agent (Claude Code, Codex, OpenAI-compatible generally do; verify each)
