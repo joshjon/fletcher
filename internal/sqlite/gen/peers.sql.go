@@ -21,18 +21,19 @@ func (q *Queries) CountPeers(ctx context.Context) (int64, error) {
 }
 
 const createPeer = `-- name: CreatePeer :one
-INSERT INTO peers (id, name, public_key, allowed_ips, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
-RETURNING id, name, public_key, allowed_ips, created_at, updated_at
+INSERT INTO peers (id, name, public_key, allowed_ips, api_token_hash, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id, name, public_key, allowed_ips, created_at, updated_at, api_token_hash
 `
 
 type CreatePeerParams struct {
-	ID         string
-	Name       string
-	PublicKey  string
-	AllowedIps string
-	CreatedAt  int64
-	UpdatedAt  int64
+	ID           string
+	Name         string
+	PublicKey    string
+	AllowedIps   string
+	ApiTokenHash *string
+	CreatedAt    int64
+	UpdatedAt    int64
 }
 
 func (q *Queries) CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, error) {
@@ -41,6 +42,7 @@ func (q *Queries) CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, e
 		arg.Name,
 		arg.PublicKey,
 		arg.AllowedIps,
+		arg.ApiTokenHash,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -52,6 +54,7 @@ func (q *Queries) CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, e
 		&i.AllowedIps,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ApiTokenHash,
 	)
 	return i, err
 }
@@ -69,7 +72,7 @@ func (q *Queries) DeletePeer(ctx context.Context, id string) (int64, error) {
 }
 
 const getPeer = `-- name: GetPeer :one
-SELECT id, name, public_key, allowed_ips, created_at, updated_at FROM peers WHERE id = ?
+SELECT id, name, public_key, allowed_ips, created_at, updated_at, api_token_hash FROM peers WHERE id = ?
 `
 
 func (q *Queries) GetPeer(ctx context.Context, id string) (Peer, error) {
@@ -82,12 +85,32 @@ func (q *Queries) GetPeer(ctx context.Context, id string) (Peer, error) {
 		&i.AllowedIps,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ApiTokenHash,
+	)
+	return i, err
+}
+
+const getPeerByAPITokenHash = `-- name: GetPeerByAPITokenHash :one
+SELECT id, name, public_key, allowed_ips, created_at, updated_at, api_token_hash FROM peers WHERE api_token_hash = ?
+`
+
+func (q *Queries) GetPeerByAPITokenHash(ctx context.Context, apiTokenHash *string) (Peer, error) {
+	row := q.db.QueryRowContext(ctx, getPeerByAPITokenHash, apiTokenHash)
+	var i Peer
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.PublicKey,
+		&i.AllowedIps,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ApiTokenHash,
 	)
 	return i, err
 }
 
 const getPeerByName = `-- name: GetPeerByName :one
-SELECT id, name, public_key, allowed_ips, created_at, updated_at FROM peers WHERE name = ?
+SELECT id, name, public_key, allowed_ips, created_at, updated_at, api_token_hash FROM peers WHERE name = ?
 `
 
 func (q *Queries) GetPeerByName(ctx context.Context, name string) (Peer, error) {
@@ -100,12 +123,13 @@ func (q *Queries) GetPeerByName(ctx context.Context, name string) (Peer, error) 
 		&i.AllowedIps,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ApiTokenHash,
 	)
 	return i, err
 }
 
 const listPeers = `-- name: ListPeers :many
-SELECT id, name, public_key, allowed_ips, created_at, updated_at FROM peers
+SELECT id, name, public_key, allowed_ips, created_at, updated_at, api_token_hash FROM peers
 ORDER BY created_at DESC
 LIMIT ? OFFSET ?
 `
@@ -131,6 +155,7 @@ func (q *Queries) ListPeers(ctx context.Context, arg ListPeersParams) ([]Peer, e
 			&i.AllowedIps,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ApiTokenHash,
 		); err != nil {
 			return nil, err
 		}

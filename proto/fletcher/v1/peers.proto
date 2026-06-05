@@ -89,6 +89,13 @@ message PairPeerResponse {
   // endpoint is the host:port the peer's device will dial; copied from
   // the daemon's configured public_endpoint.
   string endpoint = 5;
+  // api_token is the per-peer bearer token for the daemon's network API,
+  // returned exactly once. Clients send it as `Authorization: Bearer <token>`
+  // when driving the daemon over the tunnel.
+  string api_token = 6;
+  // api_endpoint is the tunnel-side host:port a client dials to drive the
+  // daemon (e.g. "10.99.0.1:11700"), reachable once the tunnel is up.
+  string api_endpoint = 7;
 }
 
 message ServerConfigRequest {

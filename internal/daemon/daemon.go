@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/oklog/run"
@@ -171,6 +172,9 @@ type services struct {
 	mcpLn          net.Listener
 	gatewayUnixLn  net.Listener
 	mcpUnixLn      net.Listener
+	remoteSrv      *http.Server
+	remoteLn       net.Listener
+	remoteAddr     string
 	gatewayUnix    string
 	mcpUnix        string
 	gatewayBaseURL string
@@ -178,6 +182,7 @@ type services struct {
 	tunnel         wireguard.Tunnel
 }
 
+//nolint:funlen // the single construction hub that wires every subsystem; splitting further would scatter the boot sequence
 func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, logger *slog.Logger) (*services, error) {
 	connectLn, err := listenUnix(ctx, cfg.SocketPath)
 	if err != nil {
@@ -228,8 +233,10 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	}
 
 	approvalSvc := approval.NewService(queries, approval.ServiceOptions{})
+	apiEndpoint := remoteAPIAddr()
 	peerSvc := peer.NewService(queries, peer.Options{
 		PublicEndpoint: cfg.PublicEndpoint,
+		APIEndpoint:    apiEndpoint,
 	})
 	wgKeyProvider := newServerKeyProvider(secretsStore)
 
@@ -237,6 +244,11 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	if err != nil {
 		return nil, fmt.Errorf("bring up network: %w", err)
 	}
+
+	// Expose the Connect API on the tunnel interface so paired clients can
+	// drive the daemon. Requires a per-peer token (the unix socket stays
+	// local + auth-free). Best-effort: nil when the tunnel is not up.
+	remoteLn := listenRemoteAPI(ctx, netSetup, apiEndpoint, logger)
 
 	mcpServer := fletchermcp.NewServer("fletcher", buildinfo.Version, auditRecorder, logger)
 	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, &http.Client{Timeout: 30 * time.Second}, approvalSvc)
@@ -270,10 +282,14 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		peerSync:  &tunnelPeerSyncer{peers: peerSvc, tunnel: netSetup.Tunnel, logger: logger},
 		settings:  settings.NewStore(queries),
 	}
+
+	connectSrv := newHTTPServer(startedAt.Unix(), connectDeps, logger)
+	remoteSrv := newRemoteServer(remoteLn, peerSvc, connectSrv.Handler)
+
 	return &services{
 		cfg:            cfg,
 		supervisor:     supervisor,
-		connectSrv:     newHTTPServer(startedAt.Unix(), connectDeps, logger),
+		connectSrv:     connectSrv,
 		gatewaySrv:     newGatewayHTTPServer(gw),
 		mcpSrv:         newMCPHTTPServer(mcpServer),
 		connectLn:      connectLn,
@@ -281,6 +297,9 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		mcpLn:          mcpLn,
 		gatewayUnixLn:  gatewayUnixLn,
 		mcpUnixLn:      mcpUnixLn,
+		remoteSrv:      remoteSrv,
+		remoteLn:       remoteLn,
+		remoteAddr:     apiEndpoint,
 		gatewayUnix:    gatewayUnix,
 		mcpUnix:        mcpUnix,
 		gatewayBaseURL: gatewayURL,
@@ -353,6 +372,10 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	g.Add(httpServeActor(logger, "gateway-unix", s.gatewaySrv, s.gatewayUnixLn, "unix:"+s.gatewayUnix))
 	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
 	g.Add(httpServeActor(logger, "mcp-unix", s.mcpSrv, s.mcpUnixLn, "unix:"+s.mcpUnix))
+	if s.remoteSrv != nil {
+		//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
+		g.Add(httpServeActor(logger, "remote-api", s.remoteSrv, s.remoteLn, "http://"+s.remoteAddr))
+	}
 	g.Add(supervisorActor(ctx, s.supervisor))
 	if s.tunnel != nil {
 		g.Add(tunnelActor(ctx, logger, s.tunnel))
@@ -626,6 +649,75 @@ func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logg
 		logger.Info("applied setting", slog.String("key", k), slog.String("value", v))
 	}
 	return nil
+}
+
+// remoteAPIPort is the TCP port the daemon exposes its Connect API on, bound to
+// the WireGuard tunnel interface for paired clients.
+const remoteAPIPort = 11700
+
+// remoteAPIAddr is the tunnel-side host:port for the network API: the WireGuard
+// server tunnel IP (the .1 of the peer subnet) so only tunnel peers can reach
+// it. Falls back to loopback if the subnet cannot be parsed.
+func remoteAPIAddr() string {
+	addr, err := serverTunnelAddress(peer.DefaultTunnelCIDR)
+	if err != nil {
+		return net.JoinHostPort("127.0.0.1", strconv.Itoa(remoteAPIPort))
+	}
+	ip, _, _ := strings.Cut(addr, "/")
+	return net.JoinHostPort(ip, strconv.Itoa(remoteAPIPort))
+}
+
+// newRemoteServer builds the network-API http.Server (the same handlers as the
+// unix socket, gated by a per-peer token), or nil when there is no listener.
+func newRemoteServer(remoteLn net.Listener, auth tokenAuthenticator, handler http.Handler) *http.Server {
+	if remoteLn == nil {
+		return nil
+	}
+	return &http.Server{
+		Handler:           authMiddleware(auth, handler),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+}
+
+// listenRemoteAPI binds the tunnel-side TCP listener for the network API, or
+// returns nil (logged) when the tunnel is down or the bind fails - the daemon
+// still serves the local unix socket.
+func listenRemoteAPI(ctx context.Context, netSetup *networkSetup, addr string, logger *slog.Logger) net.Listener {
+	if netSetup.Tunnel == nil {
+		return nil
+	}
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
+	if err != nil {
+		logger.Warn("remote API listener not started", slog.String("addr", addr), slog.String("err", err.Error()))
+		return nil
+	}
+	return ln
+}
+
+// tokenAuthenticator verifies that a bearer token belongs to a paired peer.
+type tokenAuthenticator interface {
+	AuthenticateToken(ctx context.Context, token string) (peer.Peer, error)
+}
+
+// authMiddleware requires a valid per-peer bearer token before passing the
+// request to next. Used only on the network-exposed remote listener; the local
+// unix socket is file-permission gated and stays auth-free.
+func authMiddleware(auth tokenAuthenticator, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, err := auth.AuthenticateToken(r.Context(), bearerToken(r.Header.Get("Authorization"))); err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func bearerToken(header string) string {
+	if after, ok := strings.CutPrefix(header, "Bearer "); ok {
+		return after
+	}
+	return ""
 }
 
 // gatewaySocketPath and mcpSocketPath are the daemon-side unix sockets the

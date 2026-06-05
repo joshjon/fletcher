@@ -8,7 +8,11 @@ package peer
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -31,6 +35,9 @@ const DefaultTunnelCIDR = "10.99.0.0/24"
 
 // ErrNotFound is returned when a peer ID does not exist.
 var ErrNotFound = errs.New(errs.CategoryNotFound, "peer not found")
+
+// ErrUnauthenticated is returned when an API token matches no peer.
+var ErrUnauthenticated = errs.New(errs.CategoryUnauthenticated, "invalid or missing API token")
 
 // ErrNameTaken is returned when CreatePeer would collide on the unique name.
 var ErrNameTaken = errs.New(errs.CategoryConflict, "peer name already exists")
@@ -56,18 +63,22 @@ type CreateParams struct {
 	AllowedIPs []string
 }
 
-// Created bundles the persisted Peer with the one-time secret returned to
-// the caller. PrivateKey is non-empty only on Create - the daemon does
-// not store it.
+// Created bundles the persisted Peer with the one-time secrets returned to
+// the caller. PrivateKey and APIToken are non-empty only on Create - the
+// daemon stores only the WireGuard public key and the token's hash.
 type Created struct {
 	Peer       Peer
 	PrivateKey wireguard.Key
+	// APIToken is the per-peer bearer token for the daemon's network API.
+	// Shown once; only its hash is persisted.
+	APIToken string
 }
 
 // Service is the high-level peers API.
 type Service struct {
-	q          sqliteq.Querier
-	tunnelCIDR string
+	q           sqliteq.Querier
+	tunnelCIDR  string
+	apiEndpoint string
 
 	mu             sync.RWMutex
 	publicEndpoint string
@@ -83,6 +94,10 @@ type Options struct {
 	// causes PairPeer to fail with a clear error pointing at how to
 	// set it; CreatePeer with an explicit server_endpoint still works.
 	PublicEndpoint string
+	// APIEndpoint is the tunnel-side host:port a paired client dials to
+	// drive the daemon's network API (e.g. "10.99.0.1:11700"). Surfaced in
+	// pairing output so the client knows where to point.
+	APIEndpoint string
 }
 
 // NewService wires a Service to a sqlc querier with the given options.
@@ -91,8 +106,12 @@ func NewService(q sqliteq.Querier, opts Options) *Service {
 	if cidr == "" {
 		cidr = DefaultTunnelCIDR
 	}
-	return &Service{q: q, tunnelCIDR: cidr, publicEndpoint: opts.PublicEndpoint}
+	return &Service{q: q, tunnelCIDR: cidr, publicEndpoint: opts.PublicEndpoint, apiEndpoint: opts.APIEndpoint}
 }
+
+// APIEndpoint returns the tunnel-side host:port clients dial to drive the
+// daemon's network API.
+func (s *Service) APIEndpoint() string { return s.apiEndpoint }
 
 // TunnelCIDR returns the subnet used for auto-allocation. The caller
 // renders this into the server-side AllowedIPs when needed.
@@ -187,19 +206,58 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Created, error) {
 	if err != nil {
 		return Created{}, fmt.Errorf("generate id: %w", err)
 	}
+	token, err := generateToken()
+	if err != nil {
+		return Created{}, fmt.Errorf("generate api token: %w", err)
+	}
+	tokenHash := hashToken(token)
+
 	now := time.Now().Unix()
 	row, err := s.q.CreatePeer(ctx, sqliteq.CreatePeerParams{
-		ID:         id.String(),
-		Name:       p.Name,
-		PublicKey:  string(kp.Public),
-		AllowedIps: strings.Join(p.AllowedIPs, ","),
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:           id.String(),
+		Name:         p.Name,
+		PublicKey:    string(kp.Public),
+		AllowedIps:   strings.Join(p.AllowedIPs, ","),
+		ApiTokenHash: &tokenHash,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	})
 	if err != nil {
 		return Created{}, fmt.Errorf("create peer: %w", err)
 	}
-	return Created{Peer: peerFromRow(row), PrivateKey: kp.Private}, nil
+	return Created{Peer: peerFromRow(row), PrivateKey: kp.Private, APIToken: token}, nil
+}
+
+// AuthenticateToken returns the peer a bearer token belongs to, or an error if
+// the token is empty or matches no peer. Used by the network API's auth layer.
+func (s *Service) AuthenticateToken(ctx context.Context, token string) (Peer, error) {
+	if token == "" {
+		return Peer{}, ErrUnauthenticated
+	}
+	hash := hashToken(token)
+	row, err := s.q.GetPeerByAPITokenHash(ctx, &hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Peer{}, ErrUnauthenticated
+	}
+	if err != nil {
+		return Peer{}, fmt.Errorf("lookup token: %w", err)
+	}
+	return peerFromRow(row), nil
+}
+
+// generateToken returns a 256-bit URL-safe random bearer token.
+func generateToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// hashToken returns the hex SHA-256 of a token; only this is stored.
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 // Get returns a peer by ID.

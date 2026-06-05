@@ -24,7 +24,7 @@ func healthCmd() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			client := newAdminClient(cmd.String("socket"))
+			client := newAdminClient(cmd)
 			resp, err := client.Health(ctx, connect.NewRequest(&fletcherv1.HealthRequest{}))
 			if err != nil {
 				return fmt.Errorf("call health: %w", err)

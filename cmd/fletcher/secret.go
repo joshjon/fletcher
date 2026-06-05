@@ -53,7 +53,7 @@ func secretSetCmd() *cli.Command {
 				return err
 			}
 
-			client := newSecretsClient(cmd.String("socket"))
+			client := newSecretsClient(cmd)
 			_, err = client.SetSecret(ctx, connect.NewRequest(&fletcherv1.SetSecretRequest{
 				Name:  name,
 				Value: value,
@@ -73,7 +73,7 @@ func secretListCmd() *cli.Command {
 		Usage: "list secret names (values are never returned)",
 		Flags: []cli.Flag{socketFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			client := newSecretsClient(cmd.String("socket"))
+			client := newSecretsClient(cmd)
 			resp, err := client.ListSecrets(ctx, connect.NewRequest(&fletcherv1.ListSecretsRequest{}))
 			if err != nil {
 				return err
@@ -103,7 +103,7 @@ func secretDeleteCmd() *cli.Command {
 			if name == "" {
 				return errors.New("secret name is required")
 			}
-			client := newSecretsClient(cmd.String("socket"))
+			client := newSecretsClient(cmd)
 			resp, err := client.DeleteSecret(ctx, connect.NewRequest(&fletcherv1.DeleteSecretRequest{Name: name}))
 			if err != nil {
 				return err
@@ -142,6 +142,7 @@ func readAllStdin() (string, error) {
 	return string(data), nil
 }
 
-func newSecretsClient(socket string) fletcherv1connect.SecretServiceClient {
-	return fletcherv1connect.NewSecretServiceClient(unixHTTPClient(socket), unixBaseURL)
+func newSecretsClient(cmd *cli.Command) fletcherv1connect.SecretServiceClient {
+	hc, base, opts := clientTarget(cmd)
+	return fletcherv1connect.NewSecretServiceClient(hc, base, opts...)
 }

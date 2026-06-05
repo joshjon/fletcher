@@ -45,7 +45,7 @@ func approvalListCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			client := newApprovalsClient(cmd.String("socket"))
+			client := newApprovalsClient(cmd)
 			resp, err := client.ListApprovals(ctx, connect.NewRequest(&fletcherv1.ListApprovalsRequest{
 				Limit:        clampInt32(cmd.Int("limit")),
 				Offset:       clampInt32(cmd.Int("offset")),
@@ -73,7 +73,7 @@ func approvalGetCmd() *cli.Command {
 			if id == "" {
 				return errors.New("approval id is required")
 			}
-			client := newApprovalsClient(cmd.String("socket"))
+			client := newApprovalsClient(cmd)
 			resp, err := client.GetApproval(ctx, connect.NewRequest(&fletcherv1.GetApprovalRequest{Id: id}))
 			if err != nil {
 				return err
@@ -97,7 +97,7 @@ func approvalApproveCmd() *cli.Command {
 			if id == "" {
 				return errors.New("approval id is required")
 			}
-			client := newApprovalsClient(cmd.String("socket"))
+			client := newApprovalsClient(cmd)
 			resp, err := client.ApproveApproval(ctx, connect.NewRequest(&fletcherv1.ApproveApprovalRequest{
 				Id: id, Reason: cmd.String("reason"),
 			}))
@@ -128,7 +128,7 @@ func approvalDenyCmd() *cli.Command {
 			if id == "" {
 				return errors.New("approval id is required")
 			}
-			client := newApprovalsClient(cmd.String("socket"))
+			client := newApprovalsClient(cmd)
 			resp, err := client.DenyApproval(ctx, connect.NewRequest(&fletcherv1.DenyApprovalRequest{
 				Id: id, Reason: cmd.String("reason"),
 			}))
@@ -219,6 +219,7 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-func newApprovalsClient(socket string) fletcherv1connect.ApprovalServiceClient {
-	return fletcherv1connect.NewApprovalServiceClient(unixHTTPClient(socket), unixBaseURL)
+func newApprovalsClient(cmd *cli.Command) fletcherv1connect.ApprovalServiceClient {
+	hc, base, opts := clientTarget(cmd)
+	return fletcherv1connect.NewApprovalServiceClient(hc, base, opts...)
 }

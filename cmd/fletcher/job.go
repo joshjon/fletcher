@@ -56,7 +56,7 @@ func jobCreateCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			client := newJobsClient(cmd.String("socket"))
+			client := newJobsClient(cmd)
 			resp, err := client.CreateJob(ctx, connect.NewRequest(&fletcherv1.CreateJobRequest{
 				Trigger:     trigger,
 				Name:        cmd.String("name"),
@@ -83,7 +83,7 @@ func jobGetCmd() *cli.Command {
 			if id == "" {
 				return errors.New("job id is required")
 			}
-			client := newJobsClient(cmd.String("socket"))
+			client := newJobsClient(cmd)
 			resp, err := client.GetJob(ctx, connect.NewRequest(&fletcherv1.GetJobRequest{Id: id}))
 			if err != nil {
 				return err
@@ -113,7 +113,7 @@ func jobListCmd() *cli.Command {
 				}
 				status = st
 			}
-			client := newJobsClient(cmd.String("socket"))
+			client := newJobsClient(cmd)
 			limit := clampInt32(cmd.Int("limit"))
 			offset := clampInt32(cmd.Int("offset"))
 			resp, err := client.ListJobs(ctx, connect.NewRequest(&fletcherv1.ListJobsRequest{
@@ -140,7 +140,7 @@ func jobCancelCmd() *cli.Command {
 			if id == "" {
 				return errors.New("job id is required")
 			}
-			client := newJobsClient(cmd.String("socket"))
+			client := newJobsClient(cmd)
 			resp, err := client.CancelJob(ctx, connect.NewRequest(&fletcherv1.CancelJobRequest{Id: id}))
 			if err != nil {
 				return err

@@ -57,7 +57,7 @@ device immediately and don't log it elsewhere.`,
 			if name == "" {
 				return errors.New("peer name is required")
 			}
-			client := newPeersClient(cmd.String("socket"))
+			client := newPeersClient(cmd)
 			resp, err := client.PairPeer(ctx, connect.NewRequest(&fletcherv1.PairPeerRequest{Name: name}))
 			if err != nil {
 				return err
@@ -74,6 +74,10 @@ func renderPairResult(w io.Writer, resp *fletcherv1.PairPeerResponse, withQR boo
 	fmt.Fprintf(w, "  id:       %s\n", p.GetId())
 	fmt.Fprintf(w, "  address:  %s\n", resp.GetAddress())
 	fmt.Fprintf(w, "  endpoint: %s\n", resp.GetEndpoint())
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "# ===== API TOKEN (shown exactly once) =====")
+	fmt.Fprintf(w, "# Drive the daemon from this device over the tunnel with:\n")
+	fmt.Fprintf(w, "#   fletcher --remote %s --token %s <command>\n", resp.GetApiEndpoint(), resp.GetApiToken())
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "# ===== CLIENT CONFIG (private key shown exactly once) =====")
 	fmt.Fprint(w, resp.GetClientConfig())
@@ -149,7 +153,7 @@ func peerAddCmd() *cli.Command {
 				ServerEndpoint:   cmd.String("endpoint"),
 				ClientAllowedIps: cmd.StringSlice("client-allowed-ips"),
 			}
-			client := newPeersClient(cmd.String("socket"))
+			client := newPeersClient(cmd)
 			resp, err := client.CreatePeer(ctx, connect.NewRequest(req))
 			if err != nil {
 				return err
@@ -175,7 +179,7 @@ func peerListCmd() *cli.Command {
 		Usage: "list registered peers",
 		Flags: []cli.Flag{socketFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			client := newPeersClient(cmd.String("socket"))
+			client := newPeersClient(cmd)
 			resp, err := client.ListPeers(ctx, connect.NewRequest(&fletcherv1.ListPeersRequest{Limit: 100}))
 			if err != nil {
 				return err
@@ -196,7 +200,7 @@ func peerDeleteCmd() *cli.Command {
 			if id == "" {
 				return errors.New("peer id is required")
 			}
-			client := newPeersClient(cmd.String("socket"))
+			client := newPeersClient(cmd)
 			resp, err := client.DeletePeer(ctx, connect.NewRequest(&fletcherv1.DeletePeerRequest{Id: id}))
 			if err != nil {
 				return err
@@ -229,7 +233,7 @@ func peerServerConfigCmd() *cli.Command {
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			client := newPeersClient(cmd.String("socket"))
+			client := newPeersClient(cmd)
 			resp, err := client.ServerConfig(ctx, connect.NewRequest(&fletcherv1.ServerConfigRequest{
 				Address:    cmd.String("address"),
 				ListenPort: clampInt32(cmd.Int("listen-port")),
@@ -259,6 +263,7 @@ func writePeersTable(w io.Writer, peers []*fletcherv1.Peer) error {
 	return tw.Flush()
 }
 
-func newPeersClient(socket string) fletcherv1connect.PeerServiceClient {
-	return fletcherv1connect.NewPeerServiceClient(unixHTTPClient(socket), unixBaseURL)
+func newPeersClient(cmd *cli.Command) fletcherv1connect.PeerServiceClient {
+	hc, base, opts := clientTarget(cmd)
+	return fletcherv1connect.NewPeerServiceClient(hc, base, opts...)
 }

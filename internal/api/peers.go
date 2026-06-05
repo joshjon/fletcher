@@ -26,6 +26,9 @@ type PeersBackend interface {
 	// PublicEndpoint returns the operator-configured host:port for
 	// PairPeer; empty disables pairing with a clear error.
 	PublicEndpoint() string
+	// APIEndpoint returns the tunnel-side host:port clients dial to drive
+	// the daemon's network API.
+	APIEndpoint() string
 	// TunnelCIDR is the subnet the server side announces as AllowedIPs
 	// to peers (so they route only fletcher-network traffic through).
 	TunnelCIDR() string
@@ -121,6 +124,8 @@ func (s *PeersService) PairPeer(ctx context.Context, req *connect.Request[fletch
 		PrivateKey:   string(created.PrivateKey),
 		Address:      address,
 		Endpoint:     endpoint,
+		ApiToken:     created.APIToken,
+		ApiEndpoint:  s.peers.APIEndpoint(),
 	}), nil
 }
 

@@ -1,7 +1,10 @@
 -- name: CreatePeer :one
-INSERT INTO peers (id, name, public_key, allowed_ips, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO peers (id, name, public_key, allowed_ips, api_token_hash, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
+
+-- name: GetPeerByAPITokenHash :one
+SELECT * FROM peers WHERE api_token_hash = ?;
 
 -- name: GetPeer :one
 SELECT * FROM peers WHERE id = ?;

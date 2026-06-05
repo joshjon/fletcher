@@ -21,11 +21,13 @@ type Querier interface {
 	CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, error)
 	DeletePeer(ctx context.Context, id string) (int64, error)
 	DeleteSecret(ctx context.Context, name string) (int64, error)
+	DeleteSetting(ctx context.Context, key string) (int64, error)
 	DenyApproval(ctx context.Context, arg DenyApprovalParams) (int64, error)
 	ExpirePendingApprovals(ctx context.Context, arg ExpirePendingApprovalsParams) (int64, error)
 	GetApproval(ctx context.Context, id string) (PendingApproval, error)
 	GetJob(ctx context.Context, id string) (Job, error)
 	GetPeer(ctx context.Context, id string) (Peer, error)
+	GetPeerByAPITokenHash(ctx context.Context, apiTokenHash *string) (Peer, error)
 	GetPeerByName(ctx context.Context, name string) (Peer, error)
 	GetSecret(ctx context.Context, name string) ([]byte, error)
 	ListApprovals(ctx context.Context, arg ListApprovalsParams) ([]PendingApproval, error)
@@ -34,11 +36,13 @@ type Querier interface {
 	ListJobsByStatus(ctx context.Context, arg ListJobsByStatusParams) ([]Job, error)
 	ListPeers(ctx context.Context, arg ListPeersParams) ([]Peer, error)
 	ListSecretMetadata(ctx context.Context) ([]ListSecretMetadataRow, error)
+	ListSettings(ctx context.Context) ([]Setting, error)
 	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) error
 	MarkJobStarted(ctx context.Context, arg MarkJobStartedParams) error
 	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
 	UpsertSecret(ctx context.Context, arg UpsertSecretParams) error
+	UpsertSetting(ctx context.Context, arg UpsertSettingParams) error
 }
 
 var _ Querier = (*Queries)(nil)

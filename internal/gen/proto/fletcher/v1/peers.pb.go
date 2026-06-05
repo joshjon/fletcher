@@ -596,7 +596,14 @@ type PairPeerResponse struct {
 	Address string `protobuf:"bytes,4,opt,name=address,proto3" json:"address,omitempty"`
 	// endpoint is the host:port the peer's device will dial; copied from
 	// the daemon's configured public_endpoint.
-	Endpoint      string `protobuf:"bytes,5,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	Endpoint string `protobuf:"bytes,5,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	// api_token is the per-peer bearer token for the daemon's network API,
+	// returned exactly once. Clients send it as `Authorization: Bearer <token>`
+	// when driving the daemon over the tunnel.
+	ApiToken string `protobuf:"bytes,6,opt,name=api_token,json=apiToken,proto3" json:"api_token,omitempty"`
+	// api_endpoint is the tunnel-side host:port a client dials to drive the
+	// daemon (e.g. "10.99.0.1:11700"), reachable once the tunnel is up.
+	ApiEndpoint   string `protobuf:"bytes,7,opt,name=api_endpoint,json=apiEndpoint,proto3" json:"api_endpoint,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -662,6 +669,20 @@ func (x *PairPeerResponse) GetAddress() string {
 func (x *PairPeerResponse) GetEndpoint() string {
 	if x != nil {
 		return x.Endpoint
+	}
+	return ""
+}
+
+func (x *PairPeerResponse) GetApiToken() string {
+	if x != nil {
+		return x.ApiToken
+	}
+	return ""
+}
+
+func (x *PairPeerResponse) GetApiEndpoint() string {
+	if x != nil {
+		return x.ApiEndpoint
 	}
 	return ""
 }
@@ -818,14 +839,16 @@ const file_fletcher_v1_peers_proto_rawDesc = "" +
 	"\x12DeletePeerResponse\x12\x18\n" +
 	"\aexisted\x18\x01 \x01(\bR\aexisted\"%\n" +
 	"\x0fPairPeerRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\xb5\x01\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\xf5\x01\n" +
 	"\x10PairPeerResponse\x12%\n" +
 	"\x04peer\x18\x01 \x01(\v2\x11.fletcher.v1.PeerR\x04peer\x12#\n" +
 	"\rclient_config\x18\x02 \x01(\tR\fclientConfig\x12\x1f\n" +
 	"\vprivate_key\x18\x03 \x01(\tR\n" +
 	"privateKey\x12\x18\n" +
 	"\aaddress\x18\x04 \x01(\tR\aaddress\x12\x1a\n" +
-	"\bendpoint\x18\x05 \x01(\tR\bendpoint\"P\n" +
+	"\bendpoint\x18\x05 \x01(\tR\bendpoint\x12\x1b\n" +
+	"\tapi_token\x18\x06 \x01(\tR\bapiToken\x12!\n" +
+	"\fapi_endpoint\x18\a \x01(\tR\vapiEndpoint\"P\n" +
 	"\x13ServerConfigRequest\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x1f\n" +
 	"\vlisten_port\x18\x02 \x01(\x05R\n" +

@@ -34,7 +34,7 @@ func settingsListCmd() *cli.Command {
 		Usage: "list every setting with its value and help",
 		Flags: []cli.Flag{socketFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			client := newSettingsClient(cmd.String("socket"))
+			client := newSettingsClient(cmd)
 			resp, err := client.ListSettings(ctx, connect.NewRequest(&fletcherv1.ListSettingsRequest{}))
 			if err != nil {
 				return err
@@ -64,7 +64,7 @@ func settingsSetCmd() *cli.Command {
 				return errors.New("usage: fletcher settings set <key> <value>")
 			}
 			key, value := cmd.Args().Get(0), cmd.Args().Get(1)
-			client := newSettingsClient(cmd.String("socket"))
+			client := newSettingsClient(cmd)
 			if _, err := client.SetSetting(ctx, connect.NewRequest(&fletcherv1.SetSettingRequest{Key: key, Value: value})); err != nil {
 				return err
 			}
@@ -86,7 +86,7 @@ func settingsUnsetCmd() *cli.Command {
 			if key == "" {
 				return errors.New("a setting key is required")
 			}
-			client := newSettingsClient(cmd.String("socket"))
+			client := newSettingsClient(cmd)
 			resp, err := client.DeleteSetting(ctx, connect.NewRequest(&fletcherv1.DeleteSettingRequest{Key: key}))
 			if err != nil {
 				return err
@@ -102,6 +102,7 @@ func settingsUnsetCmd() *cli.Command {
 	}
 }
 
-func newSettingsClient(socket string) fletcherv1connect.SettingsServiceClient {
-	return fletcherv1connect.NewSettingsServiceClient(unixHTTPClient(socket), unixBaseURL)
+func newSettingsClient(cmd *cli.Command) fletcherv1connect.SettingsServiceClient {
+	hc, base, opts := clientTarget(cmd)
+	return fletcherv1connect.NewSettingsServiceClient(hc, base, opts...)
 }

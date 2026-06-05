@@ -46,6 +46,19 @@ func newApp() *cli.Command {
 		Name:    "fletcher",
 		Usage:   "private agent compute on hardware you own",
 		Version: buildinfo.Version,
+		// Root flags are persistent in urfave/cli v3, so subcommands can read
+		// --remote/--token to target a daemon over the tunnel.
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "remote",
+				Usage: "drive a remote daemon at host:port over the tunnel instead of the local socket",
+			},
+			&cli.StringFlag{
+				Name:    "token",
+				Sources: cli.EnvVars("FLETCHER_TOKEN"),
+				Usage:   "per-peer API token for --remote (from `fletcher peer pair`)",
+			},
+		},
 		Commands: []*cli.Command{
 			serveCmd(),
 			daemonCmd(),

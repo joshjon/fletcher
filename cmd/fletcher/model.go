@@ -42,7 +42,7 @@ Model IDs work on either endpoint - same id, two wire formats.`,
 			outputFlag(),
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			client := newModelsClient(cmd.String("socket"))
+			client := newModelsClient(cmd)
 			resp, err := client.ListModels(ctx, connect.NewRequest(&fletcherv1.ListModelsRequest{}))
 			if err != nil {
 				return err

@@ -21,12 +21,13 @@ type Job struct {
 }
 
 type Peer struct {
-	ID         string
-	Name       string
-	PublicKey  string
-	AllowedIps string
-	CreatedAt  int64
-	UpdatedAt  int64
+	ID           string
+	Name         string
+	PublicKey    string
+	AllowedIps   string
+	CreatedAt    int64
+	UpdatedAt    int64
+	ApiTokenHash *string
 }
 
 type PendingApproval struct {
@@ -46,4 +47,10 @@ type Secret struct {
 	Ciphertext []byte
 	CreatedAt  int64
 	UpdatedAt  int64
+}
+
+type Setting struct {
+	Key       string
+	Value     string
+	UpdatedAt int64
 }
