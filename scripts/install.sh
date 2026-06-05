@@ -9,6 +9,10 @@
 #
 # Override the release tag with FLETCHER_VERSION=vX.Y.Z, or the install
 # prefix with FLETCHER_PREFIX=/opt/fletcher.
+#
+# To validate a release before tagging it, point FLETCHER_LOCAL_TARBALL at a
+# locally-built tarball (e.g. a goreleaser snapshot from dist/) - the script
+# installs it directly instead of downloading from GitHub.
 
 set -eu
 
@@ -46,37 +50,47 @@ case "$(uname -m)" in
 	*) die "unsupported architecture: $(uname -m)" ;;
 esac
 
-if [ "$VERSION" = "latest" ]; then
-	log "resolving latest release"
-	VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-		| sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
-		| head -n1)
-	[ -n "$VERSION" ] || die "could not resolve latest release from GitHub API"
-fi
-
-TARBALL="fletcher_${VERSION}_linux_${ARCH}.tar.gz"
-SUMS="SHA256SUMS"
-BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
-
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
-log "downloading $TARBALL"
-curl -fsSL "${BASE_URL}/${TARBALL}" -o "${WORK}/${TARBALL}"
-log "downloading checksums"
-curl -fsSL "${BASE_URL}/${SUMS}" -o "${WORK}/${SUMS}"
-
-log "verifying checksum"
-cd "$WORK"
-if command -v sha256sum >/dev/null 2>&1; then
-	grep "  ${TARBALL}$" "$SUMS" | sha256sum -c -
+if [ -n "${FLETCHER_LOCAL_TARBALL:-}" ]; then
+	# Test mode: install a locally-built tarball (e.g. a goreleaser snapshot)
+	# instead of a published release. Used to validate a release before tagging
+	# it; skips the GitHub download and the checksum step.
+	[ -f "${FLETCHER_LOCAL_TARBALL}" ] || die "FLETCHER_LOCAL_TARBALL not found: ${FLETCHER_LOCAL_TARBALL}"
+	TARBALL=$(basename "${FLETCHER_LOCAL_TARBALL}")
+	log "using local tarball ${FLETCHER_LOCAL_TARBALL} (test mode; skipping download + checksum)"
+	cp "${FLETCHER_LOCAL_TARBALL}" "${WORK}/${TARBALL}"
 else
-	# macOS-style fallback (unlikely on Linux but defensive)
-	expected=$(grep "  ${TARBALL}$" "$SUMS" | awk '{print $1}')
-	actual=$(shasum -a 256 "$TARBALL" | awk '{print $1}')
-	[ "$expected" = "$actual" ] || die "checksum mismatch for $TARBALL"
+	if [ "$VERSION" = "latest" ]; then
+		log "resolving latest release"
+		VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+			| sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' \
+			| head -n1)
+		[ -n "$VERSION" ] || die "could not resolve latest release from GitHub API"
+	fi
+
+	TARBALL="fletcher_${VERSION}_linux_${ARCH}.tar.gz"
+	SUMS="SHA256SUMS"
+	BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+
+	log "downloading $TARBALL"
+	curl -fsSL "${BASE_URL}/${TARBALL}" -o "${WORK}/${TARBALL}"
+	log "downloading checksums"
+	curl -fsSL "${BASE_URL}/${SUMS}" -o "${WORK}/${SUMS}"
+
+	log "verifying checksum"
+	cd "$WORK"
+	if command -v sha256sum >/dev/null 2>&1; then
+		grep "  ${TARBALL}$" "$SUMS" | sha256sum -c -
+	else
+		# macOS-style fallback (unlikely on Linux but defensive)
+		expected=$(grep "  ${TARBALL}$" "$SUMS" | awk '{print $1}')
+		actual=$(shasum -a 256 "$TARBALL" | awk '{print $1}')
+		[ "$expected" = "$actual" ] || die "checksum mismatch for $TARBALL"
+	fi
+	cd - >/dev/null
 fi
-cd - >/dev/null
 
 log "extracting"
 tar -xzf "${WORK}/${TARBALL}" -C "${WORK}"
