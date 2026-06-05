@@ -46,9 +46,10 @@ fletcher peer pair phone
 ```
 
 On a KVM host the daemon defaults to the **Firecracker** runtime, so running a
-job needs a base image first: build one with `make image` and import it with
-`fletcher image import --format ext4`, then `fletcher job create --image
-<name> --command "..."`. The full walkthrough - building/importing the image,
+job needs a base image first. Pull the published one and import it:
+`sudo fletcher image import ghcr.io/joshjon/fletcher-base:debian-13 --format
+ext4 --name <name>`, then `fletcher job create --image <name> --command "..."`.
+The full walkthrough - importing the image,
 running an agent in a microVM, `fletcher settings` / `fletcher daemon`, and
 driving the daemon from a paired device - is in [`docs/setup.md`](docs/setup.md).
 (No KVM? The daemon falls back to the mock runtime, where

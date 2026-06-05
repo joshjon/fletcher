@@ -49,10 +49,15 @@ daemon over the tunnel, gated by a per-peer token), and **Milestone 5**
 (Firecracker microVMs - the default isolation tier, see below). All planned
 milestones M1-M5 are complete.
 
-What is **not** possible yet (deferred / backlog, not planned milestones):
+Everything needed to run a real agent in a microVM is in place: a base image is
+published to `ghcr.io/<owner>/fletcher-base` by CI, so an operator pulls and
+imports it (`fletcher image import ghcr.io/<owner>/fletcher-base:debian-13
+--format ext4`) rather than building it. Verified: the image boots in a microVM
+and `claude`/`node`/`go` run inside it.
 
-- A shipped/pullable `fletcher-base` image - running a real agent still needs a
-  local `make image` + `fletcher image import` (see Backlog).
+Remaining rough edges (deferred / backlog, not planned milestones): a multi-arch
+image (arm64 is not built yet - slow under emulation), and trimming the
+snapshot-root setup so the few-GB space requirement is provisioned, not manual.
 
 ## Status at a glance (phases 0-16)
 

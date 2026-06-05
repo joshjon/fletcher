@@ -9,9 +9,9 @@
 # Ships the three first-class agent CLIs (`claude`, `codex`, `pi`) plus
 # the daemon contract (well-known env vars, /workspace mount point,
 # pre-created credential dirs Phase 12 bind-mounts target). Built via
-# `make image`; flattened into a btrfs subvolume by the snapshot driver
-# until the firecracker-containerd OCI pull pipeline per DESIGN.md §3
-# lands.
+# `make image` (or pulled from ghcr.io/<owner>/fletcher-base) and flattened
+# by `fletcher image import` into a btrfs subvolume (runc) or an ext4 image
+# (Firecracker) - the self-built pipeline per DESIGN.md §11.
 #
 # Reference design: exe.dev's "exeuntu". Reference patterns adopted:
 # single AGENTS.md symlinked into each agent's expected config path;

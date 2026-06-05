@@ -371,15 +371,15 @@ available as an explicit, shared-kernel fallback (`fletcher settings set runtime
 runc`). Confirm what you have with `fletcher doctor` (it checks `/dev/kvm` and the
 bundled VMM).
 
-Running an agent needs a base-image rootfs. This currently requires building the
-`fletcher-base` image from the source repo (a shipped/pullable image is pending).
-For the Firecracker default:
+Running an agent needs a base-image rootfs. For the Firecracker default:
 
-1. Build and import a base image as an ext4 rootfs:
-   `make image`, then `sudo fletcher image import fletcher-base:dev --format ext4
-   --btrfs-root /var/lib/fletcher/snapshots --name fletcher-base`. (The importer
-   injects the microVM init; the snapshot root only needs to be writable, and is
-   cheapest on btrfs where clones are reflinks.)
+1. Import a base image as an ext4 rootfs. Pull the published image (no local
+   build needed):
+   `sudo fletcher image import ghcr.io/joshjon/fletcher-base:debian-13 --format
+   ext4 --btrfs-root /var/lib/fletcher/snapshots --name fletcher-base`. (Or build
+   it yourself with `make image` and import `fletcher-base:dev`.) The agent rootfs
+   is roughly 3 GB, so make sure the snapshot root has a few GB free; on btrfs the
+   per-job clones are reflinks. The importer injects the microVM init for you.
 2. Give the daemon an Anthropic key so the gateway can reach models:
    `fletcher secret set anthropic_api_key sk-ant-...`.
 3. Run an agent as a job:
