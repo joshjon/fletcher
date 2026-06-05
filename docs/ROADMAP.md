@@ -388,6 +388,86 @@ DESIGN.md §11 and §9.
   gateway over vsock, has no egress, and the gateway already stamps credentials
   (M1-M4). It is the operator's final validation, documented in setup.md.
 
+### Milestone 6 - Durable sessions (interactive, persistent workspaces) - PLANNED (design sketch)
+
+**The gap.** Today every job is ephemeral: a fresh fork runs one command and is
+torn down (the supervisor `deleteSnapshot`s on completion). There is no way to
+keep a workspace, SSH/shell into a running VM, iterate on a checkout, or hold a
+live agent session across commands. The whole interactive/durable half of the
+job model (DESIGN §4's `long_running` trigger, §5's on-disk durability and
+resume, preview-URL brokered access) is designed but unbuilt. This milestone
+builds it - turning Fletcher from an ephemeral task runner into something that
+*also* hosts durable, interactive sessions, without splitting the job model.
+
+**Primitive.** A **session is a job with the `long_running` trigger whose fork
+persists** - the enum value already exists; the lifecycle differs (DESIGN §4: one
+primitive, many hats, not three subsystems). The durable unit is the **fork on
+disk** (the ext4 image / btrfs subvolume), not a running process. So `/workspace`,
+a `git clone`, edits, and the agent's on-disk session survive across
+disconnects, stops, and daemon restarts.
+
+**Persistence model: disk-first; hibernate by stopping the VM, not snapshotting
+RAM.** The robust, simple path on a single box (and what DESIGN §5 already
+commits to):
+
+- Idle/stopped session = **VM stopped, fork kept on disk.** Stopping reclaims all
+  RAM/CPU; nothing in memory is load-bearing.
+- Wake = **boot a fresh microVM against the persisted fork**, and resume the agent
+  from its on-disk session (e.g. `claude --resume <id>`) - durability comes from
+  disk, never from a live process. This is exactly DESIGN §5's "resume = restart
+  the agent pointed at its on-disk session," now realised for sessions.
+- **Idle auto-hibernate** (a configurable timeout) stops idle sessions so many can
+  coexist on one box without holding RAM - the standard resource-reclaim pattern.
+- **Firecracker memory snapshot/restore is a later, optional instant-wake
+  optimisation, not a dependency** (DESIGN §11). It buys sub-second wake with a
+  live process tree, but on a single box it is the hard path: the guest memory
+  file must stay resident for the VM's lifetime, pause cost scales with RAM, and
+  reclaiming that RAM needs balloon/page-out tricks. Disk-first sidesteps all of
+  it; we add memory-snapshot only if cold-wake latency proves to be a real pain.
+
+**Interactive access: brokered, never a direct route into VM-land.** Same trust
+boundary as everything else - the client is a WireGuard peer to the daemon; the
+daemon brokers into vsock-land (DESIGN §5/§6). Building on the M5d guest agent:
+
+- **`fletcher session exec` / `shell`** - an interactive command/PTY in the running
+  session, streamed client -> tunnel -> daemon -> vsock -> guest agent (extends
+  M5d from "run one command, capture output" to "PTY, stdin, window-resize,
+  signals").
+- **Brokered SSH (optional, for IDE attach)** - run `sshd` in the session VM (the
+  base image already plans host keys generated at boot) and have the daemon proxy
+  SSH over vsock, so editors that speak Remote-SSH can attach. This is the
+  preview-URL reverse-proxy generalised from HTTP to SSH; the VM stays
+  unroutable.
+- **Preview ports** - reuse the gateway-forward machinery in reverse to expose a
+  port the session is serving as a daemon-brokered URL.
+
+**CLI / API shape.** Keep `job` for ephemeral one-shots (unchanged). Add session
+verbs that mirror the lifecycle: `session create` (boot a persistent VM),
+`session shell` / `session exec`, `session stop` (hibernate) / `session start`
+(wake), `session ssh` (set up brokered SSH for an IDE), `session list`,
+`session delete` (destroy the fork). Under the hood these are the one job model
+with `long_running` + the persistence/transport above.
+
+**Open design questions to whiteboard** (some of these the broader ecosystem
+does not document, so they are genuinely ours to decide):
+
+- Agent-conversation resume: re-spawn against the on-disk session (the §5 bet,
+  durability-correct) vs keep a live process via a memory snapshot (instant but
+  the hard path). Lead with re-spawn; treat snapshot as the optimisation.
+- One brokered channel or two: does a single vsock exec channel cover PTY +
+  resize + signals + `scp`/`sftp` + port-forward, or do IDE/file-transfer flows
+  want the brokered-SSH path as a second channel?
+- Lifecycle semantics: what counts as "idle" for auto-hibernate; does a job's
+  trigger flip, or is a session a distinct row referencing the same fork.
+- Storage growth: persistent forks are full ext4 images (a few GB each); per-job
+  reflink clones are cheap, but long-lived divergent sessions are not - quota /
+  prune policy.
+
+This sketch is informed by how durable, interactive sandbox/dev-environment
+systems handle persistence vs hibernation and brokered access generally; the
+choices above are Fletcher's own, derived from the single-box, daemon-gated,
+no-route-into-VM-land constraints.
+
 ## Backlog (not scheduled - awaiting a usage signal)
 
 Per DESIGN.md §13, these wait for real demand rather than being pre-planned.
