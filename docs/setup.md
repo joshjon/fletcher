@@ -31,38 +31,19 @@ restarts it on upgrade automatically.
 
 You should now have `fletcher version` working.
 
-> **Pre-v0.1.0 note:** until the first release is tagged, the installer
-> errors with "could not resolve latest release from GitHub API." If
-> you're an early tester who wants to try Fletcher today, see the
-> "Building from source" section in the [README](../README.md) - the
-> from-source path is documented there for developers.
-
-## First run (smoke test)
-
-Before configuring networking, run the daemon in the foreground to confirm
-the binary is healthy on this machine:
-
-```sh
-mkdir -p /tmp/fletcher-data
-fletcher serve \
-  --socket   /tmp/fletcher-data/fletcher.sock \
-  --database /tmp/fletcher-data/fletcher.db \
-  --age-key  /tmp/fletcher-data/age.key
-```
-
-You should see startup logs ending in `model gateway ready` and
-`mcp server ready`. From another shell on the same machine:
-
-```sh
-fletcher health --socket /tmp/fletcher-data/fletcher.sock
-```
-
-`status: ok` confirms the daemon is reachable. `Ctrl-C` the daemon, then
-clean up: `rm -rf /tmp/fletcher-data`.
+> **Pre-v0.1.0 note:** until the first release is tagged, the installer's
+> default download path errors with "could not resolve latest release from
+> GitHub API." To try Fletcher today, either build from source (see the
+> [README](../README.md)), or install a locally-built release with the
+> installer's `FLETCHER_LOCAL_TARBALL` mode - both paths are written up in
+> [`TESTING.md`](TESTING.md).
 
 ## Networking
 
-Fletcher has two networking modes. **You only pick one.**
+Fletcher has two networking modes. **You only pick one.** This is also where you
+start the daemon for the first time - it sets up networking when it starts, so
+pick your mode first, then start it (each mode below ends with the start
+command).
 
 ### Mode A: built-in WireGuard (recommended for most homelabs)
 
@@ -78,8 +59,8 @@ No `wg-quick`, no `/etc/wireguard/` config files.
 **Try it:**
 
 ```sh
-sudo systemctl enable --now fletcher
-sudo journalctl -u fletcher -f
+fletcher daemon enable      # start now and on every boot (prompts for sudo)
+fletcher daemon logs -f     # follow the startup logs
 ```
 
 In the logs you're looking for:
@@ -96,11 +77,16 @@ If you see all three, you're done with setup. Skip to
 **If UPnP fails**, the log says so. Two reasons it commonly fails:
 
 1. Your router has UPnP disabled. Look for "UPnP" or "IGD" in the router
-   admin UI and enable it, then `sudo systemctl restart fletcher`.
-2. You're behind CGNAT (your ISP shares a public IP across customers).
-   This isn't fixable from your end - your router doesn't have a public IP
-   to forward. See [Mode B](#mode-b-bring-your-own-vpn) below; that's
-   what to do.
+   admin UI and enable it, then `fletcher daemon restart`.
+2. You're behind CGNAT (your ISP shares one public IP across many customers,
+   so your router has no public IP to forward). Two ways forward:
+   - **Ask your ISP to take you off CGNAT.** Many will, often for free - some
+     let you toggle it yourself in their account/admin portal, otherwise a
+     quick call or support ticket requesting "a public IP" or "to be removed
+     from CGNAT" usually does it. Once they switch it, `fletcher daemon
+     restart` and Mode A should work.
+   - **Or use [Mode B](#mode-b-bring-your-own-vpn)** - reach the daemon over a
+     VPN you already run (Tailscale, etc.), no public IP needed.
 
 **If you'd rather skip UPnP** and forward the port manually (e.g. for
 security reasons or because UPnP is unreliable on your router): set your
@@ -118,10 +104,14 @@ Environment=FLETCHER_PUBLIC_ENDPOINT=your-host-or-ip:51820
 Environment=FLETCHER_NO_UPNP=true
 ```
 
-Then forward UDP 51820 manually in your router (look for "Port
+Save it, then forward UDP 51820 manually in your router (look for "Port
 Forwarding", "Virtual Server", or "NAT/Gaming"). Protocol: UDP, External
-port: 51820, Internal port: 51820, Destination: the LAN IP of this
-machine (`ip -4 addr` shows it).
+port: 51820, Internal port: 51820, Destination: the LAN IP of this machine
+(`ip -4 addr` shows it). Then start the daemon: `fletcher daemon enable`.
+
+(The endpoint alone is also a `fletcher settings` key -
+`fletcher settings set public_endpoint <host>:51820` - but `FLETCHER_NO_UPNP`
+has no settings equivalent yet, so the drop-in is the way to set both.)
 
 ### Mode B: bring your own VPN
 
@@ -152,7 +142,7 @@ Environment=FLETCHER_NO_UPNP=true
 ```
 
 The `FLETCHER_NO_UPNP=true` is important - there's nothing for the
-built-in tunnel to do here.
+built-in tunnel to do here. Save, then start the daemon: `fletcher daemon enable`.
 
 For example, **with Tailscale** on the server and on the device you want
 to connect from:
@@ -276,10 +266,10 @@ hints below may help.
 is on your `$PATH` (`echo $PATH`). Run with the full path:
 `/usr/local/bin/fletcher version`.
 
-**Daemon won't start: "operation not permitted" on TUN.** The systemd
-unit grants `CAP_NET_ADMIN` automatically. If you're running the daemon
-manually (not via systemd), you'll need to run as root or grant the
-capability: `sudo setcap cap_net_admin+ep /usr/local/bin/fletcher`.
+**Daemon won't start: "operation not permitted" on TUN.** The systemd unit
+grants `CAP_NET_ADMIN` for the tunnel automatically, so this usually means the
+daemon was started outside systemd. Start it with `fletcher daemon start` (or
+`enable`), which run it under the unit.
 
 **`upnp port-forward unavailable` in logs.** Either UPnP isn't enabled
 on your router, or you're behind CGNAT. `fletcher doctor` distinguishes
@@ -296,9 +286,9 @@ from outside your LAN: an online UDP port checker against
 **I want to start over.** Stop the daemon, wipe the state directories:
 
 ```sh
-sudo systemctl stop fletcher
+fletcher daemon stop
 sudo rm -rf /var/lib/fletcher
-sudo systemctl start fletcher
+fletcher daemon start
 ```
 
 This regenerates the age identity, the server WireGuard key, and an

@@ -201,9 +201,11 @@ make image
 ```
 
 Builds `fletcher-base:dev` with claude / codex / pi agent CLIs baked
-in. The image is only used in real anger on Linux (the snapshot driver
-flattens it into a btrfs subvolume); on macOS this is just a "did the
-Dockerfile compile" smoke test.
+in. The image is only used in real anger on Linux (`fletcher image import`
+flattens it into an ext4 image for Firecracker or a btrfs subvolume for
+runc); on macOS this is just a "did the Dockerfile compile" smoke test. CI
+also publishes it to `ghcr.io/<owner>/fletcher-base`, so on Linux you can
+pull it instead of building.
 
 ### If something looks off
 
@@ -251,7 +253,7 @@ After making changes locally:
 cd ~/git/fletcher
 git pull
 make install        # same command for upgrade; restarts daemon if running
-sudo journalctl -u fletcher -f
+fletcher daemon logs -f
 ```
 
 About 15 seconds from `git pull` to "new binary running." Watch the
@@ -298,8 +300,8 @@ This prints a QR code and the equivalent `wg-quick` config. Then:
    `wg` tool to read. Check the interface and the daemon log instead:
 
    ```sh
-   ip addr show fletcher0                       # UP, with 10.99.0.1/24
-   journalctl -u fletcher | grep -i wireguard   # "tunnel up" + "peer set updated peers:N"
+   ip addr show fletcher0                            # UP, with 10.99.0.1/24
+   fletcher daemon logs | grep -i wireguard          # "tunnel up" + "peer set updated peers:N"
    ```
 
 5. Confirm the handshake from the client. The server cannot show it -
@@ -341,11 +343,83 @@ fletcher peer list
 fletcher peer delete <peer-id>
 ```
 
-### 2. Real runtime (runc + btrfs)
+### 2. Real runtime - Firecracker microVMs (the default)
+
+**What this proves:** jobs run inside a real KVM microVM - its own kernel, a
+copy-on-write ext4 rootfs, a vsock channel to the daemon, and no NIC - instead
+of the mock driver's bare subprocess. This is the default isolation tier.
+
+Prerequisites: a host with `/dev/kvm` (bare metal, or a VM with nested
+virtualization). `fletcher doctor` checks `/dev/kvm` and that the VMM is
+bundled; both should be green. Nothing else to provision - unlike runc, the
+ext4 driver works on any filesystem, so there is no btrfs loopback to set up,
+and the daemon creates its own snapshot root.
+
+With no runtime configured, the daemon auto-selects Firecracker on a KVM host.
+Confirm:
+
+```sh
+fletcher daemon logs | grep "drivers selected"   # runtime=firecracker snapshot=ext4
+```
+
+Import a base image as an ext4 rootfs - pull the published one (or `make image`
+first and import `fletcher-base:dev`):
+
+```sh
+sudo fletcher image import ghcr.io/joshjon/fletcher-base:debian-13 \
+  --format ext4 --btrfs-root /var/lib/fletcher/snapshots --name fletcher-base
+```
+
+The importer pulls via docker, builds the ext4, and injects the microVM init.
+Pass `--btrfs-root` to match the daemon's snapshot root (default
+`/var/lib/fletcher/snapshots`); the rootfs is ~3 GB, so leave a few GB free.
+
+Smoke test - a command in a real microVM (exits non-zero so its output lands in
+the job's error field):
+
+```sh
+fletcher job create --name fc-smoke \
+  --command "echo KERNEL=\$(uname -r); cat /proc/1/comm; ls /sys/class/net; exit 9" \
+  --image fletcher-base
+sleep 6
+fletcher daemon logs | grep fc-smoke
+```
+
+Expect the guest kernel (`5.10.x`, not the host's), `fletcher-init` as PID 1,
+and only `lo` for a NIC - the VM has no other interface, so no egress.
+
+**A real agent + model call.** Give the daemon a key, then have claude generate
+(it reaches Anthropic only via the daemon gateway over vsock; the key never
+enters the VM):
+
+```sh
+fletcher secret set anthropic_api_key sk-ant-...
+fletcher job create --name fc-agent --command "claude -p 'reply with: PONG'" --image fletcher-base
+sleep 8
+fletcher job list   # fc-agent -> succeeded
+```
+
+**Driver-level integration tests.** The microVM boot, output streaming, exit
+code, the vsock gateway forward, and the no-egress property all have automated
+tests behind the `integration` build tag. They need `/dev/kvm` and an ext4
+rootfs carrying the guest agent. Copy the template somewhere your user can read,
+then run them:
+
+```sh
+sudo cp /var/lib/fletcher/snapshots/images/fletcher-base.ext4 /tmp/rootfs.ext4
+sudo chown "$USER" /tmp/rootfs.ext4
+FLETCHER_TEST_ROOTFS=/tmp/rootfs.ext4 \
+  go test -tags integration -run TestFirecracker -v ./internal/runtime/firecrackerdriver/
+```
+
+### 3. Real runtime - runc + btrfs (the no-KVM fallback)
 
 **What this proves:** jobs run inside a real OCI container (runc) against
 a real copy-on-write snapshot (btrfs), instead of the mock driver's bare
-subprocess and plain directory.
+subprocess and plain directory. Use this on a host without `/dev/kvm`, or to
+exercise the degraded-isolation path; it is an explicit opt-in
+(`fletcher settings set runtime runc`). Unlike Firecracker, runc needs a btrfs
+snapshot root - the loopback below.
 
 Prerequisites: `runc` and `docker` on `PATH`, and a btrfs filesystem for
 the snapshot root that the daemon (the `fletcher` user) can write to. No
@@ -436,7 +510,7 @@ To revert to the mock drivers: `fletcher settings unset runtime` (and
 `snapshot`, `btrfs_root`), `fletcher daemon restart`, and unmount the
 loopback if you created one.
 
-### 3. Remote API (drive the daemon from a paired client)
+### 4. Remote API (drive the daemon from a paired client)
 
 **What this proves:** a paired device drives the daemon over the tunnel, with
 the per-peer token enforced and the local socket still open.
@@ -459,3 +533,55 @@ fletcher health                                     # local socket, no token -> 
 operators who want to override tunnel IP, endpoint, or allowed-IPs
 manually. The `pair` command is the documented path; `add` is the
 escape hatch for atypical cases.
+
+## Testing a release the way a user installs it
+
+The highest-fidelity test before tagging: build the actual release artifacts and
+install them the way `scripts/install.sh` does. This exercises the real
+installer and the release binary - which, unlike `make install`, must embed the
+Firecracker VMM + guest agent via the goreleaser hooks.
+
+**1. Build a snapshot.** Needs goreleaser
+(`go install github.com/goreleaser/goreleaser/v2@latest`):
+
+```sh
+make release-snapshot    # runs the release hooks (fetch-vmm, build-guest-all) -> dist/
+```
+
+Confirm the binary actually embedded the VMM (the thing that would otherwise
+silently downgrade a release to mock):
+
+```sh
+dist/fletcher_linux_amd64_v1/fletcher doctor | grep -A1 "Firecracker VMM"
+# -> bundled (firecracker binary + guest kernel)
+```
+
+**2. (Optional) start from a clean slate** to test the genuine first-run path -
+no pre-existing user, dirs, or storage:
+
+```sh
+sudo systemctl disable --now fletcher 2>/dev/null || true
+sudo umount /var/lib/fletcher/snapshots 2>/dev/null || true   # only if you made a btrfs loopback
+sudo rm -f /usr/local/bin/fletcher /etc/systemd/system/fletcher.service
+sudo rm -rf /etc/systemd/system/fletcher.service.d /var/lib/fletcher /etc/fletcher /run/fletcher
+sudo systemctl daemon-reload
+sudo userdel fletcher 2>/dev/null; sudo groupdel fletcher 2>/dev/null || true
+```
+
+**3. Install the snapshot via the real installer.** The `FLETCHER_LOCAL_TARBALL`
+mode installs a local tarball instead of downloading a release (skips the GitHub
+download + checksum):
+
+```sh
+sudo FLETCHER_LOCAL_TARBALL="$PWD/dist/$(cd dist && ls fletcher_*_linux_amd64.tar.gz)" \
+  sh scripts/install.sh
+```
+
+This creates the `fletcher` user, installs the binary + unit, adds the daemon to
+the `kvm` group and you to the `fletcher` group - exactly what `curl | sudo sh`
+does once a release is tagged.
+
+**4. From here, follow [`setup.md`](setup.md) as a user would** - `fletcher
+daemon enable`, `fletcher doctor`, import the base image, run an agent. Anything
+in that flow that needs a step the docs don't mention is a fresh-user-experience
+bug to fix before tagging.
