@@ -98,7 +98,7 @@ If you see all three, you're done with setup. Skip to
 1. Your router has UPnP disabled. Look for "UPnP" or "IGD" in the router
    admin UI and enable it, then `sudo systemctl restart fletcher`.
 2. You're behind CGNAT (your ISP shares a public IP across customers).
-   This isn't fixable from your end — your router doesn't have a public IP
+   This isn't fixable from your end - your router doesn't have a public IP
    to forward. See [Mode B](#mode-b-bring-your-own-vpn) below; that's
    what to do.
 
@@ -151,7 +151,7 @@ Environment=FLETCHER_MCP_LISTEN=0.0.0.0:11600
 Environment=FLETCHER_NO_UPNP=true
 ```
 
-The `FLETCHER_NO_UPNP=true` is important — there's nothing for the
+The `FLETCHER_NO_UPNP=true` is important - there's nothing for the
 built-in tunnel to do here.
 
 For example, **with Tailscale** on the server and on the device you want
@@ -179,15 +179,23 @@ Once Mode A is up (or Mode B's VPN can reach the server), pair a device:
 fletcher peer pair phone
 ```
 
-This outputs:
+This outputs (each secret shown exactly once):
 - A summary line (`paired phone, address: 10.99.0.2/32, endpoint: ...`)
+- An **API token** plus the `fletcher --remote <host:port> --token <token> ...`
+  line that device uses to drive the daemon over the tunnel (see
+  "Driving the daemon from another device" below)
 - The full `wg-quick` configuration text
 - A QR code (in the terminal) encoding the same config
 
 On your phone, install the official **WireGuard** app, tap "Add tunnel",
 choose "Create from QR code", scan the code. Toggle the tunnel on; the
-phone is connected. On the server, `sudo wg show` (Mode A) should list
-the peer with a recent handshake within a few seconds.
+phone is connected.
+
+To confirm the tunnel, look at the **WireGuard app** itself: tap the tunnel
+and check "Latest handshake" and the data counters. (`wg show` on the server
+prints nothing - Fletcher runs userspace WireGuard with no kernel device for
+that tool to read; `ip addr show fletcher0` confirms the interface is up, and
+`fletcher daemon logs | grep -i wireguard` shows the peer being added.)
 
 For a laptop, the same `fletcher peer pair laptop` command outputs the
 config. Copy the `[Interface]` / `[Peer]` block into
@@ -205,7 +213,7 @@ home connection. Some honest framing:
 **WireGuard is unusually safe to expose.** The protocol refuses to
 acknowledge that it's running unless a packet completes a cryptographic
 handshake with a key it already knows. To port scanners (nmap, Shodan,
-random bots) the port looks identical to a closed port — no version
+random bots) the port looks identical to a closed port - no version
 string, no fingerprint, no reply. That's the opposite of SSH or any HTTP
 service, which respond to every probe.
 
@@ -226,11 +234,16 @@ The next time the running tunnel syncs (which happens automatically on
 this command), the lost device can't connect any more, regardless of
 what's on it.
 
-**Anyone with a valid peer key has full daemon access.** They can
-submit jobs, read your secrets store via the API, and use the model
-gateway. Pairing a peer is not "letting a device on my LAN" — it's
-"granting that device control over Fletcher." Pair only devices you
-intend to use Fletcher with.
+**A paired device has full daemon access.** Driving the daemon over the
+tunnel takes two things, both handed out at pair time: tunnel reachability
+(the WireGuard key) *and* a per-peer API token (sent as a bearer token; the
+daemon stores only its hash). That is defense in depth - a leaked WireGuard
+key alone reaches the API port but gets `401` without the token - but a fully
+paired device gets both, and with them can submit jobs, manage secrets and
+settings, and use the model gateway. Pairing a peer is not "letting a device
+on my LAN"; it is "granting that device control over Fletcher." Pair only
+devices you intend to use Fletcher with. Deleting the peer
+(`fletcher peer delete <id>`) revokes both the network access and the token.
 
 ## Troubleshooting
 
@@ -272,11 +285,13 @@ capability: `sudo setcap cap_net_admin+ep /usr/local/bin/fletcher`.
 on your router, or you're behind CGNAT. `fletcher doctor` distinguishes
 the two cases and points at the right fix.
 
-**Peer's WireGuard app shows "no handshake".** First check the server:
-`sudo wg show` should list the peer's public key. If yes, the issue is
-network reachability (port forward not actually open, or wrong endpoint
-in the config). Test from outside your LAN: an online UDP port checker
-against `<your-public-ip>:51820` should report "open".
+**Peer's WireGuard app shows "no handshake".** First confirm the daemon
+knows the peer: `fletcher peer list` and `fletcher daemon logs | grep -i
+wireguard` (the daemon runs userspace WireGuard, so `wg show` prints
+nothing). If the peer is registered, the issue is network reachability
+(port forward not actually open, or wrong endpoint in the config). Test
+from outside your LAN: an online UDP port checker against
+`<your-public-ip>:51820` should report "open".
 
 **I want to start over.** Stop the daemon, wipe the state directories:
 
@@ -290,12 +305,84 @@ This regenerates the age identity, the server WireGuard key, and an
 empty peer registry. All previously-paired devices will need to be
 re-paired.
 
-## What's next
+## Configuring Fletcher
 
-- Set the daemon's Anthropic API key: `fletcher secret set anthropic_api_key sk-ant-...` (only required if you want the daemon to translate OpenAI-shape calls to Anthropic; for Anthropic-native agents like Claude Code with their own auth, no secret is needed in the daemon)
-- Browse the model catalog the daemon exposes: `fletcher model list`
-- Submit your first job: `fletcher job create --name hello --image fletcher-base:dev --command "echo hello world"`
+Operational settings live in the daemon's database and are edited with
+`fletcher settings` - no editing systemd unit files. List every setting,
+its current value (or `(default)`), and help with:
 
-Each of these has its own `--help` flag with details. The `--help` output
-for `fletcher model list` in particular explains what the endpoints mean
-and how SDK-based agents discover them.
+```sh
+fletcher settings list
+```
+
+Set one and apply it with a restart (settings take effect on the next start):
+
+```sh
+fletcher settings set log_level debug
+fletcher daemon restart
+fletcher settings unset log_level        # revert to the flag/env default
+```
+
+Settable keys include `runtime`, `snapshot`, `btrfs_root`, `public_endpoint`,
+`wireguard_port`, `log_level`, and `credentials_dir`. Bootstrap config (where
+the database, socket, and keys live, and the listen addresses) stays in the
+flag/env layer.
+
+## Managing the daemon
+
+You don't need `systemctl`. `fletcher daemon` is a thin wrapper over the
+service:
+
+```sh
+fletcher daemon status
+fletcher daemon restart
+fletcher daemon logs            # recent logs; -f to follow
+fletcher daemon enable          # start now and on every boot
+fletcher daemon stop
+```
+
+systemd is still the supervisor underneath (boot persistence, crash-restart,
+the unit sandbox); these are just friendlier verbs.
+
+## Driving the daemon from another device
+
+A paired device drives the daemon over the tunnel using the API token from
+`fletcher peer pair` (see "Pair your first device"). Point any command at the
+remote daemon:
+
+```sh
+fletcher --remote 10.99.0.1:11700 --token <token> health
+fletcher --remote 10.99.0.1:11700 --token <token> job list
+```
+
+The token can also come from the `FLETCHER_TOKEN` environment variable. The
+network API binds to the tunnel interface only and requires the token; the
+local Unix socket needs neither (it is gated by file permissions). Revoke a
+device with `fletcher peer delete <id>`.
+
+## Running real agents in a fork (runc + btrfs)
+
+The default `mock` runtime runs a job's command as a plain host subprocess -
+fine for a smoke test, but not isolated. To run a real agent (Claude Code,
+Codex, pi) inside an isolated **rootless runc + btrfs fork** - reaching models
+only through the daemon's gateway, with no egress - you need the runc runtime,
+a btrfs snapshot root, and a base-image rootfs.
+
+This currently requires building the `fletcher-base` image from the source
+repo (a shipped image is pending), so the step-by-step lives in the developer
+guide: see [`TESTING.md`](TESTING.md) "Real runtime (runc + btrfs)". In short:
+
+1. Point the daemon at the real drivers and a btrfs snapshot root:
+   `fletcher settings set runtime runc`, `... snapshot btrfs`,
+   `... btrfs_root /var/lib/fletcher/snapshots`, then `fletcher daemon restart`.
+2. Import a base image: `make image` then `sudo fletcher image import
+   fletcher-base:dev --btrfs-root /var/lib/fletcher/snapshots --name fletcher-base`.
+3. Give the daemon an Anthropic key so the gateway can reach models:
+   `fletcher secret set anthropic_api_key sk-ant-...`.
+4. Run an agent as a job:
+   `fletcher job create --image fletcher-base --command "claude -p 'say hi'"`.
+
+The agent runs as an unprivileged user inside the fork, reaches Anthropic only
+through the daemon gateway (the key never enters the fork), and has no other
+network egress. Browse what the gateway can route to with `fletcher model
+list`. Every command has `--help` with more detail.

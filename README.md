@@ -13,10 +13,18 @@ the snapshots - everything runs on metal you control.
 
 ## Status
 
-Pre-v0.1.0. The build pipeline, daemon lifecycle, job/secret/approval/peer
-surfaces, and a working OpenAI-compatible model gateway are in place. The
-Firecracker runtime driver is stubbed pending verification on a Linux/KVM
-host; runc + btrfs Linux drivers are wired but unverified outside Linux.
+Pre-v0.1.0, but the core loop works end to end on a real Linux box: a job
+runs a real agent (Claude Code) inside an isolated **rootless runc + btrfs
+fork**, reaching models *only* through the daemon's gateway (the API key never
+enters the fork, and the fork has no other network egress). You configure and
+manage it entirely with `fletcher` verbs - `fletcher settings`,
+`fletcher daemon` - with no systemctl, and you can drive the daemon from a
+paired device over the tunnel with a per-peer token. The **Firecracker**
+microVM runtime (the intended default isolation tier) is the remaining piece
+and is still stubbed.
+
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for exactly what is built, verified,
+and pending.
 
 ## Quickstart
 
@@ -38,20 +46,29 @@ fletcher job list
 fletcher peer pair phone
 ```
 
-The daemon brings up its own WireGuard interface and asks your router to
-forward the listening port via UPnP - on most home connections that's
-the whole setup. Walkthrough, troubleshooting, and the
-"bring-your-own-VPN" alternative (Tailscale, etc.) live in
+That runs against the default mock runtime (a plain host subprocess - good
+for a smoke test). Running a *real agent in an isolated fork* needs the
+runc + btrfs runtime and a base image; the full walkthrough - including
+`fletcher settings`, `fletcher daemon`, running Claude Code in a fork, and
+driving the daemon from a paired device - is in
 [`docs/setup.md`](docs/setup.md).
 
-The CLI talks to the daemon over a local Unix socket. Subcommand help is
-the source of truth: `fletcher --help`, `fletcher job --help`, etc.
+The daemon brings up its own WireGuard interface and asks your router to
+forward the listening port via UPnP - on most home connections that's
+the whole setup. Troubleshooting and the "bring-your-own-VPN" alternative
+(Tailscale, etc.) are in [`docs/setup.md`](docs/setup.md) too.
+
+The CLI talks to the daemon over a local Unix socket (or a remote daemon
+with `--remote host:port --token …`). Subcommand help is the source of
+truth: `fletcher --help`, `fletcher job --help`, etc.
 
 ## Documentation
 
 - [`docs/setup.md`](docs/setup.md) - end-user install, first run,
-  networking modes, security notes, troubleshooting. Start here if
-  you're running Fletcher.
+  running agents, configuration, the remote client, networking modes,
+  security notes, troubleshooting. Start here if you're running Fletcher.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) - delivery status: what is built,
+  verified, deliberately cut, and planned.
 - [`DESIGN.md`](./DESIGN.md) - positioning, architecture, the thinking
   behind the trust boundary and the job model. Read this first if
   you're working on Fletcher.

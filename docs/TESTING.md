@@ -361,28 +361,27 @@ sudo chown fletcher:fletcher /var/lib/fletcher/snapshots
 ```
 
 The shipped systemd unit grants the daemon `CAP_SYS_ADMIN` (for btrfs
-subvolumes and the namespaces runc needs), so `make install` covers the
-privilege side - nothing extra to configure there.
+subvolumes), so `make install` covers the privilege side. The daemon runs
+unprivileged, so runc is **rootless**: it maps the container's root to the
+daemon's own user, which is why `image import` chowns the template to that
+user (next step) - nothing for you to configure.
 
-Point the daemon at the real drivers via a systemd drop-in (still
-env-based until the settings work lands; see `ROADMAP.md` Phase 17):
+Point the daemon at the real drivers with `fletcher settings`, then restart:
 
 ```sh
-sudo systemctl edit fletcher
-#   [Service]
-#   Environment=FLETCHER_RUNTIME=runc
-#   Environment=FLETCHER_SNAPSHOT=btrfs
-#   Environment=FLETCHER_BTRFS_ROOT=/var/lib/fletcher/snapshots
-sudo systemctl restart fletcher
+fletcher settings set runtime runc
+fletcher settings set snapshot btrfs
+fletcher settings set btrfs_root /var/lib/fletcher/snapshots
+fletcher daemon restart
 ```
 
-Confirm the switch took: the startup log should read
-`drivers selected runtime=runc snapshot=btrfs`, and `fletcher doctor`
-should still be clean.
+Confirm the switch took: `fletcher daemon logs | grep "drivers selected"`
+should read `runtime=runc snapshot=btrfs`, and `fletcher doctor` clean.
 
 Import a base-image rootfs template so jobs have something to run in. A
-job's `--image` names a template at `<btrfs-root>/images/<name>`; build
-the OCI image once, then flatten it into the btrfs root with the CLI:
+job's `--image` names a template at `<btrfs-root>/images/<name>`; build the
+OCI image once, then flatten it into the btrfs root (the import chowns it to
+the daemon user for rootless runc):
 
 ```sh
 make image                       # builds fletcher-base:dev (needs Docker)
@@ -393,11 +392,10 @@ sudo fletcher image ls --btrfs-root /var/lib/fletcher/snapshots   # -> fletcher-
 
 All three `image` subcommands need `sudo`: the btrfs subvolume and docker
 need root, and `/var/lib/fletcher` is mode 0700 owned by the `fletcher`
-user, so a non-root CLI cannot even read the snapshot root (the daemon
-reads it fine as `fletcher`). Pass `--btrfs-root` explicitly because
-`sudo` does not carry `FLETCHER_BTRFS_ROOT` through.
+user. Pass `--btrfs-root` explicitly because `sudo` does not carry
+`FLETCHER_BTRFS_ROOT` through.
 
-Run a job in it:
+Smoke test - a command in a real fork:
 
 ```sh
 fletcher job create --name runc-smoke --command "echo hi from runc" --image fletcher-base
@@ -405,9 +403,55 @@ sleep 1
 fletcher job list   # runc-smoke -> succeeded
 ```
 
-To revert to the mock drivers, remove the drop-in
-(`sudo systemctl revert fletcher`), restart, and unmount the loopback if
-you created one.
+**A real agent in the fork.** `claude --version` proves the agent binary
+runs as the fork's user; a job's stderr is captured into its error field, so
+a failure shows why:
+
+```sh
+fletcher job create --name agent --command "claude --version" --image fletcher-base
+sleep 2
+fletcher job get <job-id>          # status: succeeded
+```
+
+**A real model call through the gateway.** Give the daemon a key, then have
+the agent generate (it reaches Anthropic only via the daemon gateway):
+
+```sh
+fletcher secret set anthropic_api_key sk-ant-...
+fletcher job create --name call --command "claude -p 'reply with: PONG'" --image fletcher-base
+sleep 8
+fletcher job get <job-id>          # status: succeeded (a real generation)
+```
+
+**No egress from the fork.** The fork reaches only the daemon, nothing else:
+
+```sh
+# reaches the gateway via the in-fork forwarder -> succeeds:
+fletcher job create --command "curl -sf http://127.0.0.1:11500/v1/catalog.json -o /dev/null" --image fletcher-base
+# the public internet -> fails (cannot even resolve, exit 6):
+fletcher job create --command "curl -sf --max-time 6 https://example.com -o /dev/null" --image fletcher-base
+```
+
+To revert to the mock drivers: `fletcher settings unset runtime` (and
+`snapshot`, `btrfs_root`), `fletcher daemon restart`, and unmount the
+loopback if you created one.
+
+### 3. Remote API (drive the daemon from a paired client)
+
+**What this proves:** a paired device drives the daemon over the tunnel, with
+the per-peer token enforced and the local socket still open.
+
+Pair a device (or reuse one); the output includes a token and the
+`fletcher --remote <addr> --token <token>` line. From the box itself the
+tunnel IP is a local interface, so you can test it there:
+
+```sh
+ADDR=10.99.0.1:11700
+fletcher --remote $ADDR --token <token> health      # -> ok
+fletcher --remote $ADDR --token wrong-token health  # -> 401 unauthorized
+fletcher --remote $ADDR health                      # -> 401 unauthorized
+fletcher health                                     # local socket, no token -> ok
+```
 
 ### Power-user CLI
 
