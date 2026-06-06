@@ -151,14 +151,15 @@ Once Mode A is up (or Mode B's VPN can reach the server), pair a device:
 fletcher peer pair phone
 ```
 
-This outputs (each secret shown exactly once):
+This outputs (each secret shown exactly once), in the order you use them:
 - A summary line (`paired phone, address: 10.99.0.2/32, endpoint: ...`)
-- An **API token** - shown both as a ready-to-paste `fletcher login <token>`
-  line (the easy path) and as the equivalent `fletcher --remote <host:port>
-  --token <token>` flags - that a device uses to drive the daemon over the
-  tunnel (see "Driving the daemon from another device" below)
-- The full `wg-quick` configuration text
-- A QR code (in the terminal) encoding the same config
+- **Step 1 - the WireGuard tunnel:** the full `wg-quick` configuration text and
+  a QR code encoding it. Bring this up first.
+- **Step 2 - the API token:** a ready-to-paste `fletcher login <token>` line (the
+  easy path), and the equivalent `fletcher --remote <host:port> --token <token>`
+  flags. Use it *after* the tunnel is up - `fletcher login` reaches the daemon to
+  verify the token, so it needs the tunnel connected first (see "Driving the
+  daemon from another device" below).
 
 On your phone, install the official **WireGuard** app, tap "Add tunnel",
 choose "Create from QR code", scan the code. Toggle the tunnel on; the
@@ -363,6 +364,12 @@ override the stored login:
 fletcher --remote 10.99.0.1:11700 --token <token> health     # -> status: ok
 fletcher --remote 10.99.0.1:11700 --token <token> job list
 ```
+
+> **`login` worked but commands return `401 Unauthorized`?** A leftover
+> `FLETCHER_REMOTE` or `FLETCHER_TOKEN` in your shell overrides the stored login
+> (`login` ignores them, so it still succeeds). Check `echo $FLETCHER_REMOTE
+> $FLETCHER_TOKEN` and `unset` whichever is set (and remove it from your shell
+> profile). The CLI also prints a warning when it targets a remote with no token.
 
 **Spin up a microVM remotely.** A `job create` runs its command inside a
 Firecracker microVM on the server (assuming the Firecracker runtime and an

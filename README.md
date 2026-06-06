@@ -60,9 +60,12 @@ forward the listening port via UPnP - on most home connections that's
 the whole setup. Troubleshooting and the "bring-your-own-VPN" alternative
 (Tailscale, etc.) are in [`docs/setup.md`](docs/setup.md) too.
 
-The CLI talks to the daemon over a local Unix socket (or a remote daemon
-with `--remote host:port --token …`). Subcommand help is the source of
-truth: `fletcher --help`, `fletcher job --help`, etc.
+The CLI talks to the daemon over a local Unix socket, or to a remote daemon
+over the tunnel: run `fletcher login <token>` once (the token is printed by
+`fletcher peer pair`) and subsequent commands target it by default, or pass
+`--remote host:port --token …` / `FLETCHER_REMOTE` + `FLETCHER_TOKEN` per
+command. Subcommand help is the source of truth: `fletcher --help`,
+`fletcher job --help`, etc.
 
 ## Documentation
 

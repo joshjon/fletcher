@@ -75,13 +75,10 @@ func renderPairResult(w io.Writer, resp *fletcherv1.PairPeerResponse, withQR boo
 	fmt.Fprintf(w, "  address:  %s\n", resp.GetAddress())
 	fmt.Fprintf(w, "  endpoint: %s\n", resp.GetEndpoint())
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "# ===== API TOKEN (shown exactly once) =====")
-	fmt.Fprintln(w, "# On this device, save the credential once and then just run `fletcher`:")
-	fmt.Fprintf(w, "#   fletcher login %s\n", encodeLoginBlob(resp.GetApiEndpoint(), resp.GetApiToken()))
-	fmt.Fprintln(w, "# Or pass it per command:")
-	fmt.Fprintf(w, "#   fletcher --remote %s --token %s <command>\n", resp.GetApiEndpoint(), resp.GetApiToken())
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "# ===== CLIENT CONFIG (private key shown exactly once) =====")
+
+	// Step 1 first: `fletcher login` (step 2) reaches the daemon over the
+	// tunnel, so the tunnel has to be up before it will work.
+	fmt.Fprintln(w, "# ===== STEP 1: WIREGUARD TUNNEL (private key shown exactly once) =====")
 	fmt.Fprint(w, resp.GetClientConfig())
 	if withQR && isTerminal(w) {
 		fmt.Fprintln(w)
@@ -101,6 +98,12 @@ func renderPairResult(w io.Writer, resp *fletcherv1.PairPeerResponse, withQR boo
 			QuietZone:      1,
 		})
 	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "# ===== STEP 2: API TOKEN (shown exactly once) =====")
+	fmt.Fprintln(w, "# Once the tunnel above is connected, save the credential and just run `fletcher`:")
+	fmt.Fprintf(w, "#   fletcher login %s\n", encodeLoginBlob(resp.GetApiEndpoint(), resp.GetApiToken()))
+	fmt.Fprintln(w, "# Or pass it per command:")
+	fmt.Fprintf(w, "#   fletcher --remote %s --token %s <command>\n", resp.GetApiEndpoint(), resp.GetApiToken())
 }
 
 // isTerminal reports whether w is an os.File attached to a TTY. Used to

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
 
 	"connectrpc.com/connect"
 	"github.com/urfave/cli/v3"
@@ -31,17 +33,31 @@ const unixBaseURL = "http://unix"
 // --remote/--token flags and the FLETCHER_REMOTE/FLETCHER_TOKEN env vars
 // (resolved by urfave/cli) win; otherwise the stored `fletcher login` config is
 // used. An empty remote means "use the local Unix socket".
+//
+// The token falls back to the stored login whenever it is not given explicitly
+// and the target matches the logged-in remote - so a stray FLETCHER_REMOTE that
+// points at your own daemon still uses your login token instead of silently
+// sending none (which the daemon answers with an opaque 401).
 func resolveRemote(cmd *cli.Command) (remote, token string) {
 	remote, token = cmd.String("remote"), cmd.String("token")
+	cfg := loadClientConfig()
 	if remote == "" {
-		if cfg := loadClientConfig(); cfg.Remote != "" {
-			remote = cfg.Remote
-			if token == "" {
-				token = cfg.Token
-			}
-		}
+		remote = cfg.Remote
+	}
+	if token == "" && remote != "" && remote == cfg.Remote {
+		token = cfg.Token
 	}
 	return remote, token
+}
+
+// warnIfRemoteUnauthed hints when a command will hit a remote daemon with no
+// token - almost always a stray FLETCHER_REMOTE or a missing login, which the
+// daemon otherwise answers with a bare 401.
+func warnIfRemoteUnauthed(remote, token string) {
+	if remote != "" && token == "" {
+		fmt.Fprintln(os.Stderr, yellow("warning:")+" targeting remote "+remote+
+			" with no API token - run `fletcher login`, or unset a stray FLETCHER_REMOTE")
+	}
 }
 
 // clientTarget resolves where Connect clients should talk to: a remote daemon
@@ -49,6 +65,7 @@ func resolveRemote(cmd *cli.Command) (remote, token string) {
 // the default). The remote target comes from flags, env, or `fletcher login`.
 func clientTarget(cmd *cli.Command) (connect.HTTPClient, string, []connect.ClientOption) {
 	if remote, token := resolveRemote(cmd); remote != "" {
+		warnIfRemoteUnauthed(remote, token)
 		return &http.Client{}, "http://" + remote,
 			[]connect.ClientOption{connect.WithInterceptors(bearerAuthInterceptor(token))}
 	}
@@ -89,6 +106,7 @@ func newModelsClient(cmd *cli.Command) fletcherv1connect.ModelServiceClient {
 // both the unary verbs and the shell share one transport.
 func newSessionsClient(cmd *cli.Command) fletcherv1connect.SessionServiceClient {
 	if remote, token := resolveRemote(cmd); remote != "" {
+		warnIfRemoteUnauthed(remote, token)
 		hc := h2cClient("tcp", remote)
 		return fletcherv1connect.NewSessionServiceClient(hc, "http://"+remote,
 			connect.WithInterceptors(bearerInterceptor{token: token}))
