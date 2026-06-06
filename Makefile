@@ -30,7 +30,8 @@ define build-guest
 endef
 
 .PHONY: help build build-guest build-guest-all build-linux build-linux-amd64 \
-	build-linux-arm64 test test-integration lint fmt check cover generate \
+	build-linux-arm64 build-darwin build-darwin-amd64 build-darwin-arm64 \
+	cross-check test test-integration lint fmt check cover generate \
 	generate-check tools clean image image-amd64 image-arm64 install fetch-vmm
 
 help: ## Show this help
@@ -89,6 +90,18 @@ build-linux-arm64: ## Cross-compile linux/arm64
 	$(call build-guest,arm64)
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -o bin/fletcher-linux-arm64 ./cmd/fletcher
 
+build-darwin: build-darwin-amd64 build-darwin-arm64 ## Cross-compile both macOS client targets (slim: no bundled VMM)
+
+build-darwin-amd64: ## Cross-compile darwin/amd64 (client)
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -o bin/fletcher-darwin-amd64 ./cmd/fletcher
+
+build-darwin-arm64: ## Cross-compile darwin/arm64 (client)
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GO) build $(BUILD_FLAGS) -o bin/fletcher-darwin-arm64 ./cmd/fletcher
+
+cross-check: ## Verify the CLI still cross-compiles to macOS, catching non-linux stub drift
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 $(GO) build -o /dev/null ./cmd/fletcher
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 $(GO) build -o /dev/null ./cmd/fletcher
+
 ## --- Test ---
 
 test: ## Run unit tests with the race detector
@@ -111,7 +124,7 @@ lint: ## Run golangci-lint and buf lint
 fmt: ## Auto-format source via gofumpt + goimports
 	$(GO) tool golangci-lint fmt
 
-check: lint test generate-check ## Full local gate: lint + tests + generated drift
+check: lint test generate-check cross-check ## Full local gate: lint + tests + generated drift + macOS cross-build
 
 ## --- Codegen ---
 

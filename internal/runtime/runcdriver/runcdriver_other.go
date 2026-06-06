@@ -17,10 +17,18 @@ import (
 // Driver is the cross-platform shim.
 type Driver struct{}
 
+// Forward matches the Linux surface so call sites need no build guards.
+type Forward struct {
+	Listen     string
+	HostSocket string
+}
+
 // Options matches the Linux surface so call sites work without build tags.
 type Options struct {
-	Binary    string
-	BundleDir string
+	Binary          string
+	BundleDir       string
+	ForwarderBinary string
+	Forwards        []Forward
 }
 
 // New refuses to construct on non-Linux. Daemons configured with

@@ -1,0 +1,30 @@
+# Lint, unit tests, and a macOS cross-build on every push/PR. The cross-build
+# guards against the non-linux driver stubs drifting out of sync with their
+# Linux counterparts (which silently breaks `fletcher` as a Mac client). The
+# embed directives compile against committed about.txt placeholders, so no VMM
+# fetch or guest build is needed here.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Lint
+        run: make lint
+      - name: Test
+        run: make test
+      - name: Cross-build for macOS (client)
+        run: make cross-check

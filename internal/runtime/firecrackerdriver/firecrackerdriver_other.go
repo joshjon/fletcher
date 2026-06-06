@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"runtime"
 
 	fcruntime "github.com/joshjon/fletcher/internal/runtime"
@@ -31,6 +32,7 @@ type Options struct {
 	Forwards          []Forward
 	VcpuCount         int64
 	MemSizeMib        int64
+	Logger            *slog.Logger
 }
 
 // New refuses to construct off Linux; a daemon configured with
