@@ -83,8 +83,9 @@ install: build ## Developer convenience - mirrors scripts/install.sh using local
 	fi
 else
 install: build ## Developer convenience - install the client to $(PREFIX)/bin (macOS: client only, no daemon)
+	sudo install -d $(PREFIX)/bin
 	sudo install $(BIN) $(PREFIX)/bin/fletcher
-	@echo "==> installed the fletcher client. Connect it to your daemon: fletcher login <token>"
+	@echo "==> installed the fletcher client to $(PREFIX)/bin (on the default PATH). Connect it: fletcher login <token>"
 endif
 
 build-linux: build-linux-amd64 build-linux-arm64 ## Cross-compile both Linux targets
