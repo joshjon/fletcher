@@ -1,0 +1,33 @@
+# Cut a release when a version tag is pushed: `git tag v0.1.0 && git push
+# origin v0.1.0`. Nothing else triggers it - normal pushes to main only run CI.
+# goreleaser builds the linux + darwin binaries, bundling the Firecracker VMM
+# and guest agent into the Linux ones via the before-hooks (the darwin client is
+# slim by build tags), and publishes the GitHub Release. Publishing the release
+# in turn fires fletcher-base-image.yml (on: release published) to push the
+# versioned base image.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the GitHub Release and upload artifacts
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # goreleaser needs full history for the changelog
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -600,14 +600,15 @@ operator and is intentionally not in this list.
 - **macOS client release - DONE.** One binary, no split CLI (the Consul/Vault
   model): the daemon is Linux-only, the client runs anywhere. Restored the
   darwin cross-build (two non-linux driver stubs had drifted) and guarded it with
-  `make cross-check` + a new `ci` workflow. goreleaser now builds slim darwin
-  binaries (~8 MB vs ~20 MB; the VMM/kernel/guest are linux-embed-only) and a
-  Homebrew cask; `install.sh` is OS-aware (macOS = client only); `--help` groups
-  Client vs Daemon (Linux host). *Deferred / operator actions:* create the
-  `joshjon/homebrew-tap` repo and give the release token write access; add a
-  `LICENSE` file (a public Homebrew cask wants one); macOS code signing /
-  notarization is a later nicety (curl-installed binaries are not quarantined, so
-  it is not blocking).
+  `make cross-check` + a new `ci` workflow. goreleaser builds slim darwin
+  binaries (~8 MB vs ~20 MB; the VMM/kernel/guest are linux-embed-only);
+  `install.sh` and `make install` are OS-aware (macOS = client only); `--help`
+  groups Client vs Daemon (Linux host). Releases publish the linux + darwin
+  tarballs to GitHub via a tag-triggered `release` workflow (`git push` a `v*`
+  tag), and `install.sh` installs from there on both OSes. *Deferred:* a Homebrew
+  tap/cask (needs a tap repo + token; revisit alongside a marketing site); a
+  `LICENSE` file; macOS code signing / notarization (curl-installed binaries are
+  not quarantined, so not blocking).
 
 **Deferred for now (revisit on demand, not v1-blocking).** Audit-log storage (the
 operator does not want it yet; the `audit.Noop` seam stays). Gateway breadth

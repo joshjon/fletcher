@@ -23,6 +23,7 @@ VMM_ASSETS   := internal/runtime/firecrackerdriver/vmm/assets
 # arch and embedded. build-guest($arch) builds it into the embed tree.
 GUEST_ASSETS := internal/runtime/firecrackerdriver/guestagent/assets
 HOST_GOARCH  := $(shell $(GO) env GOARCH)
+HOST_OS      := $(shell uname -s)
 define build-guest
 	@mkdir -p $(GUEST_ASSETS)/$(1)
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(1) $(GO) build -trimpath -ldflags "-s -w" \
@@ -55,6 +56,7 @@ fetch-vmm: ## Download the bundled Firecracker VMM + guest kernel (needed before
 
 PREFIX ?= /usr/local
 
+ifeq ($(HOST_OS),Linux)
 install: build ## Developer convenience - mirrors scripts/install.sh using local files. End users use scripts/install.sh instead.
 	@if ! id -u fletcher >/dev/null 2>&1; then \
 		echo "==> creating fletcher system user"; \
@@ -77,8 +79,13 @@ install: build ## Developer convenience - mirrors scripts/install.sh using local
 		echo "==> fletcher is running; restarting"; \
 		sudo systemctl restart fletcher; \
 	else \
-		echo "==> installed. start with: sudo systemctl enable --now fletcher"; \
+		echo "==> installed. start with: fletcher daemon enable"; \
 	fi
+else
+install: build ## Developer convenience - install the client to $(PREFIX)/bin (macOS: client only, no daemon)
+	sudo install $(BIN) $(PREFIX)/bin/fletcher
+	@echo "==> installed the fletcher client. Connect it to your daemon: fletcher login <token>"
+endif
 
 build-linux: build-linux-amd64 build-linux-arm64 ## Cross-compile both Linux targets
 
