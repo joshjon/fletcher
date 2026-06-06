@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -222,6 +223,16 @@ func pumpResize(ctx context.Context, resize <-chan fcruntime.WinSize, writeFrame
 			}
 		}
 	}
+}
+
+// DialSSH opens a raw vsock connection to the guest's SSH relay (which splices
+// to its loopback sshd). The caller proxies an SSH session over it.
+func (s *fcSession) DialSSH(ctx context.Context) (net.Conn, error) {
+	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.SSHPort)
+	if err != nil {
+		return nil, fmt.Errorf("firecracker: connect session ssh: %w", err)
+	}
+	return conn, nil
 }
 
 // Stop shuts the session VM down cleanly, keeping its fork on disk.

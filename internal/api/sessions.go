@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net"
 
 	"connectrpc.com/connect"
 
@@ -24,6 +26,7 @@ type SessionsBackend interface {
 	Delete(ctx context.Context, ref string) (bool, error)
 	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
 	Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error)
+	DialSSH(ctx context.Context, ref string) (net.Conn, error)
 }
 
 // SessionsService implements fletcherv1connect.SessionServiceHandler.
@@ -171,6 +174,63 @@ func (s *SessionsService) ShellSession(ctx context.Context, stream *connect.Bidi
 	return stream.Send(&fletcherv1.ShellSessionResponse{
 		Msg: &fletcherv1.ShellSessionResponse_ExitCode{ExitCode: code},
 	})
+}
+
+// ProxySession brokers a raw byte stream between the client and a running
+// session's SSH server (relayed over vsock). It backs `fletcher session ssh`
+// as an SSH ProxyCommand; the VM needs no network route.
+func (s *SessionsService) ProxySession(ctx context.Context, stream *connect.BidiStream[fletcherv1.ProxySessionRequest, fletcherv1.ProxySessionResponse]) error {
+	first, err := stream.Receive()
+	if err != nil {
+		return err
+	}
+	open := first.GetOpen()
+	if open == nil || open.GetRef() == "" {
+		return errs.New(errs.CategoryInvalidArgument, "first proxy message must carry open with a session ref")
+	}
+	conn, err := s.backend.DialSSH(ctx, open.GetRef())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+
+	go proxyClientToConn(stream, conn)
+
+	// Session -> client drives the handler's lifetime.
+	buf := make([]byte, 32<<10)
+	for {
+		n, rerr := conn.Read(buf)
+		if n > 0 {
+			if serr := stream.Send(&fletcherv1.ProxySessionResponse{Data: append([]byte(nil), buf[:n]...)}); serr != nil {
+				return serr
+			}
+		}
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				return nil
+			}
+			return rerr
+		}
+	}
+}
+
+// proxyClientToConn copies client bytes into the session connection. On the
+// client's half-close it half-closes toward sshd so it sees EOF, not a reset.
+func proxyClientToConn(stream *connect.BidiStream[fletcherv1.ProxySessionRequest, fletcherv1.ProxySessionResponse], conn net.Conn) {
+	for {
+		msg, err := stream.Receive()
+		if err != nil {
+			if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+				_ = cw.CloseWrite()
+			}
+			return
+		}
+		if d := msg.GetData(); len(d) > 0 {
+			if _, werr := conn.Write(d); werr != nil {
+				return
+			}
+		}
+	}
 }
 
 // writerFunc adapts a function to io.Writer.

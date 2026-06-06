@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"io"
+	"net"
 )
 
 // SessionSpec describes a persistent session VM to start.
@@ -44,6 +45,10 @@ type SessionHandle interface {
 	// output to stdout, reads keystrokes from stdin, applies window sizes from
 	// resize, and returns the shell's exit code when it ends or stdin closes.
 	Shell(ctx context.Context, spec ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan WinSize) (int32, error)
+	// DialSSH opens a raw byte stream to the VM's SSH server (relayed over
+	// vsock). The caller proxies an SSH connection through it; the VM needs no
+	// network route. The caller closes the returned conn.
+	DialSSH(ctx context.Context) (net.Conn, error)
 	// Stop shuts the VM down cleanly. The fork on disk is untouched.
 	Stop(ctx context.Context) error
 }

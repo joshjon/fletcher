@@ -64,6 +64,12 @@ func sessionMode() bool {
 // serve is the session control loop: listen on vsock and serve each
 // host-initiated connection. It returns only if the listener fails.
 func serve() {
+	// Bring up sshd (brokered SSH / IDE attach) and its vsock relay before
+	// accepting control connections; both are best-effort so a session is still
+	// usable via exec/shell if sshd cannot start.
+	startSSHD()
+	go serveSSHRelay()
+
 	ln, err := vsock.Listen(guestproto.ControlPort, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fletcher-guest: listen control: %v\n", err)
@@ -77,6 +83,67 @@ func serve() {
 		}
 		go serveControl(conn)
 	}
+}
+
+// startSSHD generates host keys on first boot (the image ships none) and runs
+// sshd in the foreground, relaunching it if it exits. sshd listens on loopback;
+// serveSSHRelay bridges the daemon's vsock connections to it.
+func startSSHD() {
+	if _, err := os.Stat("/usr/sbin/sshd"); err != nil {
+		return // image without an SSH server; brokered SSH is simply unavailable
+	}
+	// ssh-keygen -A creates any missing host keys under /etc/ssh.
+	if out, err := exec.CommandContext(context.Background(), "/usr/bin/ssh-keygen", "-A").CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: ssh-keygen: %v: %s\n", err, out)
+	}
+	_ = os.MkdirAll("/run/sshd", 0o755) //nolint:gosec // sshd privilege-separation dir, standard perms
+	go func() {
+		for {
+			cmd := exec.CommandContext(context.Background(), "/usr/sbin/sshd", "-D", "-e")
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "fletcher-guest: sshd exited: %v\n", err)
+			}
+			time.Sleep(time.Second) // avoid a hot loop if sshd cannot start
+		}
+	}()
+}
+
+// serveSSHRelay accepts the daemon's vsock connections on SSHPort and splices
+// each to the loopback sshd, so SSH reaches the VM without it having a NIC.
+func serveSSHRelay() {
+	ln, err := vsock.Listen(guestproto.SSHPort, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: listen ssh relay: %v\n", err)
+		return
+	}
+	defer func() { _ = ln.Close() }()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go relayToSSHD(conn)
+	}
+}
+
+func relayToSSHD(conn net.Conn) {
+	// sshd may still be coming up just after a cold boot; retry briefly so the
+	// first connection after wake does not fail the race.
+	var upstream net.Conn
+	for range 50 {
+		c, err := net.Dial("tcp", "127.0.0.1:22") //nolint:noctx // lifetime is the spliced connection
+		if err == nil {
+			upstream = c
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if upstream == nil {
+		_ = conn.Close()
+		return
+	}
+	splice(conn, upstream)
 }
 
 // serveControl handles one host control connection: run a command, or shut down.

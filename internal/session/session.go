@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -287,6 +288,26 @@ func (m *Manager) Shell(ctx context.Context, ref string, spec runtime.ShellSpec,
 	}
 	m.touch(ctx, row.ID)
 	return code, nil
+}
+
+// DialSSH opens a raw byte stream to a running session's SSH server for the
+// daemon to proxy a brokered SSH connection through.
+func (m *Manager) DialSSH(ctx context.Context, ref string) (net.Conn, error) {
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	handle := m.getHandle(row.ID)
+	if handle == nil || State(row.State) != StateRunning {
+		return nil, errs.Newf(errs.CategoryFailedPrecondition,
+			"session %q is not running; start it with `fletcher session start`", row.Name)
+	}
+	conn, err := handle.DialSSH(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("dial session ssh: %w", err)
+	}
+	m.touch(ctx, row.ID)
+	return conn, nil
 }
 
 // ReconcileOnBoot marks every "running" session as "stopped" at daemon start:

@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential pkg-config \
         python3 python3-pip python-is-python3 pipx \
         sqlite3 \
-        sudo openssh-client \
+        sudo openssh-client openssh-server \
         iproute2 iputils-ping netcat-openbsd \
         unzip rsync file tree \
         systemd systemd-sysv \

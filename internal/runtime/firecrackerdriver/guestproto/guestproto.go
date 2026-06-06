@@ -30,6 +30,10 @@ const (
 	// host-initiated control connections (exec, shutdown). Unlike Port (which
 	// the ephemeral guest dials out on), here the host connects to the guest.
 	ControlPort = 1025
+	// SSHPort is the vsock port a session guest listens on and relays to its
+	// loopback sshd, so the daemon can broker SSH into the VM without the VM
+	// having any network route (the preview-proxy pattern, for SSH).
+	SSHPort = 1026
 	// ForwardPortBase is the first vsock port used for service forwards; the
 	// host assigns ForwardPortBase, +1, +2, ... one per Forward.
 	ForwardPortBase = 1100

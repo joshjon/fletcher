@@ -1112,6 +1112,180 @@ func (*ShellSessionResponse_Data) isShellSessionResponse_Msg() {}
 
 func (*ShellSessionResponse_ExitCode) isShellSessionResponse_Msg() {}
 
+type ProxySessionRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Msg:
+	//
+	//	*ProxySessionRequest_Open
+	//	*ProxySessionRequest_Data
+	Msg           isProxySessionRequest_Msg `protobuf_oneof:"msg"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProxySessionRequest) Reset() {
+	*x = ProxySessionRequest{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxySessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxySessionRequest) ProtoMessage() {}
+
+func (x *ProxySessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxySessionRequest.ProtoReflect.Descriptor instead.
+func (*ProxySessionRequest) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ProxySessionRequest) GetMsg() isProxySessionRequest_Msg {
+	if x != nil {
+		return x.Msg
+	}
+	return nil
+}
+
+func (x *ProxySessionRequest) GetOpen() *ProxyOpen {
+	if x != nil {
+		if x, ok := x.Msg.(*ProxySessionRequest_Open); ok {
+			return x.Open
+		}
+	}
+	return nil
+}
+
+func (x *ProxySessionRequest) GetData() []byte {
+	if x != nil {
+		if x, ok := x.Msg.(*ProxySessionRequest_Data); ok {
+			return x.Data
+		}
+	}
+	return nil
+}
+
+type isProxySessionRequest_Msg interface {
+	isProxySessionRequest_Msg()
+}
+
+type ProxySessionRequest_Open struct {
+	// open names the session to broker into; must be the first message.
+	Open *ProxyOpen `protobuf:"bytes,1,opt,name=open,proto3,oneof"`
+}
+
+type ProxySessionRequest_Data struct {
+	// data is opaque bytes from the client to the session's SSH server.
+	Data []byte `protobuf:"bytes,2,opt,name=data,proto3,oneof"`
+}
+
+func (*ProxySessionRequest_Open) isProxySessionRequest_Msg() {}
+
+func (*ProxySessionRequest_Data) isProxySessionRequest_Msg() {}
+
+type ProxyOpen struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ref is a session ID or name; the session must be running.
+	Ref           string `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProxyOpen) Reset() {
+	*x = ProxyOpen{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxyOpen) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxyOpen) ProtoMessage() {}
+
+func (x *ProxyOpen) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxyOpen.ProtoReflect.Descriptor instead.
+func (*ProxyOpen) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ProxyOpen) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+type ProxySessionResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// data is opaque bytes from the session's SSH server back to the client.
+	Data          []byte `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProxySessionResponse) Reset() {
+	*x = ProxySessionResponse{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProxySessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProxySessionResponse) ProtoMessage() {}
+
+func (x *ProxySessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProxySessionResponse.ProtoReflect.Descriptor instead.
+func (*ProxySessionResponse) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ProxySessionResponse) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
 var File_fletcher_v1_sessions_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_sessions_proto_rawDesc = "" +
@@ -1177,11 +1351,19 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\x14ShellSessionResponse\x12\x14\n" +
 	"\x04data\x18\x01 \x01(\fH\x00R\x04data\x12\x1d\n" +
 	"\texit_code\x18\x02 \x01(\x05H\x00R\bexitCodeB\x05\n" +
-	"\x03msg*c\n" +
+	"\x03msg\"`\n" +
+	"\x13ProxySessionRequest\x12,\n" +
+	"\x04open\x18\x01 \x01(\v2\x16.fletcher.v1.ProxyOpenH\x00R\x04open\x12\x14\n" +
+	"\x04data\x18\x02 \x01(\fH\x00R\x04dataB\x05\n" +
+	"\x03msg\"\x1d\n" +
+	"\tProxyOpen\x12\x10\n" +
+	"\x03ref\x18\x01 \x01(\tR\x03ref\"*\n" +
+	"\x14ProxySessionResponse\x12\x12\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data*c\n" +
 	"\fSessionState\x12\x1d\n" +
 	"\x19SESSION_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATE_RUNNING\x10\x01\x12\x19\n" +
-	"\x15SESSION_STATE_STOPPED\x10\x022\xc6\x05\n" +
+	"\x15SESSION_STATE_STOPPED\x10\x022\xa1\x06\n" +
 	"\x0eSessionService\x12X\n" +
 	"\rCreateSession\x12!.fletcher.v1.CreateSessionRequest\x1a\".fletcher.v1.CreateSessionResponse\"\x00\x12O\n" +
 	"\n" +
@@ -1191,7 +1373,8 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\vStopSession\x12\x1f.fletcher.v1.StopSessionRequest\x1a .fletcher.v1.StopSessionResponse\"\x00\x12X\n" +
 	"\rDeleteSession\x12!.fletcher.v1.DeleteSessionRequest\x1a\".fletcher.v1.DeleteSessionResponse\"\x00\x12R\n" +
 	"\vExecSession\x12\x1f.fletcher.v1.ExecSessionRequest\x1a .fletcher.v1.ExecSessionResponse\"\x00\x12Y\n" +
-	"\fShellSession\x12 .fletcher.v1.ShellSessionRequest\x1a!.fletcher.v1.ShellSessionResponse\"\x00(\x010\x01B\xb4\x01\n" +
+	"\fShellSession\x12 .fletcher.v1.ShellSessionRequest\x1a!.fletcher.v1.ShellSessionResponse\"\x00(\x010\x01\x12Y\n" +
+	"\fProxySession\x12 .fletcher.v1.ProxySessionRequest\x1a!.fletcher.v1.ProxySessionResponse\"\x00(\x010\x01B\xb4\x01\n" +
 	"\x0fcom.fletcher.v1B\rSessionsProtoP\x01ZEgithub.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1\xa2\x02\x03FXX\xaa\x02\vFletcher.V1\xca\x02\vFletcher\\V1\xe2\x02\x17Fletcher\\V1\\GPBMetadata\xea\x02\fFletcher::V1b\x06proto3"
 
 var (
@@ -1207,7 +1390,7 @@ func file_fletcher_v1_sessions_proto_rawDescGZIP() []byte {
 }
 
 var file_fletcher_v1_sessions_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_fletcher_v1_sessions_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_fletcher_v1_sessions_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_fletcher_v1_sessions_proto_goTypes = []any{
 	(SessionState)(0),             // 0: fletcher.v1.SessionState
 	(*Session)(nil),               // 1: fletcher.v1.Session
@@ -1229,6 +1412,9 @@ var file_fletcher_v1_sessions_proto_goTypes = []any{
 	(*ShellStart)(nil),            // 17: fletcher.v1.ShellStart
 	(*ShellResize)(nil),           // 18: fletcher.v1.ShellResize
 	(*ShellSessionResponse)(nil),  // 19: fletcher.v1.ShellSessionResponse
+	(*ProxySessionRequest)(nil),   // 20: fletcher.v1.ProxySessionRequest
+	(*ProxyOpen)(nil),             // 21: fletcher.v1.ProxyOpen
+	(*ProxySessionResponse)(nil),  // 22: fletcher.v1.ProxySessionResponse
 }
 var file_fletcher_v1_sessions_proto_depIdxs = []int32{
 	0,  // 0: fletcher.v1.Session.state:type_name -> fletcher.v1.SessionState
@@ -1239,27 +1425,30 @@ var file_fletcher_v1_sessions_proto_depIdxs = []int32{
 	1,  // 5: fletcher.v1.StopSessionResponse.session:type_name -> fletcher.v1.Session
 	17, // 6: fletcher.v1.ShellSessionRequest.start:type_name -> fletcher.v1.ShellStart
 	18, // 7: fletcher.v1.ShellSessionRequest.resize:type_name -> fletcher.v1.ShellResize
-	2,  // 8: fletcher.v1.SessionService.CreateSession:input_type -> fletcher.v1.CreateSessionRequest
-	4,  // 9: fletcher.v1.SessionService.GetSession:input_type -> fletcher.v1.GetSessionRequest
-	6,  // 10: fletcher.v1.SessionService.ListSessions:input_type -> fletcher.v1.ListSessionsRequest
-	8,  // 11: fletcher.v1.SessionService.StartSession:input_type -> fletcher.v1.StartSessionRequest
-	10, // 12: fletcher.v1.SessionService.StopSession:input_type -> fletcher.v1.StopSessionRequest
-	12, // 13: fletcher.v1.SessionService.DeleteSession:input_type -> fletcher.v1.DeleteSessionRequest
-	14, // 14: fletcher.v1.SessionService.ExecSession:input_type -> fletcher.v1.ExecSessionRequest
-	16, // 15: fletcher.v1.SessionService.ShellSession:input_type -> fletcher.v1.ShellSessionRequest
-	3,  // 16: fletcher.v1.SessionService.CreateSession:output_type -> fletcher.v1.CreateSessionResponse
-	5,  // 17: fletcher.v1.SessionService.GetSession:output_type -> fletcher.v1.GetSessionResponse
-	7,  // 18: fletcher.v1.SessionService.ListSessions:output_type -> fletcher.v1.ListSessionsResponse
-	9,  // 19: fletcher.v1.SessionService.StartSession:output_type -> fletcher.v1.StartSessionResponse
-	11, // 20: fletcher.v1.SessionService.StopSession:output_type -> fletcher.v1.StopSessionResponse
-	13, // 21: fletcher.v1.SessionService.DeleteSession:output_type -> fletcher.v1.DeleteSessionResponse
-	15, // 22: fletcher.v1.SessionService.ExecSession:output_type -> fletcher.v1.ExecSessionResponse
-	19, // 23: fletcher.v1.SessionService.ShellSession:output_type -> fletcher.v1.ShellSessionResponse
-	16, // [16:24] is the sub-list for method output_type
-	8,  // [8:16] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	21, // 8: fletcher.v1.ProxySessionRequest.open:type_name -> fletcher.v1.ProxyOpen
+	2,  // 9: fletcher.v1.SessionService.CreateSession:input_type -> fletcher.v1.CreateSessionRequest
+	4,  // 10: fletcher.v1.SessionService.GetSession:input_type -> fletcher.v1.GetSessionRequest
+	6,  // 11: fletcher.v1.SessionService.ListSessions:input_type -> fletcher.v1.ListSessionsRequest
+	8,  // 12: fletcher.v1.SessionService.StartSession:input_type -> fletcher.v1.StartSessionRequest
+	10, // 13: fletcher.v1.SessionService.StopSession:input_type -> fletcher.v1.StopSessionRequest
+	12, // 14: fletcher.v1.SessionService.DeleteSession:input_type -> fletcher.v1.DeleteSessionRequest
+	14, // 15: fletcher.v1.SessionService.ExecSession:input_type -> fletcher.v1.ExecSessionRequest
+	16, // 16: fletcher.v1.SessionService.ShellSession:input_type -> fletcher.v1.ShellSessionRequest
+	20, // 17: fletcher.v1.SessionService.ProxySession:input_type -> fletcher.v1.ProxySessionRequest
+	3,  // 18: fletcher.v1.SessionService.CreateSession:output_type -> fletcher.v1.CreateSessionResponse
+	5,  // 19: fletcher.v1.SessionService.GetSession:output_type -> fletcher.v1.GetSessionResponse
+	7,  // 20: fletcher.v1.SessionService.ListSessions:output_type -> fletcher.v1.ListSessionsResponse
+	9,  // 21: fletcher.v1.SessionService.StartSession:output_type -> fletcher.v1.StartSessionResponse
+	11, // 22: fletcher.v1.SessionService.StopSession:output_type -> fletcher.v1.StopSessionResponse
+	13, // 23: fletcher.v1.SessionService.DeleteSession:output_type -> fletcher.v1.DeleteSessionResponse
+	15, // 24: fletcher.v1.SessionService.ExecSession:output_type -> fletcher.v1.ExecSessionResponse
+	19, // 25: fletcher.v1.SessionService.ShellSession:output_type -> fletcher.v1.ShellSessionResponse
+	22, // 26: fletcher.v1.SessionService.ProxySession:output_type -> fletcher.v1.ProxySessionResponse
+	18, // [18:27] is the sub-list for method output_type
+	9,  // [9:18] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_fletcher_v1_sessions_proto_init() }
@@ -1277,13 +1466,17 @@ func file_fletcher_v1_sessions_proto_init() {
 		(*ShellSessionResponse_Data)(nil),
 		(*ShellSessionResponse_ExitCode)(nil),
 	}
+	file_fletcher_v1_sessions_proto_msgTypes[19].OneofWrappers = []any{
+		(*ProxySessionRequest_Open)(nil),
+		(*ProxySessionRequest_Data)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fletcher_v1_sessions_proto_rawDesc), len(file_fletcher_v1_sessions_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   19,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

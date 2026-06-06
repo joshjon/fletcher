@@ -57,6 +57,9 @@ const (
 	// SessionServiceShellSessionProcedure is the fully-qualified name of the SessionService's
 	// ShellSession RPC.
 	SessionServiceShellSessionProcedure = "/fletcher.v1.SessionService/ShellSession"
+	// SessionServiceProxySessionProcedure is the fully-qualified name of the SessionService's
+	// ProxySession RPC.
+	SessionServiceProxySessionProcedure = "/fletcher.v1.SessionService/ProxySession"
 )
 
 // SessionServiceClient is a client for the fletcher.v1.SessionService service.
@@ -82,6 +85,12 @@ type SessionServiceClient interface {
 	// or window-resize events. Server messages carry terminal output, then a
 	// final exit code when the shell ends. Full-duplex: requires HTTP/2.
 	ShellSession(context.Context) *connect.BidiStreamForClient[v1.ShellSessionRequest, v1.ShellSessionResponse]
+	// ProxySession brokers a raw byte stream into a running session VM's SSH
+	// server: the daemon relays it over vsock (the VM stays unroutable). It
+	// backs `fletcher session ssh` as an SSH ProxyCommand. The first client
+	// message must carry a ProxyOpen; all later messages (both directions) are
+	// opaque bytes. Full-duplex: requires HTTP/2.
+	ProxySession(context.Context) *connect.BidiStreamForClient[v1.ProxySessionRequest, v1.ProxySessionResponse]
 }
 
 // NewSessionServiceClient constructs a client for the fletcher.v1.SessionService service. By
@@ -143,6 +152,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("ShellSession")),
 			connect.WithClientOptions(opts...),
 		),
+		proxySession: connect.NewClient[v1.ProxySessionRequest, v1.ProxySessionResponse](
+			httpClient,
+			baseURL+SessionServiceProxySessionProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("ProxySession")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -156,6 +171,7 @@ type sessionServiceClient struct {
 	deleteSession *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
 	execSession   *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
 	shellSession  *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
+	proxySession  *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
 }
 
 // CreateSession calls fletcher.v1.SessionService.CreateSession.
@@ -198,6 +214,11 @@ func (c *sessionServiceClient) ShellSession(ctx context.Context) *connect.BidiSt
 	return c.shellSession.CallBidiStream(ctx)
 }
 
+// ProxySession calls fletcher.v1.SessionService.ProxySession.
+func (c *sessionServiceClient) ProxySession(ctx context.Context) *connect.BidiStreamForClient[v1.ProxySessionRequest, v1.ProxySessionResponse] {
+	return c.proxySession.CallBidiStream(ctx)
+}
+
 // SessionServiceHandler is an implementation of the fletcher.v1.SessionService service.
 type SessionServiceHandler interface {
 	// CreateSession provisions a session's persistent fork and boots its VM. The
@@ -221,6 +242,12 @@ type SessionServiceHandler interface {
 	// or window-resize events. Server messages carry terminal output, then a
 	// final exit code when the shell ends. Full-duplex: requires HTTP/2.
 	ShellSession(context.Context, *connect.BidiStream[v1.ShellSessionRequest, v1.ShellSessionResponse]) error
+	// ProxySession brokers a raw byte stream into a running session VM's SSH
+	// server: the daemon relays it over vsock (the VM stays unroutable). It
+	// backs `fletcher session ssh` as an SSH ProxyCommand. The first client
+	// message must carry a ProxyOpen; all later messages (both directions) are
+	// opaque bytes. Full-duplex: requires HTTP/2.
+	ProxySession(context.Context, *connect.BidiStream[v1.ProxySessionRequest, v1.ProxySessionResponse]) error
 }
 
 // NewSessionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -278,6 +305,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("ShellSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceProxySessionHandler := connect.NewBidiStreamHandler(
+		SessionServiceProxySessionProcedure,
+		svc.ProxySession,
+		connect.WithSchema(sessionServiceMethods.ByName("ProxySession")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
@@ -296,6 +329,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceExecSessionHandler.ServeHTTP(w, r)
 		case SessionServiceShellSessionProcedure:
 			sessionServiceShellSessionHandler.ServeHTTP(w, r)
+		case SessionServiceProxySessionProcedure:
+			sessionServiceProxySessionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -335,4 +370,8 @@ func (UnimplementedSessionServiceHandler) ExecSession(context.Context, *connect.
 
 func (UnimplementedSessionServiceHandler) ShellSession(context.Context, *connect.BidiStream[v1.ShellSessionRequest, v1.ShellSessionResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.ShellSession is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) ProxySession(context.Context, *connect.BidiStream[v1.ProxySessionRequest, v1.ProxySessionResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.ProxySession is not implemented"))
 }

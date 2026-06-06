@@ -30,6 +30,12 @@ service SessionService {
   // or window-resize events. Server messages carry terminal output, then a
   // final exit code when the shell ends. Full-duplex: requires HTTP/2.
   rpc ShellSession(stream ShellSessionRequest) returns (stream ShellSessionResponse) {}
+  // ProxySession brokers a raw byte stream into a running session VM's SSH
+  // server: the daemon relays it over vsock (the VM stays unroutable). It
+  // backs `fletcher session ssh` as an SSH ProxyCommand. The first client
+  // message must carry a ProxyOpen; all later messages (both directions) are
+  // opaque bytes. Full-duplex: requires HTTP/2.
+  rpc ProxySession(stream ProxySessionRequest) returns (stream ProxySessionResponse) {}
 }
 
 enum SessionState {
@@ -141,4 +147,23 @@ message ShellSessionResponse {
     // exit_code is the shell's exit status; the final message on the stream.
     int32 exit_code = 2;
   }
+}
+
+message ProxySessionRequest {
+  oneof msg {
+    // open names the session to broker into; must be the first message.
+    ProxyOpen open = 1;
+    // data is opaque bytes from the client to the session's SSH server.
+    bytes data = 2;
+  }
+}
+
+message ProxyOpen {
+  // ref is a session ID or name; the session must be running.
+  string ref = 1;
+}
+
+message ProxySessionResponse {
+  // data is opaque bytes from the session's SSH server back to the client.
+  bytes data = 1;
 }

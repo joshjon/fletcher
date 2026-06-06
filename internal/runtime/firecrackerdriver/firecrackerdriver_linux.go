@@ -265,8 +265,6 @@ func demuxFrames(ctx context.Context, conn net.Conn, stdout, stderr io.Writer) (
 // listening on, via the firecracker vsock UDS handshake (write "CONNECT
 // <port>", expect "OK ..."). It retries while the guest finishes booting and
 // starts listening.
-//
-//nolint:unparam // port is the vsock control protocol's target; later phases (brokered SSH) dial other ports
 func dialGuest(ctx context.Context, udsPath string, port uint32) (net.Conn, error) {
 	var lastErr error
 	for range 100 {

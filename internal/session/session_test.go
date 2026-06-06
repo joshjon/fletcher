@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -79,6 +80,11 @@ func (h *fakeHandle) Exec(_ context.Context, spec runtime.Spec, stdout, _ io.Wri
 func (h *fakeHandle) Shell(_ context.Context, _ runtime.ShellSpec, _ io.Reader, stdout io.Writer, _ <-chan runtime.WinSize) (int32, error) {
 	_, _ = io.WriteString(stdout, "shell")
 	return 0, nil
+}
+
+func (h *fakeHandle) DialSSH(_ context.Context) (net.Conn, error) {
+	c, _ := net.Pipe()
+	return c, nil
 }
 
 func (h *fakeHandle) Stop(_ context.Context) error {
