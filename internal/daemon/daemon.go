@@ -275,7 +275,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	remoteLn := listenRemoteAPI(ctx, netSetup, apiEndpoint, logger)
 
 	mcpServer := fletchermcp.NewServer("fletcher", buildinfo.Version, auditRecorder, logger)
-	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, &http.Client{Timeout: 30 * time.Second}, approvalSvc)
+	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, fletchermcp.NewEgressHTTPClient(30*time.Second), approvalSvc)
 	logger.Info("mcp server ready", slog.String("base_url", mcpURL))
 
 	// Env every agent inherits: it points all agents at the daemon gateway/MCP

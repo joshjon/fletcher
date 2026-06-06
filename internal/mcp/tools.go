@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
+	"syscall"
 	"time"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
@@ -87,14 +90,73 @@ func httpGetTool(httpClient *http.Client) Tool {
 	}
 }
 
-// validateEgressURL rejects URLs we never want the gateway to fetch. For
-// phase 6 the bar is low - scheme must be http(s); future phases will
-// likely refuse loopback / link-local / metadata endpoints to stop SSRF
-// against the daemon's own surface.
-func validateEgressURL(_ string) error {
-	// Intentionally permissive for phase 6. Hardening lands when egress
-	// approvals do.
+// validateEgressURL is the cheap, no-network policy check on an egress URL:
+// it must be an absolute http(s) URL with a host. The authoritative SSRF guard
+// (refusing loopback / link-local / private / cloud-metadata targets) runs at
+// dial time in NewEgressHTTPClient, so it cannot be bypassed by DNS rebinding
+// or a hostname that resolves to an internal address.
+func validateEgressURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("egress URL must be http or https, got %q", u.Scheme)
+	}
+	if u.Hostname() == "" {
+		return errors.New("egress URL must have a host")
+	}
 	return nil
+}
+
+// NewEgressHTTPClient builds the HTTP client the daemon-mediated egress tool
+// uses. Its dialer refuses to connect to any non-global address - the SSRF
+// guard - checked against the IP actually being dialed (after DNS), so an agent
+// in a fork cannot use the daemon to reach its own loopback admin surface, the
+// cloud-metadata endpoint, or the operator's LAN.
+func NewEgressHTTPClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{
+		Timeout: 10 * time.Second,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return fmt.Errorf("egress: bad dial address %q: %w", address, err)
+			}
+			ip := net.ParseIP(host)
+			if ip == nil {
+				return fmt.Errorf("egress: cannot parse dial address %q", host)
+			}
+			if disallowedEgressIP(ip) {
+				return fmt.Errorf("egress to %s is blocked (loopback, link-local, private, or metadata address)", ip)
+			}
+			return nil
+		},
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext:           dialer.DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          10,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: time.Second,
+		},
+	}
+}
+
+// disallowedEgressIP reports whether ip is an address the egress tool must
+// never reach: loopback, link-local (which includes the 169.254.169.254 cloud
+// metadata endpoint), private (RFC1918 / ULA), unspecified, or multicast. Only
+// globally-routable unicast addresses are allowed out.
+func disallowedEgressIP(ip net.IP) bool {
+	return ip.IsLoopback() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() ||
+		ip.IsMulticast() ||
+		ip.IsUnspecified() ||
+		ip.IsPrivate()
 }
 
 // requestApprovalTool lets agents ask the human for permission to perform
@@ -177,7 +239,7 @@ func formatApproval(a approval.Approval) string {
 // phases extend this list (egress allowlists, secrets-bound tools, ...).
 func RegisterBuiltinTools(srv *Server, startedAt time.Time, httpClient *http.Client, approvals ApprovalBackend) {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = NewEgressHTTPClient(30 * time.Second)
 	}
 	srv.RegisterTool(daemonHealthTool(startedAt))
 	srv.RegisterTool(httpGetTool(httpClient))
