@@ -25,6 +25,11 @@ service SessionService {
   // ExecSession runs a command inside a running session and returns its
   // captured output and exit code.
   rpc ExecSession(ExecSessionRequest) returns (ExecSessionResponse) {}
+  // ShellSession opens an interactive PTY in a running session. The first
+  // client message must carry a ShellStart; later messages carry stdin bytes
+  // or window-resize events. Server messages carry terminal output, then a
+  // final exit code when the shell ends. Full-duplex: requires HTTP/2.
+  rpc ShellSession(stream ShellSessionRequest) returns (stream ShellSessionResponse) {}
 }
 
 enum SessionState {
@@ -101,4 +106,39 @@ message ExecSessionResponse {
   string stdout = 1;
   string stderr = 2;
   int32 exit_code = 3;
+}
+
+message ShellSessionRequest {
+  oneof msg {
+    // start opens the PTY; must be the first message on the stream.
+    ShellStart start = 1;
+    // stdin carries keystrokes typed at the terminal.
+    bytes stdin = 2;
+    // resize reports a new terminal window size.
+    ShellResize resize = 3;
+  }
+}
+
+message ShellStart {
+  // ref is a session ID or name; the session must be running.
+  string ref = 1;
+  // term is the client's TERM (e.g. xterm-256color), set inside the PTY.
+  string term = 2;
+  // cols and rows are the initial window size.
+  uint32 cols = 3;
+  uint32 rows = 4;
+}
+
+message ShellResize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message ShellSessionResponse {
+  oneof msg {
+    // data is raw terminal output (stdout and stderr merged by the PTY).
+    bytes data = 1;
+    // exit_code is the shell's exit status; the final message on the stream.
+    int32 exit_code = 2;
+  }
 }

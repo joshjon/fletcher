@@ -71,21 +71,40 @@ const (
 	RequestExec RequestKind = "exec"
 	// RequestShutdown syncs and resets the VM so the VMM exits cleanly.
 	RequestShutdown RequestKind = "shutdown"
+	// RequestShell opens an interactive PTY (Request.Shell). After the request
+	// the connection is full-duplex: the host sends KindStdin/KindResize frames
+	// and the guest sends KindStdout frames, then one KindExit.
+	RequestShell RequestKind = "shell"
 )
+
+// ShellSpec parameterises an interactive PTY session.
+type ShellSpec struct {
+	// Term is the TERM value set inside the PTY (e.g. xterm-256color).
+	Term string `json:"term"`
+	// Cols and Rows are the initial window size.
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+	// Env is extra environment for the login shell.
+	Env []string `json:"env,omitempty"`
+}
 
 // Request is one host->guest control message a session guest serves. The
 // ephemeral path uses Spec directly; sessions wrap it so the same connection
-// can also carry a clean shutdown.
+// can also carry a clean shutdown or an interactive shell.
 type Request struct {
-	Kind RequestKind `json:"kind"`
-	Spec Spec        `json:"spec,omitempty"`
+	Kind  RequestKind `json:"kind"`
+	Spec  Spec        `json:"spec,omitempty"`
+	Shell ShellSpec   `json:"shell,omitempty"`
 }
 
-// Frame kinds.
+// Frame kinds. KindStdout/KindStderr/KindExit flow guest->host; KindStdin and
+// KindResize flow host->guest on an interactive shell connection.
 const (
 	KindStdout byte = 1
 	KindStderr byte = 2
 	KindExit   byte = 3
+	KindStdin  byte = 4
+	KindResize byte = 5
 )
 
 // maxFrame caps a single frame's payload so a corrupt length can't make the
@@ -194,4 +213,20 @@ func DecodeExit(payload []byte) (int32, error) {
 		return 0, errors.New("exit frame payload must be 4 bytes")
 	}
 	return int32(binary.BigEndian.Uint32(payload)), nil //nolint:gosec // deliberate uint32<->int32 reinterpret
+}
+
+// EncodeResize renders a window size as the 4-byte payload of a Resize frame.
+func EncodeResize(cols, rows uint16) []byte {
+	var b [4]byte
+	binary.BigEndian.PutUint16(b[0:], cols)
+	binary.BigEndian.PutUint16(b[2:], rows)
+	return b[:]
+}
+
+// DecodeResize parses a Resize frame payload back into a window size.
+func DecodeResize(payload []byte) (cols, rows uint16, err error) {
+	if len(payload) != 4 {
+		return 0, 0, errors.New("resize frame payload must be 4 bytes")
+	}
+	return binary.BigEndian.Uint16(payload[0:]), binary.BigEndian.Uint16(payload[2:]), nil
 }

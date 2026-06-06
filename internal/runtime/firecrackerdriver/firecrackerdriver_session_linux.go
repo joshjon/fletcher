@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
@@ -128,6 +129,99 @@ func (s *fcSession) Exec(ctx context.Context, spec fcruntime.Spec, stdout, stder
 		return fcruntime.Result{}, err
 	}
 	return fcruntime.Result{ExitCode: code}, nil
+}
+
+// Shell opens an interactive PTY in the running session VM. It sends the host's
+// keystrokes (stdin) and window resizes to the guest as frames, and writes the
+// guest's terminal output to stdout, returning the shell's exit code.
+func (s *fcSession) Shell(ctx context.Context, spec fcruntime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan fcruntime.WinSize) (int32, error) {
+	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.ControlPort)
+	if err != nil {
+		return 0, fmt.Errorf("firecracker: connect session: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	env := spec.Env
+	if len(env) == 0 {
+		env = s.env
+	}
+	req := guestproto.Request{
+		Kind:  guestproto.RequestShell,
+		Shell: guestproto.ShellSpec{Term: spec.Term, Cols: spec.Cols, Rows: spec.Rows, Env: env},
+	}
+	if err := guestproto.WriteRequest(conn, req); err != nil {
+		return 0, fmt.Errorf("firecracker: send shell: %w", err)
+	}
+
+	// stdin and resize both write frames; serialise them.
+	var wmu sync.Mutex
+	writeFrame := func(kind byte, payload []byte) error {
+		wmu.Lock()
+		defer wmu.Unlock()
+		return guestproto.WriteFrame(conn, kind, payload)
+	}
+
+	pumpCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go pumpStdin(pumpCtx, stdin, writeFrame)
+	go pumpResize(pumpCtx, resize, writeFrame)
+
+	// Guest -> host: terminal output, then a final exit frame.
+	for {
+		kind, payload, rerr := guestproto.ReadFrame(conn)
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				return 0, nil
+			}
+			return 0, fmt.Errorf("firecracker: shell stream: %w", rerr)
+		}
+		switch kind {
+		case guestproto.KindStdout, guestproto.KindStderr:
+			if _, werr := stdout.Write(payload); werr != nil {
+				return 0, werr
+			}
+		case guestproto.KindExit:
+			code, _ := guestproto.DecodeExit(payload)
+			return code, nil
+		}
+	}
+}
+
+// pumpStdin forwards the host's keystrokes to the guest as KindStdin frames
+// until stdin ends or the shell closes.
+func pumpStdin(ctx context.Context, stdin io.Reader, writeFrame func(byte, []byte) error) {
+	buf := make([]byte, 32<<10)
+	for {
+		n, rerr := stdin.Read(buf)
+		if n > 0 {
+			if werr := writeFrame(guestproto.KindStdin, buf[:n]); werr != nil {
+				return
+			}
+		}
+		if rerr != nil {
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+	}
+}
+
+// pumpResize forwards window-size changes to the guest as KindResize frames.
+func pumpResize(ctx context.Context, resize <-chan fcruntime.WinSize, writeFrame func(byte, []byte) error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case w, ok := <-resize:
+			if !ok {
+				return
+			}
+			if err := writeFrame(guestproto.KindResize, guestproto.EncodeResize(w.Cols, w.Rows)); err != nil {
+				return
+			}
+		}
+	}
 }
 
 // Stop shuts the session VM down cleanly, keeping its fork on disk.

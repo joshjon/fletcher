@@ -2,11 +2,14 @@ package api
 
 import (
 	"context"
+	"io"
 
 	"connectrpc.com/connect"
 
+	"github.com/joshjon/fletcher/internal/errs"
 	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
+	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/session"
 )
 
@@ -20,6 +23,7 @@ type SessionsBackend interface {
 	Stop(ctx context.Context, ref string) (session.Session, error)
 	Delete(ctx context.Context, ref string) (bool, error)
 	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
+	Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error)
 }
 
 // SessionsService implements fletcherv1connect.SessionServiceHandler.
@@ -103,6 +107,84 @@ func (s *SessionsService) ExecSession(ctx context.Context, req *connect.Request[
 		Stderr:   res.Stderr,
 		ExitCode: res.ExitCode,
 	}), nil
+}
+
+// ShellSession bridges a Connect bidi stream to an interactive PTY in the
+// session VM. The first client message carries ShellStart (ref + window size);
+// subsequent messages carry stdin or resize events. Terminal output flows back
+// as data messages, and a final exit_code message closes the stream.
+func (s *SessionsService) ShellSession(ctx context.Context, stream *connect.BidiStream[fletcherv1.ShellSessionRequest, fletcherv1.ShellSessionResponse]) error {
+	first, err := stream.Receive()
+	if err != nil {
+		return err
+	}
+	start := first.GetStart()
+	if start == nil || start.GetRef() == "" {
+		return errs.New(errs.CategoryInvalidArgument, "first shell message must carry start with a session ref")
+	}
+
+	// stdin: client messages feed a pipe the backend reads as the PTY's stdin.
+	pr, pw := io.Pipe()
+	resize := make(chan runtime.WinSize, 8)
+	stdout := writerFunc(func(p []byte) (int, error) {
+		if serr := stream.Send(&fletcherv1.ShellSessionResponse{
+			Msg: &fletcherv1.ShellSessionResponse_Data{Data: p},
+		}); serr != nil {
+			return 0, serr
+		}
+		return len(p), nil
+	})
+
+	// Forward later client messages (keystrokes, resizes) until it hangs up.
+	go func() {
+		defer func() { _ = pw.Close() }()
+		defer close(resize)
+		for {
+			msg, rerr := stream.Receive()
+			if rerr != nil {
+				return
+			}
+			switch m := msg.Msg.(type) {
+			case *fletcherv1.ShellSessionRequest_Stdin:
+				if _, werr := pw.Write(m.Stdin); werr != nil {
+					return
+				}
+			case *fletcherv1.ShellSessionRequest_Resize:
+				select {
+				case resize <- runtime.WinSize{Cols: clampUint16(m.Resize.GetCols()), Rows: clampUint16(m.Resize.GetRows())}:
+				default: // drop a resize if the backend is mid-write; the next one wins
+				}
+			}
+		}
+	}()
+
+	spec := runtime.ShellSpec{
+		Term: start.GetTerm(),
+		Cols: clampUint16(start.GetCols()),
+		Rows: clampUint16(start.GetRows()),
+	}
+	code, err := s.backend.Shell(ctx, start.GetRef(), spec, pr, stdout, resize)
+	_ = pr.Close() // unblock the receive goroutine's pipe writes
+	if err != nil {
+		return err
+	}
+	return stream.Send(&fletcherv1.ShellSessionResponse{
+		Msg: &fletcherv1.ShellSessionResponse_ExitCode{ExitCode: code},
+	})
+}
+
+// writerFunc adapts a function to io.Writer.
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// clampUint16 narrows a proto uint32 window dimension to the uint16 the PTY
+// ioctl expects, saturating rather than wrapping.
+func clampUint16(v uint32) uint16 {
+	if v > 0xffff {
+		return 0xffff
+	}
+	return uint16(v)
 }
 
 func sessionToProto(s session.Session) *fletcherv1.Session {

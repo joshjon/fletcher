@@ -5,6 +5,7 @@ go 1.26.3
 require (
 	connectrpc.com/connect v1.20.0
 	filippo.io/age v1.3.1
+	github.com/creack/pty v1.1.24
 	github.com/firecracker-microvm/firecracker-go-sdk v1.0.0
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/huin/goupnp v1.3.0
@@ -19,6 +20,7 @@ require (
 	go.jetify.com/typeid v1.3.0
 	golang.org/x/mod v0.36.0
 	golang.org/x/sys v0.45.0
+	golang.org/x/term v0.43.0
 	golang.zx2c4.com/wireguard v0.0.0-20260522210424-ecfc5a8d5446
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.51.0
@@ -367,7 +369,6 @@ require (
 	golang.org/x/exp/typeparams v0.0.0-20260209203927-2842357ff358 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/tools v0.45.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect

@@ -804,6 +804,314 @@ func (x *ExecSessionResponse) GetExitCode() int32 {
 	return 0
 }
 
+type ShellSessionRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Msg:
+	//
+	//	*ShellSessionRequest_Start
+	//	*ShellSessionRequest_Stdin
+	//	*ShellSessionRequest_Resize
+	Msg           isShellSessionRequest_Msg `protobuf_oneof:"msg"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShellSessionRequest) Reset() {
+	*x = ShellSessionRequest{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShellSessionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShellSessionRequest) ProtoMessage() {}
+
+func (x *ShellSessionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShellSessionRequest.ProtoReflect.Descriptor instead.
+func (*ShellSessionRequest) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *ShellSessionRequest) GetMsg() isShellSessionRequest_Msg {
+	if x != nil {
+		return x.Msg
+	}
+	return nil
+}
+
+func (x *ShellSessionRequest) GetStart() *ShellStart {
+	if x != nil {
+		if x, ok := x.Msg.(*ShellSessionRequest_Start); ok {
+			return x.Start
+		}
+	}
+	return nil
+}
+
+func (x *ShellSessionRequest) GetStdin() []byte {
+	if x != nil {
+		if x, ok := x.Msg.(*ShellSessionRequest_Stdin); ok {
+			return x.Stdin
+		}
+	}
+	return nil
+}
+
+func (x *ShellSessionRequest) GetResize() *ShellResize {
+	if x != nil {
+		if x, ok := x.Msg.(*ShellSessionRequest_Resize); ok {
+			return x.Resize
+		}
+	}
+	return nil
+}
+
+type isShellSessionRequest_Msg interface {
+	isShellSessionRequest_Msg()
+}
+
+type ShellSessionRequest_Start struct {
+	// start opens the PTY; must be the first message on the stream.
+	Start *ShellStart `protobuf:"bytes,1,opt,name=start,proto3,oneof"`
+}
+
+type ShellSessionRequest_Stdin struct {
+	// stdin carries keystrokes typed at the terminal.
+	Stdin []byte `protobuf:"bytes,2,opt,name=stdin,proto3,oneof"`
+}
+
+type ShellSessionRequest_Resize struct {
+	// resize reports a new terminal window size.
+	Resize *ShellResize `protobuf:"bytes,3,opt,name=resize,proto3,oneof"`
+}
+
+func (*ShellSessionRequest_Start) isShellSessionRequest_Msg() {}
+
+func (*ShellSessionRequest_Stdin) isShellSessionRequest_Msg() {}
+
+func (*ShellSessionRequest_Resize) isShellSessionRequest_Msg() {}
+
+type ShellStart struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ref is a session ID or name; the session must be running.
+	Ref string `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
+	// term is the client's TERM (e.g. xterm-256color), set inside the PTY.
+	Term string `protobuf:"bytes,2,opt,name=term,proto3" json:"term,omitempty"`
+	// cols and rows are the initial window size.
+	Cols          uint32 `protobuf:"varint,3,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows          uint32 `protobuf:"varint,4,opt,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShellStart) Reset() {
+	*x = ShellStart{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShellStart) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShellStart) ProtoMessage() {}
+
+func (x *ShellStart) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShellStart.ProtoReflect.Descriptor instead.
+func (*ShellStart) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ShellStart) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *ShellStart) GetTerm() string {
+	if x != nil {
+		return x.Term
+	}
+	return ""
+}
+
+func (x *ShellStart) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *ShellStart) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+type ShellResize struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Cols          uint32                 `protobuf:"varint,1,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows          uint32                 `protobuf:"varint,2,opt,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShellResize) Reset() {
+	*x = ShellResize{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShellResize) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShellResize) ProtoMessage() {}
+
+func (x *ShellResize) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShellResize.ProtoReflect.Descriptor instead.
+func (*ShellResize) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ShellResize) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *ShellResize) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+type ShellSessionResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Msg:
+	//
+	//	*ShellSessionResponse_Data
+	//	*ShellSessionResponse_ExitCode
+	Msg           isShellSessionResponse_Msg `protobuf_oneof:"msg"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ShellSessionResponse) Reset() {
+	*x = ShellSessionResponse{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShellSessionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShellSessionResponse) ProtoMessage() {}
+
+func (x *ShellSessionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShellSessionResponse.ProtoReflect.Descriptor instead.
+func (*ShellSessionResponse) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ShellSessionResponse) GetMsg() isShellSessionResponse_Msg {
+	if x != nil {
+		return x.Msg
+	}
+	return nil
+}
+
+func (x *ShellSessionResponse) GetData() []byte {
+	if x != nil {
+		if x, ok := x.Msg.(*ShellSessionResponse_Data); ok {
+			return x.Data
+		}
+	}
+	return nil
+}
+
+func (x *ShellSessionResponse) GetExitCode() int32 {
+	if x != nil {
+		if x, ok := x.Msg.(*ShellSessionResponse_ExitCode); ok {
+			return x.ExitCode
+		}
+	}
+	return 0
+}
+
+type isShellSessionResponse_Msg interface {
+	isShellSessionResponse_Msg()
+}
+
+type ShellSessionResponse_Data struct {
+	// data is raw terminal output (stdout and stderr merged by the PTY).
+	Data []byte `protobuf:"bytes,1,opt,name=data,proto3,oneof"`
+}
+
+type ShellSessionResponse_ExitCode struct {
+	// exit_code is the shell's exit status; the final message on the stream.
+	ExitCode int32 `protobuf:"varint,2,opt,name=exit_code,json=exitCode,proto3,oneof"`
+}
+
+func (*ShellSessionResponse_Data) isShellSessionResponse_Msg() {}
+
+func (*ShellSessionResponse_ExitCode) isShellSessionResponse_Msg() {}
+
 var File_fletcher_v1_sessions_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_sessions_proto_rawDesc = "" +
@@ -851,11 +1159,29 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\x13ExecSessionResponse\x12\x16\n" +
 	"\x06stdout\x18\x01 \x01(\tR\x06stdout\x12\x16\n" +
 	"\x06stderr\x18\x02 \x01(\tR\x06stderr\x12\x1b\n" +
-	"\texit_code\x18\x03 \x01(\x05R\bexitCode*c\n" +
+	"\texit_code\x18\x03 \x01(\x05R\bexitCode\"\x99\x01\n" +
+	"\x13ShellSessionRequest\x12/\n" +
+	"\x05start\x18\x01 \x01(\v2\x17.fletcher.v1.ShellStartH\x00R\x05start\x12\x16\n" +
+	"\x05stdin\x18\x02 \x01(\fH\x00R\x05stdin\x122\n" +
+	"\x06resize\x18\x03 \x01(\v2\x18.fletcher.v1.ShellResizeH\x00R\x06resizeB\x05\n" +
+	"\x03msg\"Z\n" +
+	"\n" +
+	"ShellStart\x12\x10\n" +
+	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x12\n" +
+	"\x04term\x18\x02 \x01(\tR\x04term\x12\x12\n" +
+	"\x04cols\x18\x03 \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x04 \x01(\rR\x04rows\"5\n" +
+	"\vShellResize\x12\x12\n" +
+	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x02 \x01(\rR\x04rows\"R\n" +
+	"\x14ShellSessionResponse\x12\x14\n" +
+	"\x04data\x18\x01 \x01(\fH\x00R\x04data\x12\x1d\n" +
+	"\texit_code\x18\x02 \x01(\x05H\x00R\bexitCodeB\x05\n" +
+	"\x03msg*c\n" +
 	"\fSessionState\x12\x1d\n" +
 	"\x19SESSION_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATE_RUNNING\x10\x01\x12\x19\n" +
-	"\x15SESSION_STATE_STOPPED\x10\x022\xeb\x04\n" +
+	"\x15SESSION_STATE_STOPPED\x10\x022\xc6\x05\n" +
 	"\x0eSessionService\x12X\n" +
 	"\rCreateSession\x12!.fletcher.v1.CreateSessionRequest\x1a\".fletcher.v1.CreateSessionResponse\"\x00\x12O\n" +
 	"\n" +
@@ -864,7 +1190,8 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\fStartSession\x12 .fletcher.v1.StartSessionRequest\x1a!.fletcher.v1.StartSessionResponse\"\x00\x12R\n" +
 	"\vStopSession\x12\x1f.fletcher.v1.StopSessionRequest\x1a .fletcher.v1.StopSessionResponse\"\x00\x12X\n" +
 	"\rDeleteSession\x12!.fletcher.v1.DeleteSessionRequest\x1a\".fletcher.v1.DeleteSessionResponse\"\x00\x12R\n" +
-	"\vExecSession\x12\x1f.fletcher.v1.ExecSessionRequest\x1a .fletcher.v1.ExecSessionResponse\"\x00B\xb4\x01\n" +
+	"\vExecSession\x12\x1f.fletcher.v1.ExecSessionRequest\x1a .fletcher.v1.ExecSessionResponse\"\x00\x12Y\n" +
+	"\fShellSession\x12 .fletcher.v1.ShellSessionRequest\x1a!.fletcher.v1.ShellSessionResponse\"\x00(\x010\x01B\xb4\x01\n" +
 	"\x0fcom.fletcher.v1B\rSessionsProtoP\x01ZEgithub.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1\xa2\x02\x03FXX\xaa\x02\vFletcher.V1\xca\x02\vFletcher\\V1\xe2\x02\x17Fletcher\\V1\\GPBMetadata\xea\x02\fFletcher::V1b\x06proto3"
 
 var (
@@ -880,7 +1207,7 @@ func file_fletcher_v1_sessions_proto_rawDescGZIP() []byte {
 }
 
 var file_fletcher_v1_sessions_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_fletcher_v1_sessions_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_fletcher_v1_sessions_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_fletcher_v1_sessions_proto_goTypes = []any{
 	(SessionState)(0),             // 0: fletcher.v1.SessionState
 	(*Session)(nil),               // 1: fletcher.v1.Session
@@ -898,6 +1225,10 @@ var file_fletcher_v1_sessions_proto_goTypes = []any{
 	(*DeleteSessionResponse)(nil), // 13: fletcher.v1.DeleteSessionResponse
 	(*ExecSessionRequest)(nil),    // 14: fletcher.v1.ExecSessionRequest
 	(*ExecSessionResponse)(nil),   // 15: fletcher.v1.ExecSessionResponse
+	(*ShellSessionRequest)(nil),   // 16: fletcher.v1.ShellSessionRequest
+	(*ShellStart)(nil),            // 17: fletcher.v1.ShellStart
+	(*ShellResize)(nil),           // 18: fletcher.v1.ShellResize
+	(*ShellSessionResponse)(nil),  // 19: fletcher.v1.ShellSessionResponse
 }
 var file_fletcher_v1_sessions_proto_depIdxs = []int32{
 	0,  // 0: fletcher.v1.Session.state:type_name -> fletcher.v1.SessionState
@@ -906,25 +1237,29 @@ var file_fletcher_v1_sessions_proto_depIdxs = []int32{
 	1,  // 3: fletcher.v1.ListSessionsResponse.sessions:type_name -> fletcher.v1.Session
 	1,  // 4: fletcher.v1.StartSessionResponse.session:type_name -> fletcher.v1.Session
 	1,  // 5: fletcher.v1.StopSessionResponse.session:type_name -> fletcher.v1.Session
-	2,  // 6: fletcher.v1.SessionService.CreateSession:input_type -> fletcher.v1.CreateSessionRequest
-	4,  // 7: fletcher.v1.SessionService.GetSession:input_type -> fletcher.v1.GetSessionRequest
-	6,  // 8: fletcher.v1.SessionService.ListSessions:input_type -> fletcher.v1.ListSessionsRequest
-	8,  // 9: fletcher.v1.SessionService.StartSession:input_type -> fletcher.v1.StartSessionRequest
-	10, // 10: fletcher.v1.SessionService.StopSession:input_type -> fletcher.v1.StopSessionRequest
-	12, // 11: fletcher.v1.SessionService.DeleteSession:input_type -> fletcher.v1.DeleteSessionRequest
-	14, // 12: fletcher.v1.SessionService.ExecSession:input_type -> fletcher.v1.ExecSessionRequest
-	3,  // 13: fletcher.v1.SessionService.CreateSession:output_type -> fletcher.v1.CreateSessionResponse
-	5,  // 14: fletcher.v1.SessionService.GetSession:output_type -> fletcher.v1.GetSessionResponse
-	7,  // 15: fletcher.v1.SessionService.ListSessions:output_type -> fletcher.v1.ListSessionsResponse
-	9,  // 16: fletcher.v1.SessionService.StartSession:output_type -> fletcher.v1.StartSessionResponse
-	11, // 17: fletcher.v1.SessionService.StopSession:output_type -> fletcher.v1.StopSessionResponse
-	13, // 18: fletcher.v1.SessionService.DeleteSession:output_type -> fletcher.v1.DeleteSessionResponse
-	15, // 19: fletcher.v1.SessionService.ExecSession:output_type -> fletcher.v1.ExecSessionResponse
-	13, // [13:20] is the sub-list for method output_type
-	6,  // [6:13] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	17, // 6: fletcher.v1.ShellSessionRequest.start:type_name -> fletcher.v1.ShellStart
+	18, // 7: fletcher.v1.ShellSessionRequest.resize:type_name -> fletcher.v1.ShellResize
+	2,  // 8: fletcher.v1.SessionService.CreateSession:input_type -> fletcher.v1.CreateSessionRequest
+	4,  // 9: fletcher.v1.SessionService.GetSession:input_type -> fletcher.v1.GetSessionRequest
+	6,  // 10: fletcher.v1.SessionService.ListSessions:input_type -> fletcher.v1.ListSessionsRequest
+	8,  // 11: fletcher.v1.SessionService.StartSession:input_type -> fletcher.v1.StartSessionRequest
+	10, // 12: fletcher.v1.SessionService.StopSession:input_type -> fletcher.v1.StopSessionRequest
+	12, // 13: fletcher.v1.SessionService.DeleteSession:input_type -> fletcher.v1.DeleteSessionRequest
+	14, // 14: fletcher.v1.SessionService.ExecSession:input_type -> fletcher.v1.ExecSessionRequest
+	16, // 15: fletcher.v1.SessionService.ShellSession:input_type -> fletcher.v1.ShellSessionRequest
+	3,  // 16: fletcher.v1.SessionService.CreateSession:output_type -> fletcher.v1.CreateSessionResponse
+	5,  // 17: fletcher.v1.SessionService.GetSession:output_type -> fletcher.v1.GetSessionResponse
+	7,  // 18: fletcher.v1.SessionService.ListSessions:output_type -> fletcher.v1.ListSessionsResponse
+	9,  // 19: fletcher.v1.SessionService.StartSession:output_type -> fletcher.v1.StartSessionResponse
+	11, // 20: fletcher.v1.SessionService.StopSession:output_type -> fletcher.v1.StopSessionResponse
+	13, // 21: fletcher.v1.SessionService.DeleteSession:output_type -> fletcher.v1.DeleteSessionResponse
+	15, // 22: fletcher.v1.SessionService.ExecSession:output_type -> fletcher.v1.ExecSessionResponse
+	19, // 23: fletcher.v1.SessionService.ShellSession:output_type -> fletcher.v1.ShellSessionResponse
+	16, // [16:24] is the sub-list for method output_type
+	8,  // [8:16] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_fletcher_v1_sessions_proto_init() }
@@ -933,13 +1268,22 @@ func file_fletcher_v1_sessions_proto_init() {
 		return
 	}
 	file_fletcher_v1_sessions_proto_msgTypes[0].OneofWrappers = []any{}
+	file_fletcher_v1_sessions_proto_msgTypes[15].OneofWrappers = []any{
+		(*ShellSessionRequest_Start)(nil),
+		(*ShellSessionRequest_Stdin)(nil),
+		(*ShellSessionRequest_Resize)(nil),
+	}
+	file_fletcher_v1_sessions_proto_msgTypes[18].OneofWrappers = []any{
+		(*ShellSessionResponse_Data)(nil),
+		(*ShellSessionResponse_ExitCode)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fletcher_v1_sessions_proto_rawDesc), len(file_fletcher_v1_sessions_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   15,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

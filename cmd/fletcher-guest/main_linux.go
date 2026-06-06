@@ -22,11 +22,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/mdlayher/vsock"
 	"golang.org/x/sys/unix"
 
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestproto"
 )
+
+// guestWorkspace is the conventional working directory inside a session VM.
+const guestWorkspace = "/workspace"
 
 func main() {
 	mountBasics()
@@ -89,11 +93,125 @@ func serveControl(conn net.Conn) {
 	switch req.Kind {
 	case guestproto.RequestExec:
 		runExec(conn, req.Spec)
+	case guestproto.RequestShell:
+		runShell(conn, req.Shell)
 	case guestproto.RequestShutdown:
 		shutdown() // resets the VM; does not return
 	default:
 		fmt.Fprintf(os.Stderr, "fletcher-guest: unknown request kind %q\n", req.Kind)
 	}
+}
+
+// runShell opens a PTY running a login shell and bridges it to the host over
+// conn: the guest streams terminal output back as KindStdout frames while
+// reading KindStdin/KindResize frames from the host. It returns when the shell
+// exits (user typed exit) or the host closes the connection (client detached).
+func runShell(conn net.Conn, spec guestproto.ShellSpec) {
+	shell := loginShell()
+	cmd := exec.CommandContext(context.Background(), shell, "-l") //nolint:gosec // launching a shell is the entire purpose
+	cmd.Dir = shellDir()
+	cmd.Env = shellEnv(spec)
+
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		fc := &frameConn{w: conn}
+		_ = fc.write(guestproto.KindStderr, []byte(fmt.Sprintf("fletcher-guest: start shell: %v\n", err)))
+		_ = fc.write(guestproto.KindExit, guestproto.EncodeExit(1))
+		return
+	}
+	defer func() { _ = ptmx.Close() }()
+	if spec.Cols > 0 && spec.Rows > 0 {
+		_ = pty.Setsize(ptmx, &pty.Winsize{Cols: spec.Cols, Rows: spec.Rows})
+	}
+
+	fc := &frameConn{w: conn}
+	// Pump PTY output to the host until the shell closes the terminal.
+	outDone := make(chan struct{})
+	go func() {
+		defer close(outDone)
+		buf := make([]byte, 32<<10)
+		for {
+			n, rerr := ptmx.Read(buf)
+			if n > 0 {
+				if werr := fc.write(guestproto.KindStdout, buf[:n]); werr != nil {
+					return
+				}
+			}
+			if rerr != nil {
+				return
+			}
+		}
+	}()
+	// Pump host input (keystrokes, resizes) to the PTY. When the host closes the
+	// connection, ReadFrame errors; closing the PTY hangs up the shell's
+	// controlling terminal so it exits and cmd.Wait below returns.
+	go func() {
+		for {
+			kind, payload, rerr := guestproto.ReadFrame(conn)
+			if rerr != nil {
+				_ = ptmx.Close()
+				return
+			}
+			switch kind {
+			case guestproto.KindStdin:
+				_, _ = ptmx.Write(payload)
+			case guestproto.KindResize:
+				if cols, rows, derr := guestproto.DecodeResize(payload); derr == nil {
+					_ = pty.Setsize(ptmx, &pty.Winsize{Cols: cols, Rows: rows})
+				}
+			}
+		}
+	}()
+
+	code := waitCode(cmd)
+	<-outDone                                                             // drain any output the shell wrote on its way out
+	_ = fc.write(guestproto.KindExit, guestproto.EncodeExit(int32(code))) //nolint:gosec // exit codes are 0-255
+}
+
+// loginShell prefers bash, falling back to sh on a minimal rootfs.
+func loginShell() string {
+	if _, err := os.Stat("/bin/bash"); err == nil {
+		return "/bin/bash"
+	}
+	return "/bin/sh"
+}
+
+// shellDir is the shell's working directory: /workspace if present, else /.
+func shellDir() string {
+	if fi, err := os.Stat(guestWorkspace); err == nil && fi.IsDir() {
+		return guestWorkspace
+	}
+	return "/"
+}
+
+// shellEnv builds the login shell's environment: the spec's TERM plus the
+// usual PATH/HOME defaults and any extra entries the host passed.
+func shellEnv(spec guestproto.ShellSpec) []string {
+	env := withDefaults(spec.Env)
+	term := spec.Term
+	if term == "" {
+		term = "xterm-256color"
+	}
+	if !hasKey(env, "TERM") {
+		env = append(env, "TERM="+term)
+	}
+	return env
+}
+
+// waitCode waits for cmd and maps its result to an exit code.
+func waitCode(cmd *exec.Cmd) int {
+	err := cmd.Wait()
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		if ee.ExitCode() >= 0 {
+			return ee.ExitCode()
+		}
+		return 1 // killed by signal (e.g. the host hung up the terminal)
+	}
+	return 1
 }
 
 // run dials the host, executes the job, and returns the exit code to report.

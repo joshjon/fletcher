@@ -37,6 +37,7 @@ import (
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/vmm"
 	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
 	"github.com/joshjon/fletcher/internal/runtime/runcdriver"
+
 	"github.com/joshjon/fletcher/internal/secrets"
 	"github.com/joshjon/fletcher/internal/session"
 	"github.com/joshjon/fletcher/internal/settings"
@@ -510,10 +511,24 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	)
 	mux.Handle(modelsPath, modelsHandler)
 
+	// Serve cleartext HTTP/2 (h2c) alongside HTTP/1.1 so Connect bidi streams -
+	// the interactive shell (SessionService.ShellSession) - work over the unix
+	// socket. Negotiation happens at the connection layer, so HTTP/1.1 unary
+	// clients are unaffected.
 	return &http.Server{
 		Handler:           mux,
+		Protocols:         h2cProtocols(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+}
+
+// h2cProtocols enables HTTP/1.1 and cleartext HTTP/2 (no TLS) on a server or
+// transport - the set the unix socket and tunnel API speak.
+func h2cProtocols() *http.Protocols {
+	p := new(http.Protocols)
+	p.SetHTTP1(true)
+	p.SetUnencryptedHTTP2(true)
+	return p
 }
 
 // listenTCP binds a TCP listener and resolves the base URL callers should
@@ -785,8 +800,11 @@ func newRemoteServer(remoteLn net.Listener, auth tokenAuthenticator, handler htt
 	if remoteLn == nil {
 		return nil
 	}
+	// Same h2c support as the local server so a remote `session shell` stream
+	// works over the tunnel; auth runs per request and per stream.
 	return &http.Server{
 		Handler:           authMiddleware(auth, handler),
+		Protocols:         h2cProtocols(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 }

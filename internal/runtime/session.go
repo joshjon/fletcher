@@ -17,12 +17,33 @@ type SessionSpec struct {
 	Env []string
 }
 
+// ShellSpec parameterises an interactive PTY in a session VM.
+type ShellSpec struct {
+	// Term is the TERM value set inside the PTY (e.g. xterm-256color).
+	Term string
+	// Cols and Rows are the initial window size.
+	Cols uint16
+	Rows uint16
+	// Env is extra environment for the login shell.
+	Env []string
+}
+
+// WinSize is a terminal window size pushed mid-session on a resize.
+type WinSize struct {
+	Cols uint16
+	Rows uint16
+}
+
 // SessionHandle is a running session VM. It stays up until Stop; Exec runs
 // commands inside it without tearing it down.
 type SessionHandle interface {
 	// Exec runs spec.Command in the running VM, streaming output to
 	// stdout/stderr, and returns the exit code.
 	Exec(ctx context.Context, spec Spec, stdout, stderr io.Writer) (Result, error)
+	// Shell opens an interactive login shell on a PTY. It writes terminal
+	// output to stdout, reads keystrokes from stdin, applies window sizes from
+	// resize, and returns the shell's exit code when it ends or stdin closes.
+	Shell(ctx context.Context, spec ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan WinSize) (int32, error)
 	// Stop shuts the VM down cleanly. The fork on disk is untouched.
 	Stop(ctx context.Context) error
 }

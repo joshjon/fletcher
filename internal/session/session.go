@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -263,6 +264,29 @@ func (m *Manager) Exec(ctx context.Context, ref, command string) (ExecResult, er
 	}
 	m.touch(ctx, row.ID)
 	return ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: res.ExitCode}, nil
+}
+
+// Shell opens an interactive PTY in a running session, bridging the caller's
+// stdin/stdout and window resizes to the VM, and returns the shell's exit code.
+func (m *Manager) Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error) {
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return 0, err
+	}
+	handle := m.getHandle(row.ID)
+	if handle == nil || State(row.State) != StateRunning {
+		return 0, errs.Newf(errs.CategoryFailedPrecondition,
+			"session %q is not running; start it with `fletcher session start`", row.Name)
+	}
+	if len(spec.Env) == 0 {
+		spec.Env = m.env
+	}
+	code, err := handle.Shell(ctx, spec, stdin, stdout, resize)
+	if err != nil {
+		return 0, fmt.Errorf("shell in session: %w", err)
+	}
+	m.touch(ctx, row.ID)
+	return code, nil
 }
 
 // ReconcileOnBoot marks every "running" session as "stopped" at daemon start:

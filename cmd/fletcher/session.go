@@ -26,6 +26,7 @@ func sessionCmd() *cli.Command {
 			sessionStopCmd(),
 			sessionDeleteCmd(),
 			sessionExecCmd(),
+			sessionShellCmd(),
 		},
 	}
 }
