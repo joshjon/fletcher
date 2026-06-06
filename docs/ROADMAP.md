@@ -388,7 +388,7 @@ DESIGN.md §11 and §9.
   gateway over vsock, has no egress, and the gateway already stamps credentials
   (M1-M4). It is the operator's final validation, documented in setup.md.
 
-### Milestone 6 - Durable sessions (interactive, persistent workspaces) - PLANNED (design sketch)
+### Milestone 6 - Durable sessions (interactive, persistent workspaces) - IN PROGRESS (Phase 1 done)
 
 **The gap.** Today every job is ephemeral: a fresh fork runs one command and is
 torn down (the supervisor `deleteSnapshot`s on completion). There is no way to
@@ -498,6 +498,27 @@ access - the patterns, mechanics, and source links are in
 [`docs/research/durable-sessions.md`](research/durable-sessions.md), worth
 re-reading at build time. The choices above are Fletcher's own, derived from the
 single-box, daemon-gated, no-route-into-VM-land constraints.
+
+**Build status.**
+
+- **Phase 1 - session core (cold boot + exec + lifecycle) - DONE.** A session is
+  its own SQLite row referencing a persistent fork, not a job row with the trigger
+  flipped (resolves the data-model open question above): a session has no single
+  command and a distinct running/stopped lifecycle, so it shares the execution
+  engine - the same runtime + snapshot drivers and agent env as jobs (DESIGN §4) -
+  without overloading the job table. The firecracker runtime grew a session mode:
+  the guest agent (`fletcher-init`) detects `fletcher.session=1` on the kernel
+  cmdline and, instead of dialing the host to run one command and rebooting, stays
+  up as a vsock control server (the host dials *in* via the Firecracker UDS
+  `CONNECT` handshake) serving exec/shutdown. `internal/session.Manager` owns the
+  lifecycle and the live VM handles; `ReconcileOnBoot` resets orphaned `running`
+  rows to `stopped` after a daemon restart (handles are in-memory). Surfaced as
+  `fletcher session create|get|list|start|stop|delete|exec`. Verified end-to-end on
+  real microVMs: a file written in one exec survives stop -> start (the VM reboots
+  against the same fork) and a full daemon restart; `delete` destroys the fork.
+  Layer 1 of the persistence model, realised; hibernate (Layer 2) is Phase 4.
+- **Phases 2-5** - interactive shell (PTY), brokered SSH, hibernate, storage caps
+  + idle auto-stop - still to build.
 
 ## Backlog (not scheduled - awaiting a usage signal)
 
