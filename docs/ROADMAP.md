@@ -674,6 +674,34 @@ Listed so they are visible, not lost. Items that became milestones are above.
   (most likely fixed by the M5 import-truncation fix). All three agents
   (claude, codex, pi) work.
 
+**Sessions + storage**
+
+- **Persistent volumes decoupled from session lifecycle** - today a session is a
+  single CoW fork where the base rootfs and `/workspace` are intermingled (M6:
+  the durable unit is the fork on disk), so data lives and dies with the session
+  and cannot be carried onto a newer base image. The pattern (Docker named
+  volumes, k8s PV/PVC, detach/reattach block storage, a Firecracker secondary
+  drive) is to make a **volume** a first-class object with its own id and SQLite
+  row, its own ext4 image / btrfs subvolume (not a clone of a template), mounted
+  into the VM at a known path. Then `session delete` detaches rather than
+  destroys, and `session create --volume <id>` reattaches it to a fresh rootfs
+  booted from the current `default_image`. This also folds in the
+  session-rebase capability (update a running session to a newer image
+  non-destructively = recreate on the new image with the same volume attached),
+  superseding the earlier "split rootfs + data volume" sketch raised against the
+  image-update work. The real work, when a usage signal arrives: a convention for
+  what lands on the volume (the agent's `/workspace` *and* its on-disk session
+  state, so `claude --resume` survives a rootfs swap and the rootfs is genuinely
+  reconstructible - this touches the base image, not just the daemon);
+  single-writer semantics (one ext4 volume mounted by at most one running session
+  at a time); a second verb on the snapshot interface ("create/open volume" as a
+  lineage distinct from "clone template", with detach-on-stop rather than delete);
+  and disk accounting that separates rootfs from volume (the `forkBytes`/quota
+  logic assumes one fork). Stays on-thesis: storage on metal the user owns,
+  nothing hosted or metered, and orthogonal to the job model (a storage
+  attachment, not a fourth trigger), so it does not split "one primitive, many
+  hats."
+
 **Tooling**
 
 - **Lint is blind to `_linux.go` on macOS** - `//go:build linux` files (runc,
