@@ -82,11 +82,27 @@ func TestCheckJobRuntimeSkipsWhenDaemonDown(t *testing.T) {
 
 func TestCheckBaseImageOK(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
-		Status: "ok", Runtime: "firecracker", Snapshot: "ext4", BaseImageAvailable: true,
+		Status: "ok", Runtime: "firecracker", Snapshot: "ext4",
+		BaseImageAvailable: true, BaseImageUpdateChecked: true,
 	})
 	res := CheckBaseImage(sock).Check(context.Background())
 	require.Equal(t, StatusOK, res.Status)
 	require.Nil(t, res.Plan)
+	require.Equal(t, "imported", res.Detail)
+}
+
+// Before the background check finishes (the first moment after a restart), the
+// image is OK but the detail says the freshness check is still running, rather
+// than implying the image is current.
+func TestCheckBaseImagePendingCheck(t *testing.T) {
+	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
+		Status: "ok", Runtime: "firecracker", Snapshot: "ext4",
+		BaseImageAvailable: true, BaseImageUpdateChecked: false,
+	})
+	res := CheckBaseImage(sock).Check(context.Background())
+	require.Equal(t, StatusOK, res.Status)
+	require.Nil(t, res.Plan)
+	require.Contains(t, res.Detail, "checking")
 }
 
 func TestCheckBaseImageNoImageFails(t *testing.T) {
@@ -105,7 +121,7 @@ func TestCheckBaseImageNoImageFails(t *testing.T) {
 func TestCheckBaseImageUpdateWarns(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
 		Status: "ok", Runtime: "firecracker", Snapshot: "ext4",
-		BaseImageAvailable: true, BaseImageUpdateAvailable: true,
+		BaseImageAvailable: true, BaseImageUpdateAvailable: true, BaseImageUpdateChecked: true,
 	})
 	res := CheckBaseImage(sock).Check(context.Background())
 	require.Equal(t, StatusWarn, res.Status)

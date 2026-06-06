@@ -41,4 +41,8 @@ message HealthResponse {
   // base_image_update_available is true when the registry has a newer version of
   // the default image than the imported template (checked in the background).
   bool base_image_update_available = 9;
+  // base_image_update_checked is true once the background update check has run to
+  // completion (success, no-update, or error). It lets a client tell "no update"
+  // apart from "not checked yet" in the brief window right after a restart.
+  bool base_image_update_checked = 10;
 }

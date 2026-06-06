@@ -77,13 +77,27 @@ func checkForUpgrade(ctx context.Context, logger *slog.Logger) {
 	)
 }
 
+// imageUpdateState carries the background image-update check's outcome from Run,
+// which launches the check early (before the network setup in buildServices),
+// into the admin service. available is whether the registry is ahead of the
+// imported template; checked is whether the check has finished, so Health and
+// `fletcher doctor` can tell "no update" apart from "not checked yet" and avoid
+// a misleading all-clear in the brief window right after a restart.
+type imageUpdateState struct {
+	available *atomic.Bool
+	checked   *atomic.Bool
+}
+
 // checkForImageUpdate asks the registry, in the background at boot, whether the
 // default image's imported template is older than the registry's current
-// version. On a positive result it logs a non-fatal hint and flips updated so
+// version. On a positive result it logs a non-fatal hint and flips available so
 // Health (and `fletcher doctor`) can surface it. A local-only image (no recorded
-// registry digest) or any registry error leaves updated false - the daemon must
-// not fail to start because a registry is unreachable.
-func checkForImageUpdate(ctx context.Context, cfg Config, logger *slog.Logger, updated *atomic.Bool) {
+// registry digest) or any registry error leaves available false - the daemon
+// must not fail to start because a registry is unreachable. It always marks
+// checked when done (success, no-update, or error), since it does not retry
+// until the next boot.
+func checkForImageUpdate(ctx context.Context, cfg Config, logger *slog.Logger, state imageUpdateState) {
+	defer state.checked.Store(true)
 	root := cfg.BtrfsRoot
 	if root == "" {
 		root = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
@@ -97,7 +111,7 @@ func checkForImageUpdate(ctx context.Context, cfg Config, logger *slog.Logger, u
 	if !available {
 		return
 	}
-	updated.Store(true)
+	state.available.Store(true)
 	logger.Info("a newer version of the default image is available",
 		slog.String("image", cfg.DefaultImage),
 		slog.String("source", source),
@@ -198,7 +212,14 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	logger = newLogger(cfg.LogLevel) // reflect a log_level setting
 
-	svcs, err := buildServices(ctx, cfg, queries, logger)
+	// Launch the image-update check here, before buildServices does the slower
+	// network setup, so its result is usually ready by the first `fletcher
+	// doctor` after a restart. Run owns the atomics; buildServices wires them
+	// into the admin service so Health reflects them.
+	imageUpdate := imageUpdateState{available: &atomic.Bool{}, checked: &atomic.Bool{}}
+	go checkForImageUpdate(ctx, cfg, logger, imageUpdate)
+
+	svcs, err := buildServices(ctx, cfg, queries, logger, imageUpdate)
 	if err != nil {
 		return err
 	}
@@ -236,7 +257,7 @@ type services struct {
 }
 
 //nolint:funlen // the single construction hub that wires every subsystem; splitting further would scatter the boot sequence
-func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, logger *slog.Logger) (*services, error) {
+func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, logger *slog.Logger, imageUpdate imageUpdateState) (*services, error) {
 	connectLn, err := listenUnix(ctx, cfg.SocketPath)
 	if err != nil {
 		return nil, err
@@ -364,10 +385,10 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 			Runtime:            driverKind(cfg.RuntimeKind),
 			Snapshot:           driverKind(cfg.SnapshotKind),
 			BaseImageAvailable: baseImageAvailable(cfg),
-			BaseImageUpdate:    &atomic.Bool{},
+			BaseImageUpdate:    imageUpdate.available,
+			BaseImageChecked:   imageUpdate.checked,
 		},
 	}
-	go checkForImageUpdate(ctx, cfg, logger, connectDeps.runtimeStatus.BaseImageUpdate)
 
 	connectSrv := newHTTPServer(startedAt.Unix(), connectDeps, logger)
 	remoteSrv := newRemoteServer(remoteLn, peerSvc, connectSrv.Handler)

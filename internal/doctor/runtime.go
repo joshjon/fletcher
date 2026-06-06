@@ -105,6 +105,17 @@ func CheckBaseImage(socketPath string) Checker {
 				Plan:     imageUpdatePlan(),
 			}
 		}
+		if !health.GetBaseImageUpdateChecked() {
+			// The background update check runs at daemon boot and has not finished
+			// yet (the first second or so after a restart). Say so rather than
+			// implying the image is current - the warning may still appear.
+			return Result{
+				Category: CategoryHost,
+				Name:     name,
+				Status:   StatusOK,
+				Detail:   "imported (checking for a newer version)",
+			}
+		}
 		return Result{
 			Category: CategoryHost,
 			Name:     name,

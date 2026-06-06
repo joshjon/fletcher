@@ -33,6 +33,10 @@ type RuntimeStatus struct {
 	// image's template is older than the registry's current version. It may be
 	// nil (no check wired up), which Health reports as no update available.
 	BaseImageUpdate *atomic.Bool
+	// BaseImageChecked is set once that background check has run to completion,
+	// so Health can distinguish "no update" from "not checked yet". It may be nil
+	// (no check wired up), which Health reports as not yet checked.
+	BaseImageChecked *atomic.Bool
 }
 
 // AdminService implements the daemon-administration RPCs (health checks etc.)
@@ -60,6 +64,7 @@ func (s *AdminService) Health(_ context.Context, _ *connect.Request[fletcherv1.H
 		endpoint = s.endpoint.PublicEndpoint()
 	}
 	updateAvailable := s.runtime.BaseImageUpdate != nil && s.runtime.BaseImageUpdate.Load()
+	updateChecked := s.runtime.BaseImageChecked != nil && s.runtime.BaseImageChecked.Load()
 	return connect.NewResponse(&fletcherv1.HealthResponse{
 		Status:                   "ok",
 		Version:                  info.Version,
@@ -70,5 +75,6 @@ func (s *AdminService) Health(_ context.Context, _ *connect.Request[fletcherv1.H
 		Snapshot:                 s.runtime.Snapshot,
 		BaseImageAvailable:       s.runtime.BaseImageAvailable,
 		BaseImageUpdateAvailable: updateAvailable,
+		BaseImageUpdateChecked:   updateChecked,
 	}), nil
 }
