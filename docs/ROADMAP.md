@@ -563,13 +563,88 @@ single-box, daemon-gated, no-route-into-VM-land constraints.
   a busy one keeps running and has its idle clock reset; the count cap refuses
   with a usage report; list shows disk + last-used.
 
+### Milestone 7 - SwiftUI iOS client (the hero) - PLANNED
+
+**Goal.** The native first-party client the product is actually for (DESIGN.md
+§1, §7, §8): from an iPhone, pair to your own box, spin up an isolated VM, drop
+into a terminal running Claude Code inside it, and supervise + approve unattended
+agents - all over the WireGuard tunnel, nothing leaving your network. This
+promotes the former "Native client app" backlog line to a committed milestone:
+durable Claude-Code sessions driven from a phone is *the* wedge (DESIGN.md §8,
+"a beautiful iOS/Mac app is the hardest thing for a bot-shaped competitor to
+copy"), not a someday GUI.
+
+**The substrate is already shipped.** This is a client on top of contracts M4 +
+M6 already expose; the app consumes the daemon, it does not extend it:
+
+- **Remote API over WireGuard (M4).** The remote listener serves the same Connect
+  handler as the local socket (`newRemoteServer(..., connectSrv.Handler)`), so
+  `SessionsService` and `JobsService` are reachable from a paired peer. The phone
+  pairs as a WireGuard peer via the login blob; `AdminService` stays local-socket
+  only.
+- **Interactive terminal as a streaming RPC (M6).** `ShellSession` is
+  bidirectional streaming (`stream ShellSessionRequest` -> `stream
+  ShellSessionResponse`): the in-app terminal pumps that PTY stream (stdin /
+  stdout / resize frames), no SSH client needed. `ProxySession` (also a bidi
+  stream) is there if a raw SSH byte stream is ever wanted instead.
+- **Claude actually runs in those sessions** after the session gateway/env fix
+  (loopback gateway+MCP forwards plus the `/etc/profile.d` env), so an in-app
+  terminal reaches models with no extra wiring.
+- **gRPC is the chosen app transport.** DESIGN.md §9: one handler -> gRPC
+  (SwiftUI), HTTP/JSON (CLI), gRPC-Web (web). Swift stubs generate from the same
+  `.proto` via buf.
+- **Approvals are already modeled** as `pending_approval` SQLite rows that survive
+  reboot, with APNs as the intended push transport (DESIGN.md §5).
+
+**New work (the app, sequenced by dependency).**
+
+1. **Swift client + pairing.** A generated Connect-Swift (or grpc-swift) client;
+   WireGuard on iOS via WireGuardKit / NetworkExtension; consume the login blob
+   (QR-scan the `fletcher login` token). Proven by listing / creating / stopping
+   sessions over the tunnel. Foundation for everything else.
+2. **In-app terminal (the hero interaction).** A SwiftUI terminal over
+   `ShellSession`: attach to a session, run `claude`, detach and reattach.
+   Backgrounding the app never kills the session - durability is server-side
+   (M6), which is the whole point. This is the demo.
+3. **Approvals + APNs push.** Promote APNs from the backlog: the daemon pushes a
+   `pending_approval` to the device; the app approves / denies, resolving the row.
+   Polling is the fallback until this lands.
+4. **Results inbox (DESIGN.md §7, the second surface).** A feed of job-output
+   cards / dashboards ("today's prices", "build finished - preview"). Half of why
+   monitoring use-cases are sticky and what makes a non-technical user open the
+   app daily.
+
+**Dependencies and risks to verify before betting on.**
+
+- **WireGuard on iOS** via WireGuardKit (NetworkExtension entitlement) - the
+  network plane; the daemon already speaks `wireguard-go`.
+- **gRPC bidi streaming from iOS over the tunnel** - confirm Connect-Swift carries
+  `ShellSession` cleanly; the gRPC-Web surface is the fallback if not.
+- **iOS backgrounding** truncates long-lived streams - acceptable by design: the
+  session is durable server-side, so the app detaches and reattaches rather than
+  holding the stream open.
+- **APNs** needs an Apple developer account + push setup; the push goes through
+  Apple's push service (the accepted transport in §5), not infrastructure we
+  operate, so it stays on-thesis.
+- **A remote status/health RPC** may be wanted: `AdminService.Health` is
+  local-socket only today, so the app has no daemon-status call. A small addition
+  if the control panel needs one.
+
+**Deferred within this milestone.** The **Mac app** (shares the Swift client core;
+iOS is the hero, Mac follows). The **web client** (the gRPC-Web surface already
+exists). Multi-account / multi-box switching (one box, one user is the thesis;
+DESIGN.md out-of-scope).
+
 ## Toward v1 - hardening (in progress)
 
-With M1-M6 done, the architecture is feature-complete on the thesis (ephemeral
-jobs + durable interactive sessions, both verified on real hardware). This is the
-short list being worked through before a v1 is a candidate, distinct from the
-"await a usage signal" backlog below. Release *tagging* is done manually by the
-operator and is intentionally not in this list.
+With M1-M6 done, the daemon is feature-complete on the thesis (ephemeral jobs +
+durable interactive sessions, both verified on real hardware), which is what
+makes Milestone 7 (the SwiftUI iOS client - the hero) a client deliverable on a
+finished substrate rather than new backend work. This is the short list being
+worked through before a v1 is a candidate, distinct from the "await a usage
+signal" backlog below; it can run in parallel with M7 since the RPCs M7 needs are
+already shipped. Release *tagging* is done manually by the operator and is
+intentionally not in this list.
 
 - **Cron scheduler (recurring jobs) - DONE.** A `cron` job is a definition that
   rests in a new `scheduled` status; the supervisor fires it when `next_run_at`
@@ -649,8 +724,6 @@ Listed so they are visible, not lost. Items that became milestones are above.
 - **`doctor` runtime-prereq checks** - when runc/btrfs drivers are selected,
   verify the `btrfs`/`runc` binaries and a btrfs snapshot root exist, instead of
   surfacing a raw `command not found` at job time.
-- **Native client app** - the CLI is the only client today; a GUI/native client
-  is a separate deliverable on top of Milestone 4's exposed API.
 - **Settings live hot-reload** - M3 settings apply on restart; the original spec
   also wanted live application (slog level in place, bounce the network actor for
   endpoint/port changes) so some changes need no restart at all.
