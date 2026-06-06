@@ -142,7 +142,7 @@ if command -v systemctl >/dev/null 2>&1; then
 		log "fletcher is running; restarting to pick up the new binary"
 		systemctl restart fletcher
 	else
-		log "installed. start with: sudo systemctl enable --now fletcher"
+		log "installed. start with: fletcher daemon enable"
 	fi
 else
 	log "installed. start with: ${PREFIX}/bin/fletcher serve"
