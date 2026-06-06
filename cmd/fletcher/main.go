@@ -50,8 +50,9 @@ func newApp() *cli.Command {
 		// --remote/--token to target a daemon over the tunnel.
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:  "remote",
-				Usage: "drive a remote daemon at host:port over the tunnel instead of the local socket",
+				Name:    "remote",
+				Sources: cli.EnvVars("FLETCHER_REMOTE"),
+				Usage:   "drive a remote daemon at host:port over the tunnel instead of the local socket",
 			},
 			&cli.StringFlag{
 				Name:    "token",
@@ -73,6 +74,8 @@ func newApp() *cli.Command {
 			secretCmd(),
 			approvalCmd(),
 			peerCmd(),
+			loginCmd(),
+			logoutCmd(),
 			versionCmd(),
 		},
 	}

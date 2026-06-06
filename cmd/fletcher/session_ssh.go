@@ -136,11 +136,11 @@ func setupSessionSSH(ctx context.Context, cmd *cli.Command, ref string) error {
 // fletcherSSHDir is where Fletcher keeps its managed SSH keypair, known_hosts,
 // and config include.
 func fletcherSSHDir() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := fletcherConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "fletcher", "ssh"), nil
+	return filepath.Join(dir, "ssh"), nil
 }
 
 // ensureSSHKeypair returns the managed public key, generating the keypair on

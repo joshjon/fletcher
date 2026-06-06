@@ -153,9 +153,10 @@ fletcher peer pair phone
 
 This outputs (each secret shown exactly once):
 - A summary line (`paired phone, address: 10.99.0.2/32, endpoint: ...`)
-- An **API token** plus the `fletcher --remote <host:port> --token <token> ...`
-  line that device uses to drive the daemon over the tunnel (see
-  "Driving the daemon from another device" below)
+- An **API token** - shown both as a ready-to-paste `fletcher login <token>`
+  line (the easy path) and as the equivalent `fletcher --remote <host:port>
+  --token <token>` flags - that a device uses to drive the daemon over the
+  tunnel (see "Driving the daemon from another device" below)
 - The full `wg-quick` configuration text
 - A QR code (in the terminal) encoding the same config
 
@@ -332,16 +333,27 @@ You need three things on the device:
 
 1. **It's paired.** Run `fletcher peer pair laptop` on the server (see
    [Pair your first device](#pair-your-first-device)); the output includes the
-   WireGuard config, an **API token**, and a ready-made
-   `fletcher --remote <addr> --token <token>` line.
+   WireGuard config and a ready-to-paste `fletcher login <token>` line.
 2. **The tunnel is up.** Import that WireGuard config on the device and connect,
    so it can reach the daemon's tunnel address `10.99.0.1`.
 3. **The `fletcher` CLI.** It's the same binary; the client half runs anywhere.
    There's no macOS release yet, so on a Mac build it from source (`make build`)
    and use `./bin/fletcher`.
 
-Then point any command at the remote daemon (the token can also come from the
-`FLETCHER_TOKEN` environment variable):
+**Log in once, then just use `fletcher`.** Paste the `fletcher login <token>`
+line from the pair output on the device:
+
+```sh
+fletcher login <token>          # verifies, then saves to ~/.config/fletcher/config.toml (0600)
+fletcher health                 # -> status: ok  (now targets the remote daemon)
+fletcher session list
+fletcher logout                 # forget the remote; revert to the local socket
+```
+
+`login` makes the remote the default target for every command, so you don't
+repeat the address and token. For one-off commands or CI you can still pass them
+explicitly (or via the `FLETCHER_REMOTE` / `FLETCHER_TOKEN` env vars), which
+override the stored login:
 
 ```sh
 fletcher --remote 10.99.0.1:11700 --token <token> health     # -> status: ok

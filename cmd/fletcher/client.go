@@ -27,13 +27,30 @@ func unixHTTPClient(socket string) *http.Client {
 
 const unixBaseURL = "http://unix"
 
+// resolveRemote applies the target precedence for driving the daemon: explicit
+// --remote/--token flags and the FLETCHER_REMOTE/FLETCHER_TOKEN env vars
+// (resolved by urfave/cli) win; otherwise the stored `fletcher login` config is
+// used. An empty remote means "use the local Unix socket".
+func resolveRemote(cmd *cli.Command) (remote, token string) {
+	remote, token = cmd.String("remote"), cmd.String("token")
+	if remote == "" {
+		if cfg := loadClientConfig(); cfg.Remote != "" {
+			remote = cfg.Remote
+			if token == "" {
+				token = cfg.Token
+			}
+		}
+	}
+	return remote, token
+}
+
 // clientTarget resolves where Connect clients should talk to: a remote daemon
-// over the tunnel (`--remote host:port --token ...`, sending a bearer token) or
-// the local Unix socket (`--socket`, the default).
+// over the tunnel (sending a bearer token) or the local Unix socket (`--socket`,
+// the default). The remote target comes from flags, env, or `fletcher login`.
 func clientTarget(cmd *cli.Command) (connect.HTTPClient, string, []connect.ClientOption) {
-	if remote := cmd.String("remote"); remote != "" {
+	if remote, token := resolveRemote(cmd); remote != "" {
 		return &http.Client{}, "http://" + remote,
-			[]connect.ClientOption{connect.WithInterceptors(bearerAuthInterceptor(cmd.String("token")))}
+			[]connect.ClientOption{connect.WithInterceptors(bearerAuthInterceptor(token))}
 	}
 	return unixHTTPClient(cmd.String("socket")), unixBaseURL, nil
 }
@@ -71,10 +88,10 @@ func newModelsClient(cmd *cli.Command) fletcherv1connect.ModelServiceClient {
 // daemon serves the session API over h2c, so prior-knowledge HTTP/2 here lets
 // both the unary verbs and the shell share one transport.
 func newSessionsClient(cmd *cli.Command) fletcherv1connect.SessionServiceClient {
-	if remote := cmd.String("remote"); remote != "" {
+	if remote, token := resolveRemote(cmd); remote != "" {
 		hc := h2cClient("tcp", remote)
 		return fletcherv1connect.NewSessionServiceClient(hc, "http://"+remote,
-			connect.WithInterceptors(bearerInterceptor{token: cmd.String("token")}))
+			connect.WithInterceptors(bearerInterceptor{token: token}))
 	}
 	hc := h2cClient("unix", cmd.String("socket"))
 	return fletcherv1connect.NewSessionServiceClient(hc, unixBaseURL)
