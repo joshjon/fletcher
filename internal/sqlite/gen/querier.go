@@ -16,11 +16,14 @@ type Querier interface {
 	CountJobs(ctx context.Context) (int64, error)
 	CountJobsByStatus(ctx context.Context, status string) (int64, error)
 	CountPeers(ctx context.Context) (int64, error)
+	CountSessions(ctx context.Context) (int64, error)
 	CreateApproval(ctx context.Context, arg CreateApprovalParams) (PendingApproval, error)
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
 	CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	DeletePeer(ctx context.Context, id string) (int64, error)
 	DeleteSecret(ctx context.Context, name string) (int64, error)
+	DeleteSession(ctx context.Context, id string) (int64, error)
 	DeleteSetting(ctx context.Context, key string) (int64, error)
 	DenyApproval(ctx context.Context, arg DenyApprovalParams) (int64, error)
 	ExpirePendingApprovals(ctx context.Context, arg ExpirePendingApprovalsParams) (int64, error)
@@ -30,17 +33,21 @@ type Querier interface {
 	GetPeerByAPITokenHash(ctx context.Context, apiTokenHash *string) (Peer, error)
 	GetPeerByName(ctx context.Context, name string) (Peer, error)
 	GetSecret(ctx context.Context, name string) ([]byte, error)
+	GetSessionByRef(ctx context.Context, ref string) (Session, error)
 	ListApprovals(ctx context.Context, arg ListApprovalsParams) ([]PendingApproval, error)
 	ListApprovalsByStatus(ctx context.Context, arg ListApprovalsByStatusParams) ([]PendingApproval, error)
 	ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, error)
 	ListJobsByStatus(ctx context.Context, arg ListJobsByStatusParams) ([]Job, error)
 	ListPeers(ctx context.Context, arg ListPeersParams) ([]Peer, error)
 	ListSecretMetadata(ctx context.Context) ([]ListSecretMetadataRow, error)
+	ListSessions(ctx context.Context) ([]Session, error)
 	ListSettings(ctx context.Context) ([]Setting, error)
 	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) error
 	MarkJobStarted(ctx context.Context, arg MarkJobStartedParams) error
 	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) error
+	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
+	UpdateSessionState(ctx context.Context, arg UpdateSessionStateParams) error
 	UpsertSecret(ctx context.Context, arg UpsertSecretParams) error
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) error
 }

@@ -49,6 +49,18 @@ type Secret struct {
 	UpdatedAt  int64
 }
 
+type Session struct {
+	ID         string
+	Name       string
+	Image      string
+	State      string
+	ForkID     string
+	ForkPath   string
+	CreatedAt  int64
+	UpdatedAt  int64
+	LastUsedAt *int64
+}
+
 type Setting struct {
 	Key       string
 	Value     string

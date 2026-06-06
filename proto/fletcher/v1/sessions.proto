@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// SessionService manages durable, interactive sessions: a session is a
+// persistent microVM whose fork (its disk) survives stop/start, unlike an
+// ephemeral job. It shares the runtime and snapshot machinery with jobs (one
+// execution engine, DESIGN.md §4) but has its own start/stop/exec lifecycle.
+service SessionService {
+  // CreateSession provisions a session's persistent fork and boots its VM. The
+  // returned session has state RUNNING.
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse) {}
+  // GetSession fetches a session by ID or name.
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse) {}
+  // ListSessions returns all sessions, newest first.
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse) {}
+  // StartSession boots a stopped session's VM against its persisted fork.
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse) {}
+  // StopSession stops a running session's VM, keeping its fork on disk.
+  rpc StopSession(StopSessionRequest) returns (StopSessionResponse) {}
+  // DeleteSession stops the VM (if running) and destroys the fork.
+  rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse) {}
+  // ExecSession runs a command inside a running session and returns its
+  // captured output and exit code.
+  rpc ExecSession(ExecSessionRequest) returns (ExecSessionResponse) {}
+}
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_RUNNING = 1;
+  SESSION_STATE_STOPPED = 2;
+}
+
+message Session {
+  string id = 1;
+  string name = 2;
+  string image = 3;
+  SessionState state = 4;
+  // Unix epoch seconds.
+  int64 created_at = 5;
+  int64 updated_at = 6;
+  optional int64 last_used_at = 7;
+}
+
+message CreateSessionRequest {
+  string name = 1;
+  string image = 2;
+}
+
+message CreateSessionResponse {
+  Session session = 1;
+}
+
+message GetSessionRequest {
+  // ref is a session ID or name.
+  string ref = 1;
+}
+
+message GetSessionResponse {
+  Session session = 1;
+}
+
+message ListSessionsRequest {}
+
+message ListSessionsResponse {
+  repeated Session sessions = 1;
+}
+
+message StartSessionRequest {
+  string ref = 1;
+}
+
+message StartSessionResponse {
+  Session session = 1;
+}
+
+message StopSessionRequest {
+  string ref = 1;
+}
+
+message StopSessionResponse {
+  Session session = 1;
+}
+
+message DeleteSessionRequest {
+  string ref = 1;
+}
+
+message DeleteSessionResponse {
+  bool deleted = 1;
+}
+
+message ExecSessionRequest {
+  string ref = 1;
+  string command = 2;
+}
+
+message ExecSessionResponse {
+  string stdout = 1;
+  string stderr = 2;
+  int32 exit_code = 3;
+}
