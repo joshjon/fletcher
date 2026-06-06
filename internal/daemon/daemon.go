@@ -120,6 +120,9 @@ type Config struct {
 	SessionMaxCount int
 	// SessionMaxDiskGB caps total session disk in GB; 0 disables the cap.
 	SessionMaxDiskGB int
+	// DefaultImage is the base image used by job/session create when --image is
+	// omitted; empty makes --image required. Settings-managed (default_image).
+	DefaultImage string
 }
 
 // Defaults for the session settings, applied when not explicitly set.
@@ -127,6 +130,7 @@ const (
 	defaultSessionIdleTimeout = 30 * time.Minute
 	defaultSessionMaxCount    = 10
 	defaultSessionMaxDiskGB   = 50
+	defaultDefaultImage       = "fletcher-base"
 )
 
 // shutdownTimeout caps how long the daemon waits for in-flight work before
@@ -309,13 +313,14 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		IdleTimeout:  cfg.SessionIdleTimeout,
 		MaxCount:     cfg.SessionMaxCount,
 		MaxDiskBytes: int64(cfg.SessionMaxDiskGB) << 30,
+		DefaultImage: cfg.DefaultImage,
 	})
 	if err := sessionMgr.ReconcileOnBoot(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile sessions: %w", err)
 	}
 
 	connectDeps := connectDeps{
-		jobs:             job.NewService(queries, supervisor),
+		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage),
 		sessions:         sessionMgr,
 		secrets:          secretsStore,
 		approvals:        approvalSvc,
@@ -766,6 +771,7 @@ func settingsDefaults(cfg Config) map[string]string {
 		settings.KeySessionIdleTimeout: sessionIdleTimeoutString(cfg.SessionIdleTimeout),
 		settings.KeySessionMaxCount:    strconv.Itoa(cfg.SessionMaxCount),
 		settings.KeySessionMaxDiskGB:   strconv.Itoa(cfg.SessionMaxDiskGB),
+		settings.KeyDefaultImage:       cfg.DefaultImage,
 	}
 }
 
@@ -818,6 +824,7 @@ func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logg
 	cfg.SessionIdleTimeout = defaultSessionIdleTimeout
 	cfg.SessionMaxCount = defaultSessionMaxCount
 	cfg.SessionMaxDiskGB = defaultSessionMaxDiskGB
+	cfg.DefaultImage = defaultDefaultImage
 
 	vals, err := store.Values(ctx)
 	if err != nil {
@@ -863,6 +870,8 @@ func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logg
 			if n, perr := strconv.Atoi(v); perr == nil {
 				cfg.SessionMaxDiskGB = n
 			}
+		case settings.KeyDefaultImage:
+			cfg.DefaultImage = v
 		default:
 			continue // unknown key persisted by an older/newer version; ignore
 		}

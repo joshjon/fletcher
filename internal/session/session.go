@@ -62,6 +62,9 @@ type Options struct {
 	MaxCount int
 	// MaxDiskBytes caps total session disk; 0 disables the cap.
 	MaxDiskBytes int64
+	// DefaultImage is used when a session is created with no image; empty makes
+	// the image required.
+	DefaultImage string
 }
 
 // idleLoadThreshold is the guest 1-minute load average below which a session
@@ -122,6 +125,9 @@ func (m *Manager) Create(ctx context.Context, name, image string) (Session, erro
 	}
 	if strings.TrimSpace(name) == "" {
 		return Session{}, errs.New(errs.CategoryInvalidArgument, "name is required")
+	}
+	if strings.TrimSpace(image) == "" {
+		image = m.opts.DefaultImage
 	}
 	if strings.TrimSpace(image) == "" {
 		return Session{}, errs.New(errs.CategoryInvalidArgument, "image is required")

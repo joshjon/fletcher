@@ -14,13 +14,17 @@ import (
 )
 
 func newService(t *testing.T) *job.Service {
+	return newServiceWithDefaultImage(t, "fletcher-base")
+}
+
+func newServiceWithDefaultImage(t *testing.T, defaultImage string) *job.Service {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "fletcher.db")
 	db, err := sqlite.Open(context.Background(), dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
-	return job.NewService(sqliteq.New(db), nil)
+	return job.NewService(sqliteq.New(db), nil, defaultImage)
 }
 
 func TestCreateAndGetJobRoundTrip(t *testing.T) {
@@ -58,7 +62,6 @@ func TestCreateValidatesRequiredFields(t *testing.T) {
 	}{
 		{"missing trigger", job.CreateParams{Name: "x", Command: "x", Image: "x"}},
 		{"missing command", job.CreateParams{Trigger: job.TriggerEphemeral, Name: "x", Image: "x"}},
-		{"missing image", job.CreateParams{Trigger: job.TriggerEphemeral, Name: "x", Command: "x"}},
 		{"invalid trigger", job.CreateParams{Trigger: "nonsense", Name: "x", Command: "x", Image: "x"}},
 		{"cron without schedule", job.CreateParams{Trigger: job.TriggerCron, Name: "x", Command: "x", Image: "x"}},
 		{"cron with bad schedule", job.CreateParams{Trigger: job.TriggerCron, Name: "x", Command: "x", Image: "x", Schedule: "not a cron"}},
@@ -70,6 +73,25 @@ func TestCreateValidatesRequiredFields(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestCreateDefaultsImage(t *testing.T) {
+	svc := newServiceWithDefaultImage(t, "my-base")
+	created, err := svc.Create(context.Background(), job.CreateParams{
+		Trigger: job.TriggerEphemeral,
+		Command: "echo hi",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "my-base", created.Image, "image defaults to the configured default")
+}
+
+func TestCreateRequiresImageWhenNoDefault(t *testing.T) {
+	svc := newServiceWithDefaultImage(t, "") // no default configured
+	_, err := svc.Create(context.Background(), job.CreateParams{
+		Trigger: job.TriggerEphemeral,
+		Command: "echo hi",
+	})
+	require.Error(t, err)
 }
 
 func TestCreateDefaultsNameFromCommand(t *testing.T) {

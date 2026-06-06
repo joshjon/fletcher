@@ -98,19 +98,27 @@ type Coordinator interface {
 
 // Service is the high-level façade over the jobs storage layer.
 type Service struct {
-	q   sqliteq.Querier
-	sup Coordinator
+	q            sqliteq.Querier
+	sup          Coordinator
+	defaultImage string
 }
 
 // NewService wires a Service to a sqlc-generated querier (anything that
 // satisfies sqliteq.Querier - *sqliteq.Queries in prod, a fake in tests).
 // The supervisor argument may be nil for tests that only exercise CRUD.
-func NewService(q sqliteq.Querier, sup Coordinator) *Service {
-	return &Service{q: q, sup: sup}
+// defaultImage is used when a job is created with no image (empty makes the
+// image required).
+func NewService(q sqliteq.Querier, sup Coordinator, defaultImage string) *Service {
+	return &Service{q: q, sup: sup, defaultImage: defaultImage}
 }
 
 // Create validates inputs, generates a typeid, and inserts a new queued job.
 func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
+	// Fall back to the configured default image when none is given, before
+	// validation (which still rejects an empty image when no default is set).
+	if strings.TrimSpace(p.Image) == "" {
+		p.Image = s.defaultImage
+	}
 	if err := p.validate(); err != nil {
 		return Job{}, err
 	}

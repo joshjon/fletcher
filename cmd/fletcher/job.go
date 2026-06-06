@@ -40,7 +40,7 @@ func jobCreateCmd() *cli.Command {
 			outputFlag(),
 			&cli.StringFlag{Name: "name", Usage: "human-readable job name (default: the command's program name)"},
 			&cli.StringFlag{Name: "command", Usage: "command to run inside the job environment", Required: true},
-			&cli.StringFlag{Name: "image", Value: "fletcher-base", Usage: "image / environment spec"},
+			&cli.StringFlag{Name: "image", Usage: "image / environment spec (default: the daemon's default_image setting)"},
 			&cli.StringFlag{
 				Name:  "trigger",
 				Value: "ephemeral",

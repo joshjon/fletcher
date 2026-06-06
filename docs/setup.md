@@ -301,7 +301,9 @@ fletcher settings unset log_level        # revert to the flag/env default
 
 Settable keys include `runtime`, `snapshot`, `btrfs_root`, `public_endpoint`,
 `wireguard_port`, `no_upnp`, `gateway_listen`, `mcp_listen`, `log_level`,
-`credentials_dir`, and the session limits `session_idle_timeout`,
+`credentials_dir`, `default_image` (the base image `job`/`session create` use
+when `--image` is omitted; `fletcher-base` out of the box, set empty to make
+`--image` required), and the session limits `session_idle_timeout`,
 `session_max_count`, and `session_max_disk_gb` (see [Durable
 sessions](#durable-sessions-persistent-workspaces-you-can-ssh-into)). Only
 bootstrap config - where the database, socket, and age key live - stays in the
@@ -424,9 +426,9 @@ Running an agent needs a base-image rootfs. For the Firecracker default:
 2. Give the daemon an Anthropic key so the gateway can reach models:
    `fletcher secret set anthropic_api_key sk-ant-...`.
 3. Run an agent as a job: `fletcher job create --command "claude -p 'say hi'"`.
-   `--image` defaults to `fletcher-base` and `--name` defaults to the command's
-   program name (here, `claude`), so only `--command` is required; pass `--image`
-   / `--name` to override.
+   `--image` defaults to the `default_image` setting (`fletcher-base` out of the
+   box) and `--name` defaults to the command's program name (here, `claude`), so
+   only `--command` is required; pass `--image` / `--name` to override.
 
 The agent runs inside the microVM, reaches Anthropic only through the daemon
 gateway (the key never enters the VM), and has no other network egress. Browse

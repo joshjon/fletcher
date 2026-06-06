@@ -35,6 +35,8 @@ const (
 	KeySessionIdleTimeout = "session_idle_timeout"
 	KeySessionMaxCount    = "session_max_count"
 	KeySessionMaxDiskGB   = "session_max_disk_gb"
+
+	KeyDefaultImage = "default_image"
 )
 
 // definition describes a settable key: its help text and an optional validator.
@@ -58,6 +60,7 @@ var registry = []definition{
 	{KeySessionIdleTimeout, "auto-stop a session idle (no work in flight) this long, e.g. 30m; 0 disables", durationOrZero},
 	{KeySessionMaxCount, "maximum number of sessions; 0 disables the cap", nonNegInt},
 	{KeySessionMaxDiskGB, "maximum total session disk in GB; 0 disables the cap", nonNegInt},
+	{KeyDefaultImage, "base image used by `job`/`session create` when --image is omitted; empty makes --image required", nil},
 }
 
 // View is one setting's full picture for `fletcher settings list`.
