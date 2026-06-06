@@ -215,6 +215,7 @@ func writeSessionDetails(w io.Writer, s *fletcherv1.Session) error {
 	fmt.Fprintf(tw, "name:\t%s\n", s.GetName())
 	fmt.Fprintf(tw, "state:\t%s\n", coloredSessionState(s.GetState()))
 	fmt.Fprintf(tw, "image:\t%s\n", s.GetImage())
+	fmt.Fprintf(tw, "disk:\t%s\n", humanBytes(s.GetDiskBytes()))
 	fmt.Fprintf(tw, "created_at:\t%s\n", formatUnix(s.GetCreatedAt()))
 	fmt.Fprintf(tw, "updated_at:\t%s\n", formatUnix(s.GetUpdatedAt()))
 	if s.LastUsedAt != nil {
@@ -223,16 +224,35 @@ func writeSessionDetails(w io.Writer, s *fletcherv1.Session) error {
 	return tw.Flush()
 }
 
+// humanBytes renders a byte count as a compact human-readable size.
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for v := n / unit; v >= unit; v /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
 func writeSessionsTable(w io.Writer, sessions []*fletcherv1.Session) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tSTATE\tIMAGE\tCREATED")
+	fmt.Fprintln(tw, "ID\tNAME\tSTATE\tIMAGE\tDISK\tLAST USED")
 	for _, s := range sessions {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		lastUsed := "-"
+		if s.LastUsedAt != nil {
+			lastUsed = formatUnix(s.GetLastUsedAt())
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			s.GetId(),
 			s.GetName(),
 			coloredSessionState(s.GetState()),
 			s.GetImage(),
-			formatUnix(s.GetCreatedAt()),
+			humanBytes(s.GetDiskBytes()),
+			lastUsed,
 		)
 	}
 	if err := tw.Flush(); err != nil {

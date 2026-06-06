@@ -113,7 +113,21 @@ type Config struct {
 	// at startup. Useful when running behind a router known to mishandle
 	// UPnP, or in test environments. Default false (UPnP enabled).
 	DisableUPnP bool
+	// SessionIdleTimeout auto-stops a session idle (no work in flight) this
+	// long; 0 disables the reaper. Settings-managed (session_idle_timeout).
+	SessionIdleTimeout time.Duration
+	// SessionMaxCount caps the number of sessions; 0 disables the cap.
+	SessionMaxCount int
+	// SessionMaxDiskGB caps total session disk in GB; 0 disables the cap.
+	SessionMaxDiskGB int
 }
+
+// Defaults for the session settings, applied when not explicitly set.
+const (
+	defaultSessionIdleTimeout = 30 * time.Minute
+	defaultSessionMaxCount    = 10
+	defaultSessionMaxDiskGB   = 50
+)
 
 // shutdownTimeout caps how long the daemon waits for in-flight work before
 // forcing exit. Matches STANDARDS.md.
@@ -168,6 +182,7 @@ func Run(ctx context.Context, cfg Config) error {
 type services struct {
 	cfg            Config
 	supervisor     *job.Supervisor
+	sessions       *session.Manager
 	connectSrv     *http.Server
 	gatewaySrv     *http.Server
 	mcpSrv         *http.Server
@@ -290,7 +305,11 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	// runtime (firecracker) implements runtime.SessionRuntime; other runtimes
 	// leave it nil and session lifecycle calls return a clear error.
 	sessionRuntime, _ := rtDriver.(runtime.SessionRuntime)
-	sessionMgr := session.NewManager(queries, snapDriver, sessionRuntime, agentEnv, logger)
+	sessionMgr := session.NewManager(queries, snapDriver, sessionRuntime, agentEnv, logger, session.Options{
+		IdleTimeout:  cfg.SessionIdleTimeout,
+		MaxCount:     cfg.SessionMaxCount,
+		MaxDiskBytes: int64(cfg.SessionMaxDiskGB) << 30,
+	})
 	if err := sessionMgr.ReconcileOnBoot(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile sessions: %w", err)
 	}
@@ -314,6 +333,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	return &services{
 		cfg:            cfg,
 		supervisor:     supervisor,
+		sessions:       sessionMgr,
 		connectSrv:     connectSrv,
 		gatewaySrv:     newGatewayHTTPServer(gw),
 		mcpSrv:         newMCPHTTPServer(mcpServer),
@@ -406,11 +426,44 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 		g.Add(httpServeActor(logger, "remote-api", s.remoteSrv, s.remoteLn, "http://"+s.remoteAddr))
 	}
 	g.Add(supervisorActor(ctx, s.supervisor))
+	if s.cfg.SessionIdleTimeout > 0 {
+		g.Add(sessionReaperActor(ctx, logger, s.sessions, s.cfg.SessionIdleTimeout))
+	}
 	if s.tunnel != nil {
 		g.Add(tunnelActor(ctx, logger, s.tunnel))
 	}
 	g.Add(signalActor(ctx))
 	return g.Run()
+}
+
+// sessionReaperActor periodically hibernates idle sessions (no work in flight)
+// to reclaim host RAM. The tick is the idle timeout capped to a sane range, so
+// a session is stopped within roughly one timeout of going idle.
+func sessionReaperActor(ctx context.Context, logger *slog.Logger, mgr *session.Manager, idleTimeout time.Duration) (func() error, func(error)) {
+	interval := idleTimeout / 2
+	if interval < time.Minute {
+		interval = time.Minute
+	}
+	if interval > 10*time.Minute {
+		interval = 10 * time.Minute
+	}
+	reapCtx, cancel := context.WithCancel(ctx)
+	return func() error {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-reapCtx.Done():
+					return nil
+				case <-ticker.C:
+					if _, err := mgr.ReapIdle(reapCtx); err != nil {
+						logger.Warn("session idle reaper", slog.String("err", err.Error()))
+					}
+				}
+			}
+		}, func(error) {
+			cancel()
+		}
 }
 
 // tunnelActor keeps the WireGuard interface alive until the run group
@@ -692,17 +745,29 @@ func settingsDefaults(cfg Config) map[string]string {
 		btrfsRoot = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
 	}
 	return map[string]string{
-		settings.KeyRuntime:        cfg.RuntimeKind,
-		settings.KeySnapshot:       cfg.SnapshotKind,
-		settings.KeyBtrfsRoot:      btrfsRoot,
-		settings.KeyPublicEndpoint: cfg.PublicEndpoint,
-		settings.KeyWireGuardPort:  strconv.Itoa(cfg.WireGuardListenPort),
-		settings.KeyLogLevel:       cfg.LogLevel,
-		settings.KeyCredentialsDir: cfg.CredentialsDir,
-		settings.KeyNoUPnP:         strconv.FormatBool(cfg.DisableUPnP),
-		settings.KeyGatewayListen:  cfg.GatewayListenAddr,
-		settings.KeyMCPListen:      cfg.MCPListenAddr,
+		settings.KeyRuntime:            cfg.RuntimeKind,
+		settings.KeySnapshot:           cfg.SnapshotKind,
+		settings.KeyBtrfsRoot:          btrfsRoot,
+		settings.KeyPublicEndpoint:     cfg.PublicEndpoint,
+		settings.KeyWireGuardPort:      strconv.Itoa(cfg.WireGuardListenPort),
+		settings.KeyLogLevel:           cfg.LogLevel,
+		settings.KeyCredentialsDir:     cfg.CredentialsDir,
+		settings.KeyNoUPnP:             strconv.FormatBool(cfg.DisableUPnP),
+		settings.KeyGatewayListen:      cfg.GatewayListenAddr,
+		settings.KeyMCPListen:          cfg.MCPListenAddr,
+		settings.KeySessionIdleTimeout: sessionIdleTimeoutString(cfg.SessionIdleTimeout),
+		settings.KeySessionMaxCount:    strconv.Itoa(cfg.SessionMaxCount),
+		settings.KeySessionMaxDiskGB:   strconv.Itoa(cfg.SessionMaxDiskGB),
 	}
+}
+
+// sessionIdleTimeoutString renders the idle timeout for display, showing "0"
+// (rather than "0s") when the reaper is disabled.
+func sessionIdleTimeoutString(d time.Duration) string {
+	if d <= 0 {
+		return "0"
+	}
+	return d.String()
 }
 
 // buildSnapshotDriver constructs the snapshot.Driver chosen by cfg. The
@@ -740,6 +805,12 @@ func buildSnapshotDriver(cfg Config) (snapshot.Driver, error) {
 // `fletcher settings set` overrides the flag/env default. Bootstrap config
 // (database, socket, age key, listen addresses) is not settable and untouched.
 func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logger *slog.Logger) error {
+	// Session settings have no CLI flag; seed their defaults so a stored value
+	// (including an explicit 0 to disable) overrides and absence keeps the default.
+	cfg.SessionIdleTimeout = defaultSessionIdleTimeout
+	cfg.SessionMaxCount = defaultSessionMaxCount
+	cfg.SessionMaxDiskGB = defaultSessionMaxDiskGB
+
 	vals, err := store.Values(ctx)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
@@ -770,6 +841,20 @@ func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logg
 			cfg.GatewayListenAddr = v
 		case settings.KeyMCPListen:
 			cfg.MCPListenAddr = v
+		case settings.KeySessionIdleTimeout:
+			if v == "0" {
+				cfg.SessionIdleTimeout = 0
+			} else if d, perr := time.ParseDuration(v); perr == nil {
+				cfg.SessionIdleTimeout = d
+			}
+		case settings.KeySessionMaxCount:
+			if n, perr := strconv.Atoi(v); perr == nil {
+				cfg.SessionMaxCount = n
+			}
+		case settings.KeySessionMaxDiskGB:
+			if n, perr := strconv.Atoi(v); perr == nil {
+				cfg.SessionMaxDiskGB = n
+			}
 		default:
 			continue // unknown key persisted by an older/newer version; ignore
 		}

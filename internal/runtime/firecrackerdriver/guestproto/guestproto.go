@@ -79,7 +79,27 @@ const (
 	// the connection is full-duplex: the host sends KindStdin/KindResize frames
 	// and the guest sends KindStdout frames, then one KindExit.
 	RequestShell RequestKind = "shell"
+	// RequestStat asks the guest for a liveness sample (Stat); the host uses it
+	// to tell a working session from an idle one before auto-stopping.
+	RequestStat RequestKind = "stat"
 )
+
+// Stat is the guest's liveness sample, returned for a RequestStat.
+type Stat struct {
+	// Load1 is the 1-minute load average: a proxy for in-guest work in flight
+	// (an agent or task running even with no host connection attached).
+	Load1 float64 `json:"load1"`
+}
+
+// WriteStat sends a Stat as a length-prefixed JSON message.
+func WriteStat(w io.Writer, stat Stat) error { return writeJSON(w, stat) }
+
+// ReadStat reads a Stat written by WriteStat.
+func ReadStat(r io.Reader) (Stat, error) {
+	var stat Stat
+	err := readJSON(r, &stat)
+	return stat, err
+}
 
 // ShellSpec parameterises an interactive PTY session.
 type ShellSpec struct {

@@ -49,6 +49,9 @@ type SessionHandle interface {
 	// vsock). The caller proxies an SSH connection through it; the VM needs no
 	// network route. The caller closes the returned conn.
 	DialSSH(ctx context.Context) (net.Conn, error)
+	// Load returns the guest's 1-minute load average, a proxy for in-guest work
+	// in flight. Used to avoid auto-stopping a session whose task is running.
+	Load(ctx context.Context) (float64, error)
 	// Stop shuts the VM down cleanly. The fork on disk is untouched.
 	Stop(ctx context.Context) error
 }

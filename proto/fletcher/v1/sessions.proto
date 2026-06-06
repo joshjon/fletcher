@@ -53,6 +53,8 @@ message Session {
   int64 created_at = 5;
   int64 updated_at = 6;
   optional int64 last_used_at = 7;
+  // disk_bytes is the session fork's on-disk size.
+  int64 disk_bytes = 8;
 }
 
 message CreateSessionRequest {

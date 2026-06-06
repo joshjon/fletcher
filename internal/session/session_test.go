@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -55,13 +56,14 @@ type fakeRuntime struct {
 	started   []string // rootfs paths, in order
 	handles   []*fakeHandle
 	discarded int
+	nextLoad  float64 // load stamped on handles the next StartSession hands out
 }
 
 func (r *fakeRuntime) StartSession(_ context.Context, spec runtime.SessionSpec) (runtime.SessionHandle, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.started = append(r.started, spec.RootfsPath)
-	h := &fakeHandle{}
+	h := &fakeHandle{load: r.nextLoad}
 	r.handles = append(r.handles, h)
 	return h, nil
 }
@@ -77,6 +79,7 @@ func (r *fakeRuntime) DiscardSession(_ context.Context, _ string) error {
 type fakeHandle struct {
 	execs   []string
 	stopped int
+	load    float64
 }
 
 func (h *fakeHandle) Exec(_ context.Context, spec runtime.Spec, stdout, _ io.Writer) (runtime.Result, error) {
@@ -95,6 +98,10 @@ func (h *fakeHandle) DialSSH(_ context.Context) (net.Conn, error) {
 	return c, nil
 }
 
+func (h *fakeHandle) Load(_ context.Context) (float64, error) {
+	return h.load, nil
+}
+
 func (h *fakeHandle) Stop(_ context.Context) error {
 	h.stopped++
 	return nil
@@ -108,7 +115,18 @@ func newManager(t *testing.T, rt runtime.SessionRuntime, snap snapshot.Driver) *
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return session.NewManager(sqliteq.New(db), snap, rt, nil, logger)
+	return session.NewManager(sqliteq.New(db), snap, rt, nil, logger, session.Options{})
+}
+
+func newManagerWithOpts(t *testing.T, rt runtime.SessionRuntime, snap snapshot.Driver, opts session.Options) *session.Manager {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "fletcher.db")
+	db, err := sqlite.Open(context.Background(), dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, sqlite.Migrate(db))
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return session.NewManager(sqliteq.New(db), snap, rt, nil, logger, opts)
 }
 
 func TestCreateBootsAndRecords(t *testing.T) {
@@ -224,6 +242,64 @@ func TestReconcileOnBootResetsRunning(t *testing.T) {
 	got, err := mgr.Get(ctx, "dev")
 	require.NoError(t, err)
 	require.Equal(t, session.StateStopped, got.State)
+}
+
+func TestCreateRefusedAtCountCap(t *testing.T) {
+	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{MaxCount: 1})
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "a", "ubuntu")
+	require.NoError(t, err)
+	_, err = mgr.Create(ctx, "b", "ubuntu")
+	require.Error(t, err)
+	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
+}
+
+func TestReapIdleStopsIdleSession(t *testing.T) {
+	rt := &fakeRuntime{} // handles report load 0 (idle)
+	mgr := newManagerWithOpts(t, rt, newFakeSnapshot(), session.Options{IdleTimeout: time.Millisecond})
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "ubuntu")
+	require.NoError(t, err)
+	time.Sleep(5 * time.Millisecond) // let it age past the idle timeout
+
+	n, err := mgr.ReapIdle(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "an idle session should be auto-stopped")
+
+	got, err := mgr.Get(ctx, "dev")
+	require.NoError(t, err)
+	require.Equal(t, session.StateStopped, got.State)
+}
+
+func TestReapIdleKeepsBusySession(t *testing.T) {
+	rt := &fakeRuntime{nextLoad: 1.0} // handle reports a busy guest
+	mgr := newManagerWithOpts(t, rt, newFakeSnapshot(), session.Options{IdleTimeout: time.Millisecond})
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "ubuntu")
+	require.NoError(t, err)
+	time.Sleep(5 * time.Millisecond)
+
+	n, err := mgr.ReapIdle(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, n, "a session with work in flight must not be stopped")
+
+	got, err := mgr.Get(ctx, "dev")
+	require.NoError(t, err)
+	require.Equal(t, session.StateRunning, got.State)
+}
+
+func TestReapIdleDisabledIsNoop(t *testing.T) {
+	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{}) // IdleTimeout 0
+	ctx := context.Background()
+	_, err := mgr.Create(ctx, "dev", "ubuntu")
+	require.NoError(t, err)
+
+	n, err := mgr.ReapIdle(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 0, n)
 }
 
 func TestSessionsRequireSessionRuntime(t *testing.T) {

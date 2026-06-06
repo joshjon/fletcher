@@ -77,9 +77,11 @@ type Session struct {
 	Image string                 `protobuf:"bytes,3,opt,name=image,proto3" json:"image,omitempty"`
 	State SessionState           `protobuf:"varint,4,opt,name=state,proto3,enum=fletcher.v1.SessionState" json:"state,omitempty"`
 	// Unix epoch seconds.
-	CreatedAt     int64  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	UpdatedAt     int64  `protobuf:"varint,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	LastUsedAt    *int64 `protobuf:"varint,7,opt,name=last_used_at,json=lastUsedAt,proto3,oneof" json:"last_used_at,omitempty"`
+	CreatedAt  int64  `protobuf:"varint,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt  int64  `protobuf:"varint,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	LastUsedAt *int64 `protobuf:"varint,7,opt,name=last_used_at,json=lastUsedAt,proto3,oneof" json:"last_used_at,omitempty"`
+	// disk_bytes is the session fork's on-disk size.
+	DiskBytes     int64 `protobuf:"varint,8,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -159,6 +161,13 @@ func (x *Session) GetUpdatedAt() int64 {
 func (x *Session) GetLastUsedAt() int64 {
 	if x != nil && x.LastUsedAt != nil {
 		return *x.LastUsedAt
+	}
+	return 0
+}
+
+func (x *Session) GetDiskBytes() int64 {
+	if x != nil {
+		return x.DiskBytes
 	}
 	return 0
 }
@@ -1290,7 +1299,7 @@ var File_fletcher_v1_sessions_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\n" +
-	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\xea\x01\n" +
+	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\x89\x02\n" +
 	"\aSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -1301,7 +1310,9 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\x06 \x01(\x03R\tupdatedAt\x12%\n" +
 	"\flast_used_at\x18\a \x01(\x03H\x00R\n" +
-	"lastUsedAt\x88\x01\x01B\x0f\n" +
+	"lastUsedAt\x88\x01\x01\x12\x1d\n" +
+	"\n" +
+	"disk_bytes\x18\b \x01(\x03R\tdiskBytesB\x0f\n" +
 	"\r_last_used_at\"@\n" +
 	"\x14CreateSessionRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +

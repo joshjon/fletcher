@@ -255,6 +255,7 @@ func sessionToProto(s session.Session) *fletcherv1.Session {
 		State:     stateToProto(s.State),
 		CreatedAt: s.CreatedAt.Unix(),
 		UpdatedAt: s.UpdatedAt.Unix(),
+		DiskBytes: s.DiskBytes,
 	}
 	if s.LastUsedAt != nil {
 		v := s.LastUsedAt.Unix()

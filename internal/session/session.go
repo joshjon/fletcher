@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -46,10 +47,27 @@ type Session struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	LastUsedAt *time.Time
+	DiskBytes  int64
 }
 
 // ErrNotFound is returned when a session ref matches nothing.
 var ErrNotFound = errs.New(errs.CategoryNotFound, "session not found")
+
+// Options tune session limits and the work-based idle auto-stop.
+type Options struct {
+	// IdleTimeout auto-stops a session idle (no work in flight) this long; 0
+	// disables the reaper.
+	IdleTimeout time.Duration
+	// MaxCount caps the number of sessions; 0 disables the cap.
+	MaxCount int
+	// MaxDiskBytes caps total session disk; 0 disables the cap.
+	MaxDiskBytes int64
+}
+
+// idleLoadThreshold is the guest 1-minute load average below which a session
+// with no active host operation counts as having no work in flight. A truly
+// idle VM sits near zero; a running agent or build pushes it well above this.
+const idleLoadThreshold = 0.2
 
 // Manager owns session lifecycle and the live VM handles. The runtime is the
 // session-capable driver (nil when the configured runtime cannot host
@@ -60,21 +78,25 @@ type Manager struct {
 	runtime  runtime.SessionRuntime
 	env      []string
 	logger   *slog.Logger
+	opts     Options
 
 	mu      sync.Mutex
 	handles map[string]runtime.SessionHandle
+	busy    map[string]int // sessions with an in-flight host op (exec/shell/ssh)
 }
 
 // NewManager constructs a Manager. rt may be nil if the configured runtime does
 // not support sessions, in which case lifecycle calls fail with a clear error.
-func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRuntime, env []string, logger *slog.Logger) *Manager {
+func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRuntime, env []string, logger *slog.Logger, opts Options) *Manager {
 	return &Manager{
 		q:        q,
 		snapshot: snap,
 		runtime:  rt,
 		env:      env,
 		logger:   logger,
+		opts:     opts,
 		handles:  make(map[string]runtime.SessionHandle),
+		busy:     make(map[string]int),
 	}
 }
 
@@ -103,6 +125,9 @@ func (m *Manager) Create(ctx context.Context, name, image string) (Session, erro
 	}
 	if strings.TrimSpace(image) == "" {
 		return Session{}, errs.New(errs.CategoryInvalidArgument, "image is required")
+	}
+	if err := m.checkCaps(ctx); err != nil {
+		return Session{}, err
 	}
 
 	id, err := typeid.WithPrefix(idPrefix)
@@ -264,6 +289,9 @@ func (m *Manager) Exec(ctx context.Context, ref, command string) (ExecResult, er
 			"session %q is not running; start it with `fletcher session start`", row.Name)
 	}
 
+	m.markBusy(row.ID)
+	defer m.unmarkBusy(row.ID)
+
 	var stdout, stderr strings.Builder
 	res, err := handle.Exec(ctx, runtime.Spec{Command: command, Env: m.env}, &stdout, &stderr)
 	if err != nil {
@@ -288,6 +316,8 @@ func (m *Manager) Shell(ctx context.Context, ref string, spec runtime.ShellSpec,
 	if len(spec.Env) == 0 {
 		spec.Env = m.env
 	}
+	m.markBusy(row.ID)
+	defer m.unmarkBusy(row.ID)
 	code, err := handle.Shell(ctx, spec, stdin, stdout, resize)
 	if err != nil {
 		return 0, fmt.Errorf("shell in session: %w", err)
@@ -313,7 +343,11 @@ func (m *Manager) DialSSH(ctx context.Context, ref string) (net.Conn, error) {
 		return nil, fmt.Errorf("dial session ssh: %w", err)
 	}
 	m.touch(ctx, row.ID)
-	return conn, nil
+	// The SSH session is in flight for the life of the connection; keep the
+	// session marked busy (and so safe from idle auto-stop) until it closes.
+	m.markBusy(row.ID)
+	id := row.ID
+	return &busyConn{Conn: conn, release: func() { m.unmarkBusy(id) }}, nil
 }
 
 // ReconcileOnBoot marks every "running" session as "stopped" at daemon start:
@@ -390,6 +424,140 @@ func (m *Manager) takeHandle(id string) runtime.SessionHandle {
 	return h
 }
 
+// ReapIdle stops (hibernates) every running session with no work in flight that
+// has been idle longer than the configured timeout. "Work in flight" means an
+// active host operation (exec/shell/ssh) or a busy guest (load average), so a
+// running agent or task is never stopped mid-work, even with no user attached.
+// It is a no-op when the idle timeout is disabled.
+func (m *Manager) ReapIdle(ctx context.Context) (int, error) {
+	if m.opts.IdleTimeout <= 0 {
+		return 0, nil
+	}
+	rows, err := m.q.ListSessions(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("reap idle sessions: %w", err)
+	}
+	stopped := 0
+	for _, r := range rows {
+		if State(r.State) != StateRunning || m.busyCount(r.ID) > 0 {
+			continue
+		}
+		handle := m.getHandle(r.ID)
+		if handle == nil {
+			continue
+		}
+		if load, lerr := handle.Load(ctx); lerr == nil && load >= idleLoadThreshold {
+			m.touch(ctx, r.ID) // working with no host op attached; reset the idle clock
+			continue
+		}
+		if time.Since(lastActivity(r)) < m.opts.IdleTimeout {
+			continue
+		}
+		if _, serr := m.Stop(ctx, r.ID); serr != nil {
+			m.logger.Warn("auto-stop idle session", slog.String("session_id", r.ID), slog.String("err", serr.Error()))
+			continue
+		}
+		m.logger.Info("auto-stopped idle session", slog.String("session_id", r.ID), slog.String("name", r.Name))
+		stopped++
+	}
+	return stopped, nil
+}
+
+// checkCaps refuses a new session when a configured count or disk cap is hit,
+// reporting what is using the space rather than deleting anything.
+func (m *Manager) checkCaps(ctx context.Context) error {
+	if m.opts.MaxCount <= 0 && m.opts.MaxDiskBytes <= 0 {
+		return nil
+	}
+	rows, err := m.q.ListSessions(ctx)
+	if err != nil {
+		return fmt.Errorf("check session caps: %w", err)
+	}
+	if m.opts.MaxCount > 0 && len(rows) >= m.opts.MaxCount {
+		return errs.Newf(errs.CategoryFailedPrecondition,
+			"session count cap reached (%d/%d). Delete one to make room:\n%s",
+			len(rows), m.opts.MaxCount, usageReport(rows))
+	}
+	if m.opts.MaxDiskBytes > 0 {
+		var total int64
+		for _, r := range rows {
+			total += forkBytes(r.ForkPath)
+		}
+		if total >= m.opts.MaxDiskBytes {
+			return errs.Newf(errs.CategoryFailedPrecondition,
+				"session disk cap reached (%d/%d GiB). Delete one to make room:\n%s",
+				total>>30, m.opts.MaxDiskBytes>>30, usageReport(rows))
+		}
+	}
+	return nil
+}
+
+// usageReport lists each session's disk use and last-used time for a cap error.
+func usageReport(rows []sqliteq.Session) string {
+	var b strings.Builder
+	for _, r := range rows {
+		last := "never"
+		if r.LastUsedAt != nil {
+			last = time.Unix(*r.LastUsedAt, 0).UTC().Format(time.RFC3339)
+		}
+		fmt.Fprintf(&b, "  %s  %s  %d MiB  last used %s\n",
+			r.Name, r.State, forkBytes(r.ForkPath)>>20, last)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (m *Manager) markBusy(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.busy[id]++
+}
+
+func (m *Manager) unmarkBusy(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.busy[id] <= 1 {
+		delete(m.busy, id)
+		return
+	}
+	m.busy[id]--
+}
+
+func (m *Manager) busyCount(id string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.busy[id]
+}
+
+// lastActivity is when a session was last used, falling back to when it last
+// changed state (its start) for one that has never had an operation.
+func lastActivity(r sqliteq.Session) time.Time {
+	if r.LastUsedAt != nil {
+		return time.Unix(*r.LastUsedAt, 0)
+	}
+	return time.Unix(r.UpdatedAt, 0)
+}
+
+// forkBytes is the on-disk size of a session fork, 0 if it cannot be stat-ed.
+func forkBytes(path string) int64 {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
+}
+
+// busyConn keeps a session marked busy until the SSH connection it wraps closes.
+type busyConn struct {
+	net.Conn
+	release func()
+	once    sync.Once
+}
+
+func (c *busyConn) Close() error {
+	c.once.Do(c.release)
+	return c.Conn.Close()
+}
+
 func sessionFromRow(r sqliteq.Session) Session {
 	return Session{
 		ID:         r.ID,
@@ -399,6 +567,7 @@ func sessionFromRow(r sqliteq.Session) Session {
 		CreatedAt:  time.Unix(r.CreatedAt, 0),
 		UpdatedAt:  time.Unix(r.UpdatedAt, 0),
 		LastUsedAt: timePtrFromUnix(r.LastUsedAt),
+		DiskBytes:  forkBytes(r.ForkPath),
 	}
 }
 

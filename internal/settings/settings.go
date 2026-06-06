@@ -31,6 +31,10 @@ const (
 	KeyNoUPnP         = "no_upnp"
 	KeyGatewayListen  = "gateway_listen"
 	KeyMCPListen      = "mcp_listen"
+
+	KeySessionIdleTimeout = "session_idle_timeout"
+	KeySessionMaxCount    = "session_max_count"
+	KeySessionMaxDiskGB   = "session_max_disk_gb"
 )
 
 // definition describes a settable key: its help text and an optional validator.
@@ -51,6 +55,9 @@ var registry = []definition{
 	{KeyNoUPnP, "disable the automatic UPnP port-forward: true | false", oneOf("true", "false")},
 	{KeyGatewayListen, "model gateway listen address, host:port", hostPort},
 	{KeyMCPListen, "MCP server listen address, host:port", hostPort},
+	{KeySessionIdleTimeout, "auto-stop a session idle (no work in flight) this long, e.g. 30m; 0 disables", durationOrZero},
+	{KeySessionMaxCount, "maximum number of sessions; 0 disables the cap", nonNegInt},
+	{KeySessionMaxDiskGB, "maximum total session disk in GB; 0 disables the cap", nonNegInt},
 }
 
 // View is one setting's full picture for `fletcher settings list`.
@@ -168,4 +175,22 @@ func hostPort(v string) error {
 		return fmt.Errorf("host part is required, e.g. 0.0.0.0:11500")
 	}
 	return portNumber(port)
+}
+
+func durationOrZero(v string) error {
+	if v == "0" {
+		return nil
+	}
+	if _, err := time.ParseDuration(v); err != nil {
+		return fmt.Errorf("must be a duration like 30m or 2h (0 to disable)")
+	}
+	return nil
+}
+
+func nonNegInt(v string) error {
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return fmt.Errorf("must be a non-negative integer")
+	}
+	return nil
 }

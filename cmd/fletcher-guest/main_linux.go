@@ -18,6 +18,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -162,11 +163,32 @@ func serveControl(conn net.Conn) {
 		runExec(conn, req.Spec)
 	case guestproto.RequestShell:
 		runShell(conn, req.Shell)
+	case guestproto.RequestStat:
+		if err := guestproto.WriteStat(conn, guestproto.Stat{Load1: loadAvg1()}); err != nil {
+			fmt.Fprintf(os.Stderr, "fletcher-guest: write stat: %v\n", err)
+		}
 	case guestproto.RequestShutdown:
 		shutdown() // resets the VM; does not return
 	default:
 		fmt.Fprintf(os.Stderr, "fletcher-guest: unknown request kind %q\n", req.Kind)
 	}
+}
+
+// loadAvg1 reads the 1-minute load average from /proc/loadavg; 0 if unreadable.
+func loadAvg1() float64 {
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return 0
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return 0
+	}
+	v, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 // runShell opens a PTY running a login shell and bridges it to the host over

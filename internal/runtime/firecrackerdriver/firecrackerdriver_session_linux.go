@@ -266,6 +266,24 @@ func (s *fcSession) DialSSH(ctx context.Context) (net.Conn, error) {
 	return conn, nil
 }
 
+// Load returns the guest's 1-minute load average via a stat control request.
+func (s *fcSession) Load(ctx context.Context) (float64, error) {
+	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.ControlPort)
+	if err != nil {
+		return 0, fmt.Errorf("firecracker: connect session: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if err := guestproto.WriteRequest(conn, guestproto.Request{Kind: guestproto.RequestStat}); err != nil {
+		return 0, fmt.Errorf("firecracker: send stat: %w", err)
+	}
+	stat, err := guestproto.ReadStat(conn)
+	if err != nil {
+		return 0, fmt.Errorf("firecracker: read stat: %w", err)
+	}
+	return stat.Load1, nil
+}
+
 // Stop hibernates the session: it snapshots the VM's memory to disk and exits
 // the VMM (freeing host RAM), so a later Start wakes it instantly with its
 // process tree intact. If hibernation fails it falls back to a clean shutdown.
