@@ -46,6 +46,10 @@ func jobCreateCmd() *cli.Command {
 				Value: "ephemeral",
 				Usage: "trigger kind (ephemeral, cron, long_running)",
 			},
+			&cli.StringFlag{
+				Name:  "schedule",
+				Usage: "cron expression for --trigger cron (e.g. '*/5 * * * *' or '@hourly')",
+			},
 			&cli.StringSliceFlag{
 				Name:  "credential",
 				Usage: "bind-mount a named credential dir into the fork (repeatable; allowed: claude, codex, gemini)",
@@ -63,6 +67,7 @@ func jobCreateCmd() *cli.Command {
 				Command:     cmd.String("command"),
 				Image:       cmd.String("image"),
 				Credentials: cmd.StringSlice("credential"),
+				Schedule:    cmd.String("schedule"),
 			}))
 			if err != nil {
 				return err
@@ -202,6 +207,8 @@ func statusFromString(s string) (fletcherv1.JobStatus, error) {
 		return fletcherv1.JobStatus_JOB_STATUS_FAILED, nil
 	case "cancelled", "canceled":
 		return fletcherv1.JobStatus_JOB_STATUS_CANCELLED, nil
+	case "scheduled":
+		return fletcherv1.JobStatus_JOB_STATUS_SCHEDULED, nil
 	}
 	return fletcherv1.JobStatus_JOB_STATUS_UNSPECIFIED,
 		fmt.Errorf("invalid status %q", s)
@@ -246,6 +253,15 @@ func writeJobDetails(w io.Writer, j *fletcherv1.Job) error {
 	fmt.Fprintf(tw, "name:\t%s\n", j.GetName())
 	fmt.Fprintf(tw, "status:\t%s\n", coloredStatusLabel(j.GetStatus()))
 	fmt.Fprintf(tw, "trigger:\t%s\n", triggerLabel(j.GetTrigger()))
+	if j.GetSchedule() != "" {
+		fmt.Fprintf(tw, "schedule:\t%s\n", j.GetSchedule())
+	}
+	if j.NextRunAt != nil {
+		fmt.Fprintf(tw, "next_run_at:\t%s\n", formatUnix(j.GetNextRunAt()))
+	}
+	if j.ParentId != nil {
+		fmt.Fprintf(tw, "parent:\t%s\n", j.GetParentId())
+	}
 	fmt.Fprintf(tw, "image:\t%s\n", j.GetImage())
 	fmt.Fprintf(tw, "command:\t%s\n", j.GetCommand())
 	if creds := j.GetCredentials(); len(creds) > 0 {
@@ -299,6 +315,8 @@ func statusLabel(s fletcherv1.JobStatus) string {
 		return "failed"
 	case fletcherv1.JobStatus_JOB_STATUS_CANCELLED:
 		return "cancelled"
+	case fletcherv1.JobStatus_JOB_STATUS_SCHEDULED:
+		return "scheduled"
 	}
 	return "unknown"
 }
@@ -319,6 +337,8 @@ func coloredStatusLabel(s fletcherv1.JobStatus) string {
 		return red(label)
 	case fletcherv1.JobStatus_JOB_STATUS_CANCELLED:
 		return gray(label)
+	case fletcherv1.JobStatus_JOB_STATUS_SCHEDULED:
+		return blue(label)
 	}
 	return label
 }

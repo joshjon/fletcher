@@ -30,6 +30,9 @@ const (
 	JobStatus_JOB_STATUS_SUCCEEDED   JobStatus = 3
 	JobStatus_JOB_STATUS_FAILED      JobStatus = 4
 	JobStatus_JOB_STATUS_CANCELLED   JobStatus = 5
+	// SCHEDULED is a cron job definition resting between runs; the supervisor
+	// fires it on its schedule by creating child runs.
+	JobStatus_JOB_STATUS_SCHEDULED JobStatus = 6
 )
 
 // Enum value maps for JobStatus.
@@ -41,6 +44,7 @@ var (
 		3: "JOB_STATUS_SUCCEEDED",
 		4: "JOB_STATUS_FAILED",
 		5: "JOB_STATUS_CANCELLED",
+		6: "JOB_STATUS_SCHEDULED",
 	}
 	JobStatus_value = map[string]int32{
 		"JOB_STATUS_UNSPECIFIED": 0,
@@ -49,6 +53,7 @@ var (
 		"JOB_STATUS_SUCCEEDED":   3,
 		"JOB_STATUS_FAILED":      4,
 		"JOB_STATUS_CANCELLED":   5,
+		"JOB_STATUS_SCHEDULED":   6,
 	}
 )
 
@@ -149,7 +154,13 @@ type Job struct {
 	// Named credential directories bind-mounted into the fork at job start
 	// (DESIGN.md §5 "Credential modes", Phase 12 "trusted-credential mode").
 	// Supported names: "claude", "codex", "gemini".
-	Credentials   []string `protobuf:"bytes,13,rep,name=credentials,proto3" json:"credentials,omitempty"`
+	Credentials []string `protobuf:"bytes,13,rep,name=credentials,proto3" json:"credentials,omitempty"`
+	// schedule is the cron expression for a cron job (empty otherwise).
+	Schedule string `protobuf:"bytes,14,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	// next_run_at is when a scheduled cron job next fires (Unix epoch seconds).
+	NextRunAt *int64 `protobuf:"varint,15,opt,name=next_run_at,json=nextRunAt,proto3,oneof" json:"next_run_at,omitempty"`
+	// parent_id links a run spawned by a cron job back to its definition.
+	ParentId      *string `protobuf:"bytes,16,opt,name=parent_id,json=parentId,proto3,oneof" json:"parent_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -275,6 +286,27 @@ func (x *Job) GetCredentials() []string {
 	return nil
 }
 
+func (x *Job) GetSchedule() string {
+	if x != nil {
+		return x.Schedule
+	}
+	return ""
+}
+
+func (x *Job) GetNextRunAt() int64 {
+	if x != nil && x.NextRunAt != nil {
+		return *x.NextRunAt
+	}
+	return 0
+}
+
+func (x *Job) GetParentId() string {
+	if x != nil && x.ParentId != nil {
+		return *x.ParentId
+	}
+	return ""
+}
+
 type CreateJobRequest struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Trigger JobTrigger             `protobuf:"varint,1,opt,name=trigger,proto3,enum=fletcher.v1.JobTrigger" json:"trigger,omitempty"`
@@ -282,7 +314,10 @@ type CreateJobRequest struct {
 	Command string                 `protobuf:"bytes,3,opt,name=command,proto3" json:"command,omitempty"`
 	Image   string                 `protobuf:"bytes,4,opt,name=image,proto3" json:"image,omitempty"`
 	// Optional list of credentials to bind-mount; see Job.credentials.
-	Credentials   []string `protobuf:"bytes,5,rep,name=credentials,proto3" json:"credentials,omitempty"`
+	Credentials []string `protobuf:"bytes,5,rep,name=credentials,proto3" json:"credentials,omitempty"`
+	// schedule is required when trigger is CRON: a 5-field cron expression
+	// (e.g. "*/5 * * * *") or a macro (@hourly, @daily, ...).
+	Schedule      string `protobuf:"bytes,6,opt,name=schedule,proto3" json:"schedule,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -350,6 +385,13 @@ func (x *CreateJobRequest) GetCredentials() []string {
 		return x.Credentials
 	}
 	return nil
+}
+
+func (x *CreateJobRequest) GetSchedule() string {
+	if x != nil {
+		return x.Schedule
+	}
+	return ""
 }
 
 type CreateJobResponse struct {
@@ -688,7 +730,7 @@ var File_fletcher_v1_jobs_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_jobs_proto_rawDesc = "" +
 	"\n" +
-	"\x16fletcher/v1/jobs.proto\x12\vfletcher.v1\"\xdd\x03\n" +
+	"\x16fletcher/v1/jobs.proto\x12\vfletcher.v1\"\xde\x04\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12.\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x16.fletcher.v1.JobStatusR\x06status\x121\n" +
@@ -706,17 +748,24 @@ const file_fletcher_v1_jobs_proto_rawDesc = "" +
 	" \x01(\x03H\x01R\vcompletedAt\x88\x01\x01\x12#\n" +
 	"\rerror_message\x18\v \x01(\tR\ferrorMessage\x12 \n" +
 	"\texit_code\x18\f \x01(\x05H\x02R\bexitCode\x88\x01\x01\x12 \n" +
-	"\vcredentials\x18\r \x03(\tR\vcredentialsB\r\n" +
+	"\vcredentials\x18\r \x03(\tR\vcredentials\x12\x1a\n" +
+	"\bschedule\x18\x0e \x01(\tR\bschedule\x12#\n" +
+	"\vnext_run_at\x18\x0f \x01(\x03H\x03R\tnextRunAt\x88\x01\x01\x12 \n" +
+	"\tparent_id\x18\x10 \x01(\tH\x04R\bparentId\x88\x01\x01B\r\n" +
 	"\v_started_atB\x0f\n" +
 	"\r_completed_atB\f\n" +
 	"\n" +
-	"_exit_code\"\xab\x01\n" +
+	"_exit_codeB\x0e\n" +
+	"\f_next_run_atB\f\n" +
+	"\n" +
+	"_parent_id\"\xc7\x01\n" +
 	"\x10CreateJobRequest\x121\n" +
 	"\atrigger\x18\x01 \x01(\x0e2\x17.fletcher.v1.JobTriggerR\atrigger\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\acommand\x18\x03 \x01(\tR\acommand\x12\x14\n" +
 	"\x05image\x18\x04 \x01(\tR\x05image\x12 \n" +
-	"\vcredentials\x18\x05 \x03(\tR\vcredentials\"7\n" +
+	"\vcredentials\x18\x05 \x03(\tR\vcredentials\x12\x1a\n" +
+	"\bschedule\x18\x06 \x01(\tR\bschedule\"7\n" +
 	"\x11CreateJobResponse\x12\"\n" +
 	"\x03job\x18\x01 \x01(\v2\x10.fletcher.v1.JobR\x03job\"\x1f\n" +
 	"\rGetJobRequest\x12\x0e\n" +
@@ -733,14 +782,15 @@ const file_fletcher_v1_jobs_proto_rawDesc = "" +
 	"\x10CancelJobRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"1\n" +
 	"\x11CancelJobResponse\x12\x1c\n" +
-	"\tcancelled\x18\x01 \x01(\bR\tcancelled*\xa1\x01\n" +
+	"\tcancelled\x18\x01 \x01(\bR\tcancelled*\xbb\x01\n" +
 	"\tJobStatus\x12\x1a\n" +
 	"\x16JOB_STATUS_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11JOB_STATUS_QUEUED\x10\x01\x12\x16\n" +
 	"\x12JOB_STATUS_RUNNING\x10\x02\x12\x18\n" +
 	"\x14JOB_STATUS_SUCCEEDED\x10\x03\x12\x15\n" +
 	"\x11JOB_STATUS_FAILED\x10\x04\x12\x18\n" +
-	"\x14JOB_STATUS_CANCELLED\x10\x05*x\n" +
+	"\x14JOB_STATUS_CANCELLED\x10\x05\x12\x18\n" +
+	"\x14JOB_STATUS_SCHEDULED\x10\x06*x\n" +
 	"\n" +
 	"JobTrigger\x12\x1b\n" +
 	"\x17JOB_TRIGGER_UNSPECIFIED\x10\x00\x12\x19\n" +

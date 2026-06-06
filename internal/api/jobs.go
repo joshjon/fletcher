@@ -42,6 +42,7 @@ func (s *JobsService) CreateJob(ctx context.Context, req *connect.Request[fletch
 		Command:     m.GetCommand(),
 		Image:       m.GetImage(),
 		Credentials: m.GetCredentials(),
+		Schedule:    m.GetSchedule(),
 	})
 	if err != nil {
 		return nil, err
@@ -145,6 +146,8 @@ func statusToProto(s job.Status) fletcherv1.JobStatus {
 		return fletcherv1.JobStatus_JOB_STATUS_FAILED
 	case job.StatusCancelled:
 		return fletcherv1.JobStatus_JOB_STATUS_CANCELLED
+	case job.StatusScheduled:
+		return fletcherv1.JobStatus_JOB_STATUS_SCHEDULED
 	}
 	return fletcherv1.JobStatus_JOB_STATUS_UNSPECIFIED
 }
@@ -161,6 +164,12 @@ func jobToProto(j job.Job) *fletcherv1.Job {
 		CreatedAt:    j.CreatedAt.Unix(),
 		UpdatedAt:    j.UpdatedAt.Unix(),
 		ErrorMessage: j.ErrorMessage,
+		Schedule:     j.Schedule,
+		ParentId:     j.ParentID,
+	}
+	if j.NextRunAt != nil {
+		t := j.NextRunAt.Unix()
+		out.NextRunAt = &t
 	}
 	if j.StartedAt != nil {
 		t := j.StartedAt.Unix()

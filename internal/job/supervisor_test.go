@@ -99,6 +99,65 @@ func TestSupervisorRunsSuccessfulJob(t *testing.T) {
 	wait()
 }
 
+func TestSupervisorFiresDueCronJob(t *testing.T) {
+	r := newSupervisorRig(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cronJob, err := r.svc.Create(ctx, job.CreateParams{
+		Trigger:  job.TriggerCron,
+		Name:     "nightly",
+		Command:  "exit 0",
+		Image:    "mock",
+		Schedule: "* * * * *",
+	})
+	require.NoError(t, err)
+	require.Equal(t, job.StatusScheduled, cronJob.Status)
+	require.NotNil(t, cronJob.NextRunAt)
+	require.Equal(t, "* * * * *", cronJob.Schedule)
+
+	// The next real fire is up to a minute away; force it due now.
+	past := time.Now().Add(-time.Minute).Unix()
+	require.NoError(t, r.queries.SetJobNextRun(ctx, sqliteq.SetJobNextRunParams{
+		NextRunAt: &past, UpdatedAt: time.Now().Unix(), ID: cronJob.ID,
+	}))
+
+	wait := r.start(ctx)
+
+	// A child run appears, references the cron definition, and succeeds.
+	child := waitForChildRun(t, r.svc, cronJob.ID, 5*time.Second)
+	require.Equal(t, job.TriggerEphemeral, child.Trigger)
+	require.Equal(t, "nightly", child.Name)
+	got := waitForStatus(t, r.svc, child.ID, job.StatusSucceeded, 5*time.Second)
+	require.Equal(t, int32(0), *got.ExitCode)
+
+	// The definition stays scheduled with its next run advanced into the future.
+	def, err := r.svc.Get(ctx, cronJob.ID)
+	require.NoError(t, err)
+	require.Equal(t, job.StatusScheduled, def.Status)
+	require.NotNil(t, def.NextRunAt)
+	require.True(t, def.NextRunAt.After(time.Now()), "next run should be advanced into the future")
+
+	cancel()
+	wait()
+}
+
+func waitForChildRun(t *testing.T, svc *job.Service, parentID string, timeout time.Duration) job.Job {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		jobs, err := svc.List(context.Background(), job.ListParams{Limit: 100})
+		require.NoError(t, err)
+		for _, j := range jobs {
+			if j.ParentID != nil && *j.ParentID == parentID {
+				return j
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("no child run appeared for cron job %s", parentID)
+	return job.Job{}
+}
+
 func TestSupervisorMarksFailingJob(t *testing.T) {
 	r := newSupervisorRig(t)
 	ctx, cancel := context.WithCancel(context.Background())

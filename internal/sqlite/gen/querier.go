@@ -36,6 +36,7 @@ type Querier interface {
 	GetSessionByRef(ctx context.Context, ref string) (Session, error)
 	ListApprovals(ctx context.Context, arg ListApprovalsParams) ([]PendingApproval, error)
 	ListApprovalsByStatus(ctx context.Context, arg ListApprovalsByStatusParams) ([]PendingApproval, error)
+	ListDueCronJobs(ctx context.Context, nextRunAt *int64) ([]Job, error)
 	ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, error)
 	ListJobsByStatus(ctx context.Context, arg ListJobsByStatusParams) ([]Job, error)
 	ListPeers(ctx context.Context, arg ListPeersParams) ([]Peer, error)
@@ -45,6 +46,7 @@ type Querier interface {
 	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) error
 	MarkJobStarted(ctx context.Context, arg MarkJobStartedParams) error
 	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) error
+	SetJobNextRun(ctx context.Context, arg SetJobNextRunParams) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
 	UpdateSessionState(ctx context.Context, arg UpdateSessionStateParams) error

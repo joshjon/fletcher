@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"go.jetify.com/typeid"
 
 	"github.com/joshjon/fletcher/internal/errs"
@@ -29,6 +30,8 @@ const (
 	StatusSucceeded Status = "succeeded"
 	StatusFailed    Status = "failed"
 	StatusCancelled Status = "cancelled"
+	// StatusScheduled is a cron job definition at rest between runs.
+	StatusScheduled Status = "scheduled"
 )
 
 // Trigger describes how a job is invoked.
@@ -65,6 +68,12 @@ type Job struct {
 	CompletedAt  *time.Time
 	ErrorMessage string
 	ExitCode     *int32
+	// Schedule is the cron expression for a cron job (empty otherwise).
+	Schedule string
+	// NextRunAt is when a scheduled cron job next fires.
+	NextRunAt *time.Time
+	// ParentID links a run to the cron definition that spawned it.
+	ParentID *string
 }
 
 // CreateParams are the caller-supplied fields for a new job.
@@ -74,6 +83,8 @@ type CreateParams struct {
 	Command     string
 	Image       string
 	Credentials []string
+	// Schedule is required when Trigger is cron: a cron expression.
+	Schedule string
 }
 
 // Coordinator is what Service needs from the running supervisor: a way to
@@ -114,17 +125,35 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 	if err != nil {
 		return Job{}, fmt.Errorf("generate id: %w", err)
 	}
-	now := time.Now().Unix()
+
+	// A cron job is a definition that rests in "scheduled" until its next fire;
+	// every other trigger is queued to run immediately.
+	now := time.Now()
+	status := StatusQueued
+	var nextRun *int64
+	if p.Trigger == TriggerCron {
+		sched, perr := ParseSchedule(p.Schedule)
+		if perr != nil {
+			return Job{}, perr
+		}
+		status = StatusScheduled
+		next := sched.Next(now).Unix()
+		nextRun = &next
+	}
+
+	nowUnix := now.Unix()
 	row, err := s.q.CreateJob(ctx, sqliteq.CreateJobParams{
 		ID:          id.String(),
-		Status:      string(StatusQueued),
+		Status:      string(status),
 		TriggerKind: string(p.Trigger),
 		Name:        p.Name,
 		Command:     p.Command,
 		Image:       p.Image,
 		Credentials: credsEncoded,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		CreatedAt:   nowUnix,
+		UpdatedAt:   nowUnix,
+		Schedule:    p.Schedule,
+		NextRunAt:   nextRun,
 	})
 	if err != nil {
 		return Job{}, fmt.Errorf("create job: %w", err)
@@ -219,13 +248,34 @@ func (p CreateParams) validate() error {
 		return errs.New(errs.CategoryInvalidArgument, "image is required")
 	}
 	switch p.Trigger {
-	case TriggerEphemeral, TriggerCron, TriggerLongRunning:
+	case TriggerEphemeral, TriggerLongRunning:
+		if strings.TrimSpace(p.Schedule) != "" {
+			return errs.Newf(errs.CategoryInvalidArgument, "schedule is only valid for a cron job, not %q", p.Trigger)
+		}
+		return nil
+	case TriggerCron:
+		if _, err := ParseSchedule(p.Schedule); err != nil {
+			return err
+		}
 		return nil
 	case "":
 		return errs.New(errs.CategoryInvalidArgument, "trigger is required")
 	default:
 		return errs.Newf(errs.CategoryInvalidArgument, "invalid trigger %q", p.Trigger)
 	}
+}
+
+// ParseSchedule parses a cron expression (5-field standard form, or a macro
+// like @hourly / @daily) into a schedule that can compute its next fire time.
+func ParseSchedule(spec string) (cron.Schedule, error) {
+	if strings.TrimSpace(spec) == "" {
+		return nil, errs.New(errs.CategoryInvalidArgument, "a cron job requires a schedule, e.g. --schedule '*/5 * * * *'")
+	}
+	sched, err := cron.ParseStandard(spec)
+	if err != nil {
+		return nil, errs.Newf(errs.CategoryInvalidArgument, "invalid cron schedule %q: %v", spec, err)
+	}
+	return sched, nil
 }
 
 func mapRows(rows []sqliteq.Job) ([]Job, error) {
@@ -259,6 +309,9 @@ func jobFromRow(r sqliteq.Job) (Job, error) {
 		CompletedAt:  timePtrFromUnix(r.CompletedAt),
 		ErrorMessage: derefString(r.ErrorMessage),
 		ExitCode:     int32PtrFromInt64(r.ExitCode),
+		Schedule:     r.Schedule,
+		NextRunAt:    timePtrFromUnix(r.NextRunAt),
+		ParentID:     r.ParentID,
 	}, nil
 }
 

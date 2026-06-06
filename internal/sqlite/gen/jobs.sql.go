@@ -12,7 +12,7 @@ import (
 const cancelJob = `-- name: CancelJob :execrows
 UPDATE jobs
 SET status = 'cancelled', completed_at = ?, updated_at = ?
-WHERE id = ? AND status IN ('queued', 'running')
+WHERE id = ? AND status IN ('queued', 'running', 'scheduled')
 `
 
 type CancelJobParams struct {
@@ -53,11 +53,13 @@ func (q *Queries) CountJobsByStatus(ctx context.Context, status string) (int64, 
 
 const createJob = `-- name: CreateJob :one
 INSERT INTO jobs (
-    id, status, trigger_kind, name, command, image, credentials, created_at, updated_at
+    id, status, trigger_kind, name, command, image, credentials, created_at, updated_at,
+    schedule, next_run_at, parent_id
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?
 )
-RETURNING id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials
+RETURNING id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id
 `
 
 type CreateJobParams struct {
@@ -70,6 +72,9 @@ type CreateJobParams struct {
 	Credentials string
 	CreatedAt   int64
 	UpdatedAt   int64
+	Schedule    string
+	NextRunAt   *int64
+	ParentID    *string
 }
 
 func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
@@ -83,6 +88,9 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		arg.Credentials,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.Schedule,
+		arg.NextRunAt,
+		arg.ParentID,
 	)
 	var i Job
 	err := row.Scan(
@@ -99,12 +107,15 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		&i.ErrorMessage,
 		&i.ExitCode,
 		&i.Credentials,
+		&i.Schedule,
+		&i.NextRunAt,
+		&i.ParentID,
 	)
 	return i, err
 }
 
 const getJob = `-- name: GetJob :one
-SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials FROM jobs WHERE id = ?
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id FROM jobs WHERE id = ?
 `
 
 func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
@@ -124,12 +135,62 @@ func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
 		&i.ErrorMessage,
 		&i.ExitCode,
 		&i.Credentials,
+		&i.Schedule,
+		&i.NextRunAt,
+		&i.ParentID,
 	)
 	return i, err
 }
 
+const listDueCronJobs = `-- name: ListDueCronJobs :many
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id FROM jobs
+WHERE status = 'scheduled' AND trigger_kind = 'cron'
+  AND next_run_at IS NOT NULL AND next_run_at <= ?
+ORDER BY next_run_at ASC
+`
+
+func (q *Queries) ListDueCronJobs(ctx context.Context, nextRunAt *int64) ([]Job, error) {
+	rows, err := q.db.QueryContext(ctx, listDueCronJobs, nextRunAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Job
+	for rows.Next() {
+		var i Job
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.TriggerKind,
+			&i.Name,
+			&i.Command,
+			&i.Image,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.ErrorMessage,
+			&i.ExitCode,
+			&i.Credentials,
+			&i.Schedule,
+			&i.NextRunAt,
+			&i.ParentID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listJobs = `-- name: ListJobs :many
-SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials FROM jobs
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id FROM jobs
 ORDER BY created_at DESC
 LIMIT ? OFFSET ?
 `
@@ -162,6 +223,9 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, erro
 			&i.ErrorMessage,
 			&i.ExitCode,
 			&i.Credentials,
+			&i.Schedule,
+			&i.NextRunAt,
+			&i.ParentID,
 		); err != nil {
 			return nil, err
 		}
@@ -177,7 +241,7 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, erro
 }
 
 const listJobsByStatus = `-- name: ListJobsByStatus :many
-SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials FROM jobs
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id FROM jobs
 WHERE status = ?
 ORDER BY created_at DESC
 LIMIT ? OFFSET ?
@@ -212,6 +276,9 @@ func (q *Queries) ListJobsByStatus(ctx context.Context, arg ListJobsByStatusPara
 			&i.ErrorMessage,
 			&i.ExitCode,
 			&i.Credentials,
+			&i.Schedule,
+			&i.NextRunAt,
+			&i.ParentID,
 		); err != nil {
 			return nil, err
 		}
@@ -288,6 +355,23 @@ func (q *Queries) MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededPara
 		arg.UpdatedAt,
 		arg.ID,
 	)
+	return err
+}
+
+const setJobNextRun = `-- name: SetJobNextRun :exec
+UPDATE jobs
+SET next_run_at = ?, updated_at = ?
+WHERE id = ?
+`
+
+type SetJobNextRunParams struct {
+	NextRunAt *int64
+	UpdatedAt int64
+	ID        string
+}
+
+func (q *Queries) SetJobNextRun(ctx context.Context, arg SetJobNextRunParams) error {
+	_, err := q.db.ExecContext(ctx, setJobNextRun, arg.NextRunAt, arg.UpdatedAt, arg.ID)
 	return err
 }
 

@@ -1,8 +1,10 @@
 -- name: CreateJob :one
 INSERT INTO jobs (
-    id, status, trigger_kind, name, command, image, credentials, created_at, updated_at
+    id, status, trigger_kind, name, command, image, credentials, created_at, updated_at,
+    schedule, next_run_at, parent_id
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    ?, ?, ?
 )
 RETURNING *;
 
@@ -49,4 +51,15 @@ WHERE id = ?;
 -- name: CancelJob :execrows
 UPDATE jobs
 SET status = 'cancelled', completed_at = ?, updated_at = ?
-WHERE id = ? AND status IN ('queued', 'running');
+WHERE id = ? AND status IN ('queued', 'running', 'scheduled');
+
+-- name: ListDueCronJobs :many
+SELECT * FROM jobs
+WHERE status = 'scheduled' AND trigger_kind = 'cron'
+  AND next_run_at IS NOT NULL AND next_run_at <= ?
+ORDER BY next_run_at ASC;
+
+-- name: SetJobNextRun :exec
+UPDATE jobs
+SET next_run_at = ?, updated_at = ?
+WHERE id = ?;

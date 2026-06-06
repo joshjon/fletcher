@@ -411,6 +411,29 @@ what the gateway can route to with `fletcher model list`. Every command has
 > trust properties are the same; the isolation is a shared-kernel container
 > rather than a VM.
 
+### Recurring jobs (cron)
+
+A job can run on a schedule instead of once. Give it `--trigger cron` and a cron
+expression:
+
+```sh
+fletcher job create --trigger cron --schedule "*/30 * * * *" \
+  --name hourly-scrape --image fletcher-base --command "scrape.sh"
+```
+
+The cron job is a *definition*: it shows up with status `scheduled` and a
+`next_run_at`. Each time the schedule fires, Fletcher creates a normal run of it
+(a child job you'll see in `job list`, linked back by its parent), so every run
+has its own status, output, and exit code. The schedule is a standard 5-field
+expression (`min hour day-of-month month day-of-week`) or a macro (`@hourly`,
+`@daily`, `@weekly`, ...). A run that is still going when the next window arrives
+is not double-started, and a window missed while the daemon was down fires once
+on the next start (no backfill). Stop a cron job with `fletcher job cancel <id>`.
+
+This is the agent-authored-then-automated pattern: have an agent write the
+scraper once (an interactive session or a one-off job), then schedule the plain
+program to run it on a cron.
+
 ## Durable sessions: persistent workspaces you can SSH into
 
 A *job* (above) runs one command in a fresh microVM and tears it down. A

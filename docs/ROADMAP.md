@@ -571,10 +571,15 @@ short list being worked through before a v1 is a candidate, distinct from the
 "await a usage signal" backlog below. Release *tagging* is done manually by the
 operator and is intentionally not in this list.
 
-- **Cron scheduler (recurring jobs).** `cron` is currently only a trigger value
-  with no scheduler firing it. Build the scheduling loop so a `cron` job runs on
-  its schedule (the agent-authored-then-automated pattern, DESIGN §4). This is the
-  one genuine feature gap relative to the job-model thesis.
+- **Cron scheduler (recurring jobs) - DONE.** A `cron` job is a definition that
+  rests in a new `scheduled` status; the supervisor fires it when `next_run_at`
+  is due by creating a child ephemeral run (linked by `parent_id`), so the runner
+  needs no cron-awareness and every run keeps its own history. Schedules are
+  standard 5-field cron or macros (robfig/cron). No double-start while a run is in
+  flight, fire-once on a missed window (no backfill). Surfaced as
+  `job create --trigger cron --schedule ...`. *Deferred:* pruning old child runs
+  (a cron job firing every minute accumulates rows) - add a retention cap when it
+  bites.
 - **Install ergonomics.** `scripts/install.sh` should check/install `btrfs-progs`
   and `runc`, detect or guide a btrfs snapshot root, and default Linux installs to
   the real runtime; `fletcher doctor` should verify runtime prereqs (binaries +

@@ -25,6 +25,9 @@ enum JobStatus {
   JOB_STATUS_SUCCEEDED = 3;
   JOB_STATUS_FAILED = 4;
   JOB_STATUS_CANCELLED = 5;
+  // SCHEDULED is a cron job definition resting between runs; the supervisor
+  // fires it on its schedule by creating child runs.
+  JOB_STATUS_SCHEDULED = 6;
 }
 
 enum JobTrigger {
@@ -52,6 +55,12 @@ message Job {
   // (DESIGN.md §5 "Credential modes", Phase 12 "trusted-credential mode").
   // Supported names: "claude", "codex", "gemini".
   repeated string credentials = 13;
+  // schedule is the cron expression for a cron job (empty otherwise).
+  string schedule = 14;
+  // next_run_at is when a scheduled cron job next fires (Unix epoch seconds).
+  optional int64 next_run_at = 15;
+  // parent_id links a run spawned by a cron job back to its definition.
+  optional string parent_id = 16;
 }
 
 message CreateJobRequest {
@@ -61,6 +70,9 @@ message CreateJobRequest {
   string image = 4;
   // Optional list of credentials to bind-mount; see Job.credentials.
   repeated string credentials = 5;
+  // schedule is required when trigger is CRON: a 5-field cron expression
+  // (e.g. "*/5 * * * *") or a macro (@hourly, @daily, ...).
+  string schedule = 6;
 }
 
 message CreateJobResponse {

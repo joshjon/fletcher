@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -60,6 +61,9 @@ func TestCreateValidatesRequiredFields(t *testing.T) {
 		{"missing command", job.CreateParams{Trigger: job.TriggerEphemeral, Name: "x", Image: "x"}},
 		{"missing image", job.CreateParams{Trigger: job.TriggerEphemeral, Name: "x", Command: "x"}},
 		{"invalid trigger", job.CreateParams{Trigger: "nonsense", Name: "x", Command: "x", Image: "x"}},
+		{"cron without schedule", job.CreateParams{Trigger: job.TriggerCron, Name: "x", Command: "x", Image: "x"}},
+		{"cron with bad schedule", job.CreateParams{Trigger: job.TriggerCron, Name: "x", Command: "x", Image: "x", Schedule: "not a cron"}},
+		{"schedule on ephemeral", job.CreateParams{Trigger: job.TriggerEphemeral, Name: "x", Command: "x", Image: "x", Schedule: "* * * * *"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -67,6 +71,23 @@ func TestCreateValidatesRequiredFields(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestCreateCronJobIsScheduled(t *testing.T) {
+	svc := newService(t)
+	created, err := svc.Create(context.Background(), job.CreateParams{
+		Trigger:  job.TriggerCron,
+		Name:     "hourly-scrape",
+		Command:  "scrape.sh",
+		Image:    "fletcher-base",
+		Schedule: "@hourly",
+	})
+	require.NoError(t, err)
+	require.Equal(t, job.StatusScheduled, created.Status)
+	require.Equal(t, "@hourly", created.Schedule)
+	require.NotNil(t, created.NextRunAt)
+	require.True(t, created.NextRunAt.After(time.Now()), "next run should be in the future")
+	require.Nil(t, created.ParentID)
 }
 
 func TestListAndCount(t *testing.T) {

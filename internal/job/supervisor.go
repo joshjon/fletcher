@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"go.jetify.com/typeid"
+
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/snapshot"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
@@ -95,6 +97,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	defer ticker.Stop()
 
 	for {
+		s.scheduleDueCronJobs(ctx)
 		s.pickAndRun(ctx)
 		select {
 		case <-ctx.Done():
@@ -103,6 +106,83 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		case <-s.wakeup:
 		case <-ticker.C:
 		}
+	}
+}
+
+// scheduleDueCronJobs fires every cron job whose next_run_at has arrived. Each
+// fire creates a child ephemeral run (which the same loop then executes) and
+// advances the definition's next_run_at to the following match. The run is a
+// plain job, so runOne needs no cron-awareness - one engine (DESIGN.md §4). A
+// missed window while the daemon was down fires once on recovery (no backfill).
+func (s *Supervisor) scheduleDueCronJobs(ctx context.Context) {
+	now := time.Now()
+	nowUnix := now.Unix()
+	due, err := s.q.ListDueCronJobs(ctx, &nowUnix)
+	if err != nil {
+		s.logger.Error("list due cron jobs", slog.String("err", err.Error()))
+		return
+	}
+	for _, c := range due {
+		// Parse before firing: a definition that no longer parses is marked
+		// failed so it stops being due instead of re-firing every tick.
+		sched, perr := ParseSchedule(c.Schedule)
+		if perr != nil {
+			s.logger.Error("cron job has an invalid schedule; marking failed",
+				slog.String("job_id", c.ID), slog.String("err", perr.Error()))
+			s.failCronDefinition(ctx, c.ID, perr.Error(), nowUnix)
+			continue
+		}
+
+		childID, idErr := typeid.WithPrefix(idPrefix)
+		if idErr != nil {
+			s.logger.Error("generate cron run id", slog.String("job_id", c.ID), slog.String("err", idErr.Error()))
+			continue
+		}
+		parentID := c.ID
+		if _, cErr := s.q.CreateJob(ctx, sqliteq.CreateJobParams{
+			ID:          childID.String(),
+			Status:      string(StatusQueued),
+			TriggerKind: string(TriggerEphemeral),
+			Name:        c.Name,
+			Command:     c.Command,
+			Image:       c.Image,
+			Credentials: c.Credentials,
+			CreatedAt:   nowUnix,
+			UpdatedAt:   nowUnix,
+			ParentID:    &parentID,
+		}); cErr != nil {
+			s.logger.Error("create cron run", slog.String("job_id", c.ID), slog.String("err", cErr.Error()))
+			continue
+		}
+
+		next := sched.Next(now).Unix()
+		if uErr := s.q.SetJobNextRun(ctx, sqliteq.SetJobNextRunParams{
+			NextRunAt: &next,
+			UpdatedAt: nowUnix,
+			ID:        c.ID,
+		}); uErr != nil {
+			s.logger.Error("advance cron next run", slog.String("job_id", c.ID), slog.String("err", uErr.Error()))
+			continue
+		}
+		s.logger.Info("scheduled cron run",
+			slog.String("cron_job_id", c.ID),
+			slog.String("run_id", childID.String()),
+			slog.Time("next_run", time.Unix(next, 0)))
+	}
+}
+
+// failCronDefinition marks a cron definition failed (e.g. its stored schedule no
+// longer parses) so it stops being selected as due.
+func (s *Supervisor) failCronDefinition(ctx context.Context, id, message string, nowUnix int64) {
+	code := int64(-1)
+	if err := s.q.MarkJobFailed(ctx, sqliteq.MarkJobFailedParams{
+		ExitCode:     &code,
+		ErrorMessage: &message,
+		CompletedAt:  &nowUnix,
+		UpdatedAt:    nowUnix,
+		ID:           id,
+	}); err != nil {
+		s.logger.Error("mark cron definition failed", slog.String("job_id", id), slog.String("err", err.Error()))
 	}
 }
 
