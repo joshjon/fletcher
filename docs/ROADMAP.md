@@ -627,16 +627,18 @@ Listed so they are visible, not lost. Items that became milestones are above.
   the WireGuard tunnel. runc is already rootless (M2a), so this is now only
   about btrfs; unprivileged-btrfs (or a narrower mechanism) would let it go.
 - **Audit log storage** - swap `audit.Noop` for a SQLite recorder (phase 4 seam).
-- **MCP egress hardening + approvals** - SSRF guard, then policy-gated egress
-  (phase 6).
+- **MCP egress policy/approvals** - the SSRF guard landed (the egress client
+  refuses non-global addresses at dial time). Still open: policy-gated egress
+  (allowlists, approvals) on top of the guard (phase 6).
 
 **Agents + image**
 
-- **codex launcher missing in `fletcher-base`** - `command -v codex` fails in the
-  fork: the image's `~/.local/bin/codex` symlink targets
-  `~/.codex/packages/standalone/current/bin/codex`, which is absent even in a
-  clean `docker export` of the image. A codex-install quirk in the Dockerfile,
-  separate from the import truncation fix. claude and pi work.
+- ~~**codex launcher missing in `fletcher-base`**~~ - RESOLVED. Re-verified on
+  2026-06-06: `codex --version` (codex-cli 0.137.0) runs in a real microVM fork,
+  in `docker run`, and in the published ghcr image; the `~/.local/bin/codex`
+  symlink resolves to a present file. The earlier breakage no longer reproduces
+  (most likely fixed by the M5 import-truncation fix). All three agents
+  (claude, codex, pi) work.
 
 **Tooling**
 
