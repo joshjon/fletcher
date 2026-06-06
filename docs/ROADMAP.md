@@ -580,12 +580,15 @@ operator and is intentionally not in this list.
   `job create --trigger cron --schedule ...`. *Deferred:* pruning old child runs
   (a cron job firing every minute accumulates rows) - add a retention cap when it
   bites.
-- **Install ergonomics - PARTLY DONE.** `fletcher doctor` now has a `Job runtime`
-  check (via a Health-exposed runtime/snapshot/base-image status) that catches the
-  two readiness gaps at doctor time instead of at job time: the mock runtime (no
-  real isolation) and no base image imported. A missing `runc` binary already
-  fails at daemon start (the runc driver validates it), so it surfaces via the
-  daemon check. *Still to do (deferred, low value):* `install.sh` auto-installing
+- **Install ergonomics - PARTLY DONE.** `fletcher doctor` has two Health-driven
+  readiness checks that catch gaps at doctor time instead of at job time: a `Job
+  runtime` check (the isolation stack: mock runtime warns about no real isolation)
+  and a separate `Base image` check (no image imported is a blocker; a newer
+  registry build is a follow-up). They are split because the runtime environment
+  and the base-image artifact are orthogonal - a custom image on a healthy
+  Firecracker stack is the common case, so an image nudge should not read as a
+  runtime fault. A missing `runc` binary already fails at daemon start (the runc
+  driver validates it), so it surfaces via the daemon check. *Still to do (deferred, low value):* `install.sh` auto-installing
   `btrfs-progs`/`runc` and provisioning a btrfs root for the explicit runc
   fallback - the common Firecracker path needs no extra packages. *Manual release
   action:* republish the `fletcher-base` ghcr image so brokered SSH works from the

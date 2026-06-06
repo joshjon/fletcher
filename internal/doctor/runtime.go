@@ -13,34 +13,41 @@ import (
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 )
 
-// CheckRuntimeReady asks the daemon (via Health) whether jobs and sessions can
-// actually run: the runtime gives real isolation, and a base image is imported.
-// It catches at doctor time the two things that otherwise surface as a raw error
-// only when a job or session is first created.
-func CheckRuntimeReady(socketPath string) Checker {
+// daemonHealth dials the daemon's local socket and returns its Health response.
+// Several checks key off the runtime status it carries.
+func daemonHealth(ctx context.Context, socketPath string) (*fletcherv1.HealthResponse, error) {
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", socketPath)
+			},
+		},
+	}
+	admin := fletcherv1connect.NewAdminServiceClient(client, "http://unix")
+	resp, err := admin.Health(ctx, connect.NewRequest(&fletcherv1.HealthRequest{}))
+	if err != nil {
+		return nil, err
+	}
+	return resp.Msg, nil
+}
+
+// CheckJobRuntime reports whether the execution stack gives real isolation: the
+// effective runtime and snapshot drivers. It is about the environment that must
+// pre-exist for any job or session, independent of which base image is loaded
+// into it (CheckBaseImage covers the image artifact separately).
+func CheckJobRuntime(socketPath string) Checker {
 	return CheckerFunc(func(ctx context.Context) Result {
 		const name = "Job runtime"
-		client := &http.Client{
-			Timeout: 3 * time.Second,
-			Transport: &http.Transport{
-				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					var d net.Dialer
-					return d.DialContext(ctx, "unix", socketPath)
-				},
-			},
-		}
-		admin := fletcherv1connect.NewAdminServiceClient(client, "http://unix")
-		resp, err := admin.Health(ctx, connect.NewRequest(&fletcherv1.HealthRequest{}))
+		health, err := daemonHealth(ctx, socketPath)
 		if err != nil {
 			// CheckDaemon already reports an unreachable daemon; don't duplicate.
-			return Result{Category: CategoryHost, Name: name, Status: StatusSkip, Detail: "daemon unreachable; runtime readiness not assessed"}
+			return Result{Category: CategoryHost, Name: name, Status: StatusSkip, Detail: "daemon unreachable; runtime not assessed"}
 		}
 
-		runtimeKind := resp.Msg.GetRuntime()
-		snapshotKind := resp.Msg.GetSnapshot()
-		stack := fmt.Sprintf("%s runtime / %s snapshot", runtimeKind, snapshotKind)
-
-		if runtimeKind == "mock" {
+		stack := fmt.Sprintf("%s runtime / %s snapshot", health.GetRuntime(), health.GetSnapshot())
+		if health.GetRuntime() == "mock" {
 			return Result{
 				Category: CategoryHost,
 				Name:     name,
@@ -49,25 +56,52 @@ func CheckRuntimeReady(socketPath string) Checker {
 				Plan:     mockRuntimePlan(),
 			}
 		}
-		if !resp.Msg.GetBaseImageAvailable() {
+		return Result{
+			Category: CategoryHost,
+			Name:     name,
+			Status:   StatusOK,
+			Detail:   fmt.Sprintf("%s, real isolation", stack),
+		}
+	})
+}
+
+// CheckBaseImage reports on the base-image artifact a job or session boots from:
+// whether one is imported at all (a blocker), and whether the registry has a
+// newer build than the imported template (a follow-up). This is independent of
+// the runtime - a custom image on a healthy Firecracker stack is the common
+// case, so the image gets its own line rather than riding on the runtime check.
+func CheckBaseImage(socketPath string) Checker {
+	return CheckerFunc(func(ctx context.Context) Result {
+		const name = "Base image"
+		health, err := daemonHealth(ctx, socketPath)
+		if err != nil {
+			return Result{Category: CategoryHost, Name: name, Status: StatusSkip, Detail: "daemon unreachable; base image not assessed"}
+		}
+
+		// The mock snapshot driver does not clone a real rootfs template, so a
+		// base image is not required in that (development) configuration.
+		if health.GetSnapshot() == "mock" {
+			return Result{Category: CategoryHost, Name: name, Status: StatusSkip, Detail: "mock snapshot: no base image required"}
+		}
+		if !health.GetBaseImageAvailable() {
 			// A blocker, not a warning: without a base image every job and
-			// session creation fails, so the runtime is not usable at all.
+			// session creation fails when it tries to clone a missing template.
 			return Result{
 				Category: CategoryHost,
 				Name:     name,
 				Status:   StatusFail,
-				Detail:   fmt.Sprintf("%s, but no base image is imported; jobs and sessions can't boot until you import one", stack),
-				Plan:     noBaseImagePlan(snapshotKind),
+				Detail:   "no base image imported; jobs and sessions can't boot until you import one",
+				Plan:     noBaseImagePlan(health.GetSnapshot()),
 			}
 		}
-		if resp.Msg.GetBaseImageUpdateAvailable() {
+		if health.GetBaseImageUpdateAvailable() {
 			// Not a blocker: the imported template still boots, but the registry
 			// has a newer build (e.g. a security update to the base rootfs).
 			return Result{
 				Category: CategoryHost,
 				Name:     name,
 				Status:   StatusWarn,
-				Detail:   fmt.Sprintf("%s, base image imported (a newer version is available)", stack),
+				Detail:   "imported (a newer version is available)",
 				Plan:     imageUpdatePlan(),
 			}
 		}
@@ -75,7 +109,7 @@ func CheckRuntimeReady(socketPath string) Checker {
 			Category: CategoryHost,
 			Name:     name,
 			Status:   StatusOK,
-			Detail:   fmt.Sprintf("%s, base image imported", stack),
+			Detail:   "imported",
 		}
 	})
 }

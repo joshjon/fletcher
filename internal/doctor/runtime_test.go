@@ -43,31 +43,57 @@ func serveRuntimeAdmin(t *testing.T, resp *fletcherv1.HealthResponse) string {
 	return sock
 }
 
-func TestCheckRuntimeReadyOK(t *testing.T) {
+func TestCheckJobRuntimeOK(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
 		Status: "ok", Runtime: "firecracker", Snapshot: "ext4", BaseImageAvailable: true,
 	})
-	res := CheckRuntimeReady(sock).Check(context.Background())
+	res := CheckJobRuntime(sock).Check(context.Background())
 	require.Equal(t, StatusOK, res.Status)
 	require.Nil(t, res.Plan)
 	require.Contains(t, res.Detail, "firecracker")
 }
 
-func TestCheckRuntimeReadyMockWarns(t *testing.T) {
+func TestCheckJobRuntimeMockWarns(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
 		Status: "ok", Runtime: "mock", Snapshot: "mock", BaseImageAvailable: true,
 	})
-	res := CheckRuntimeReady(sock).Check(context.Background())
+	res := CheckJobRuntime(sock).Check(context.Background())
 	require.Equal(t, StatusWarn, res.Status)
 	require.NotNil(t, res.Plan)
 	require.Equal(t, "real-runtime", res.Plan.ID)
 }
 
-func TestCheckRuntimeReadyNoBaseImageFails(t *testing.T) {
+// CheckJobRuntime no longer cares about the base image: a healthy runtime with
+// no image imported is still a healthy runtime (CheckBaseImage owns that).
+func TestCheckJobRuntimeOKWithoutBaseImage(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
 		Status: "ok", Runtime: "firecracker", Snapshot: "ext4", BaseImageAvailable: false,
 	})
-	res := CheckRuntimeReady(sock).Check(context.Background())
+	res := CheckJobRuntime(sock).Check(context.Background())
+	require.Equal(t, StatusOK, res.Status)
+	require.Nil(t, res.Plan)
+}
+
+func TestCheckJobRuntimeSkipsWhenDaemonDown(t *testing.T) {
+	res := CheckJobRuntime("/tmp/fletcher-nonexistent-rt.sock").Check(context.Background())
+	require.Equal(t, StatusSkip, res.Status)
+	require.Nil(t, res.Plan)
+}
+
+func TestCheckBaseImageOK(t *testing.T) {
+	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
+		Status: "ok", Runtime: "firecracker", Snapshot: "ext4", BaseImageAvailable: true,
+	})
+	res := CheckBaseImage(sock).Check(context.Background())
+	require.Equal(t, StatusOK, res.Status)
+	require.Nil(t, res.Plan)
+}
+
+func TestCheckBaseImageNoImageFails(t *testing.T) {
+	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
+		Status: "ok", Runtime: "firecracker", Snapshot: "ext4", BaseImageAvailable: false,
+	})
+	res := CheckBaseImage(sock).Check(context.Background())
 	// A missing base image blocks all job/session creation: Fail status and a
 	// blocker plan, kept consistent so the summary and the plan agree.
 	require.Equal(t, StatusFail, res.Status)
@@ -76,8 +102,31 @@ func TestCheckRuntimeReadyNoBaseImageFails(t *testing.T) {
 	require.Equal(t, PriorityBlocker, res.Plan.Priority)
 }
 
-func TestCheckRuntimeReadySkipsWhenDaemonDown(t *testing.T) {
-	res := CheckRuntimeReady("/tmp/fletcher-nonexistent-rt.sock").Check(context.Background())
+func TestCheckBaseImageUpdateWarns(t *testing.T) {
+	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
+		Status: "ok", Runtime: "firecracker", Snapshot: "ext4",
+		BaseImageAvailable: true, BaseImageUpdateAvailable: true,
+	})
+	res := CheckBaseImage(sock).Check(context.Background())
+	require.Equal(t, StatusWarn, res.Status)
+	require.NotNil(t, res.Plan)
+	require.Equal(t, "update-base-image", res.Plan.ID)
+	require.Equal(t, PriorityFollowup, res.Plan.Priority)
+}
+
+// The mock snapshot driver clones no real template, so a base image is not
+// required and the check skips rather than flagging a phantom blocker.
+func TestCheckBaseImageSkipsForMockSnapshot(t *testing.T) {
+	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
+		Status: "ok", Runtime: "mock", Snapshot: "mock", BaseImageAvailable: false,
+	})
+	res := CheckBaseImage(sock).Check(context.Background())
+	require.Equal(t, StatusSkip, res.Status)
+	require.Nil(t, res.Plan)
+}
+
+func TestCheckBaseImageSkipsWhenDaemonDown(t *testing.T) {
+	res := CheckBaseImage("/tmp/fletcher-nonexistent-rt.sock").Check(context.Background())
 	require.Equal(t, StatusSkip, res.Status)
 	require.Nil(t, res.Plan)
 }
