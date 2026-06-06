@@ -1,8 +1,9 @@
 #!/bin/sh
-# Fletcher installer. Fetches the latest release tarball, verifies its
-# SHA256 against the published SHA256SUMS, drops the binary at
-# /usr/local/bin/fletcher and the systemd unit at
-# /etc/systemd/system/fletcher.service.
+# Fletcher installer. Fetches the latest release tarball, verifies its SHA256
+# against the published SHA256SUMS, and installs the binary at
+# /usr/local/bin/fletcher. On Linux it also installs the systemd unit and sets
+# up the daemon (the fletcher user, state dirs, kvm group). On macOS it installs
+# the client only - connect it to a Linux daemon with `fletcher login`.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/joshjon/fletcher/main/scripts/install.sh | sudo sh
@@ -39,9 +40,13 @@ require id
 
 [ "$(id -u)" -eq 0 ] || die "install.sh must run as root (try: sudo sh install.sh)"
 
+# Fletcher is one binary: the daemon runs on Linux, the client runs anywhere.
+# On macOS we install it as a client only (no daemon, no systemd). Windows is
+# not supported.
 case "$(uname -s)" in
-	Linux) ;;
-	*) die "fletcher only supports Linux today" ;;
+	Linux)  OS=linux ;;
+	Darwin) OS=darwin ;;
+	*) die "unsupported OS: $(uname -s) (the client supports Linux and macOS; the daemon is Linux-only)" ;;
 esac
 
 case "$(uname -m)" in
@@ -70,7 +75,7 @@ else
 		[ -n "$VERSION" ] || die "could not resolve latest release from GitHub API"
 	fi
 
-	TARBALL="fletcher_${VERSION}_linux_${ARCH}.tar.gz"
+	TARBALL="fletcher_${VERSION}_${OS}_${ARCH}.tar.gz"
 	SUMS="SHA256SUMS"
 	BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
 
@@ -97,6 +102,15 @@ tar -xzf "${WORK}/${TARBALL}" -C "${WORK}"
 
 log "installing binary to ${PREFIX}/bin/fletcher"
 install -m 0755 "${WORK}/fletcher" "${PREFIX}/bin/fletcher"
+
+# macOS gets the client only: no daemon, no systemd, no system user. Connect it
+# to a Linux daemon over the tunnel with `fletcher login` (or `brew install` for
+# upgrades).
+if [ "$OS" != linux ]; then
+	log "installed the fletcher client."
+	log "connect it to your daemon: fletcher login <token>   (from 'fletcher peer pair' on the server)"
+	exit 0
+fi
 
 if [ -f "${WORK}/init/fletcher.service" ]; then
 	log "installing systemd unit to ${UNIT_PATH}"

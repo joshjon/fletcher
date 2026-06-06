@@ -337,8 +337,12 @@ You need three things on the device:
 2. **The tunnel is up.** Import that WireGuard config on the device and connect,
    so it can reach the daemon's tunnel address `10.99.0.1`.
 3. **The `fletcher` CLI.** It's the same binary; the client half runs anywhere.
-   There's no macOS release yet, so on a Mac build it from source (`make build`)
-   and use `./bin/fletcher`.
+   On macOS install the client with Homebrew (`brew install
+   joshjon/tap/fletcher`) or the install script (`curl -fsSL
+   https://raw.githubusercontent.com/joshjon/fletcher/main/scripts/install.sh |
+   sudo sh` - it detects macOS and installs the client only, no daemon). A Mac
+   build is a pure client: the daemon is Linux-only, and `fletcher --help` groups
+   commands into "Client" and "Daemon (Linux host)" so it's clear which apply.
 
 **Log in once, then just use `fletcher`.** Paste the `fletcher login <token>`
 line from the pair output on the device:

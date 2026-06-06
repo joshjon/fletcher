@@ -31,9 +31,13 @@ builds:
       - -X github.com/joshjon/fletcher/internal/buildinfo.Date={{ .CommitDate }}
     goos:
       - linux
+      - darwin
     goarch:
       - amd64
       - arm64
+    # The Firecracker VMM, guest kernel, and guest agent are behind //go:build
+    # linux embed stubs, so the darwin binaries carry none of them and ship slim
+    # as a pure client (the daemon is Linux-only).
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
@@ -50,6 +54,22 @@ archives:
 checksum:
   name_template: SHA256SUMS
   algorithm: sha256
+
+# Homebrew is the idiomatic macOS install for the client (casks are macOS-only,
+# so this targets the darwin artifacts). It installs just the binary - a Mac
+# connects to a Linux daemon via `fletcher login`. Requires a tap repo
+# (joshjon/homebrew-tap) and a token with write access; goreleaser pushes the
+# cask there on release.
+homebrew_casks:
+  - name: fletcher
+    repository:
+      owner: joshjon
+      name: homebrew-tap
+    homepage: "https://github.com/joshjon/fletcher"
+    description: "Private agent compute on hardware you own (Linux daemon + cross-platform client)"
+    caveats: |
+      Installed the fletcher client. Connect it to your Linux daemon with:
+        fletcher login <token>   (from `fletcher peer pair` on the server)
 
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"

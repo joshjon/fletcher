@@ -61,25 +61,38 @@ func newApp() *cli.Command {
 			},
 		},
 		Commands: []*cli.Command{
-			serveCmd(),
-			daemonCmd(),
-			healthCmd(),
-			doctorCmd(),
-			jobCmd(),
-			sessionCmd(),
-			imageCmd(),
-			forkRunCmd(),
-			modelCmd(),
-			settingsCmd(),
-			secretCmd(),
-			approvalCmd(),
-			peerCmd(),
-			loginCmd(),
-			logoutCmd(),
-			versionCmd(),
+			// Client commands: drive a daemon over the local socket or a remote
+			// tunnel; they run on any OS (this is all a Mac client needs).
+			client(healthCmd()),
+			client(loginCmd()),
+			client(logoutCmd()),
+			client(jobCmd()),
+			client(sessionCmd()),
+			client(modelCmd()),
+			client(secretCmd()),
+			client(settingsCmd()),
+			client(approvalCmd()),
+			client(peerCmd()),
+			client(versionCmd()),
+			// Daemon commands: run on the Linux host that hosts the daemon.
+			daemonHost(serveCmd()),
+			daemonHost(daemonCmd()),
+			daemonHost(doctorCmd()),
+			daemonHost(imageCmd()),
+			forkRunCmd(), // hidden internal re-exec
 		},
 	}
 }
+
+// Command categories group `fletcher --help` so a client (e.g. on a Mac) can
+// tell at a glance which commands are for driving a daemon versus running one.
+const (
+	catClient = "Client"
+	catDaemon = "Daemon (Linux host)"
+)
+
+func client(c *cli.Command) *cli.Command     { c.Category = catClient; return c }
+func daemonHost(c *cli.Command) *cli.Command { c.Category = catDaemon; return c }
 
 func versionCmd() *cli.Command {
 	return &cli.Command{
