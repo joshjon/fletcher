@@ -580,12 +580,17 @@ operator and is intentionally not in this list.
   `job create --trigger cron --schedule ...`. *Deferred:* pruning old child runs
   (a cron job firing every minute accumulates rows) - add a retention cap when it
   bites.
-- **Install ergonomics.** `scripts/install.sh` should check/install `btrfs-progs`
-  and `runc`, detect or guide a btrfs snapshot root, and default Linux installs to
-  the real runtime; `fletcher doctor` should verify runtime prereqs (binaries +
-  snapshot root) instead of failing at job time. Also: **republish the
-  `fletcher-base` ghcr image with `sshd`** (the Phase-3 addition), so brokered SSH
-  works from the published image, not only a local `make image` build.
+- **Install ergonomics - PARTLY DONE.** `fletcher doctor` now has a `Job runtime`
+  check (via a Health-exposed runtime/snapshot/base-image status) that catches the
+  two readiness gaps at doctor time instead of at job time: the mock runtime (no
+  real isolation) and no base image imported. A missing `runc` binary already
+  fails at daemon start (the runc driver validates it), so it surfaces via the
+  daemon check. *Still to do (deferred, low value):* `install.sh` auto-installing
+  `btrfs-progs`/`runc` and provisioning a btrfs root for the explicit runc
+  fallback - the common Firecracker path needs no extra packages. *Manual release
+  action:* republish the `fletcher-base` ghcr image so brokered SSH works from the
+  published image (the Dockerfile already adds `sshd`; only a local `make image`
+  build carries it until the image is re-pushed).
 - **Fix the codex launcher in `fletcher-base`.** `command -v codex` fails in the
   fork (the `~/.local/bin/codex` symlink targets an absent path). The image
   advertises three agents but ships two working (claude, pi).

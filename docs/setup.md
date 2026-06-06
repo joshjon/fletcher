@@ -235,6 +235,8 @@ The doctor output is also available as JSON for scripting:
 Common things the doctor catches:
 
 - Daemon not running or not reachable on the Unix socket
+- Job runtime not ready: the mock runtime (no real isolation), or no base
+  image imported yet (jobs and sessions can't boot until one is)
 - `/dev/net/tun` missing (kernel TUN module not loaded)
 - Multiple default routes on the same subnet (causes asymmetric paths)
 - Public IP in the CGNAT range (need a VPN like Tailscale; see Mode B)

@@ -28,4 +28,14 @@ message HealthResponse {
   // so `fletcher doctor` can catch the case where the endpoint is stale or
   // missing even though the router probe looks healthy.
   string public_endpoint = 5;
+  // runtime is the effective runtime driver resolved at startup: "firecracker",
+  // "runc", or "mock". Exposed so `fletcher doctor` can tell whether jobs run
+  // with real isolation.
+  string runtime = 6;
+  // snapshot is the effective snapshot driver resolved at startup: "ext4",
+  // "btrfs", or "mock".
+  string snapshot = 7;
+  // base_image_available is true when at least one base-image rootfs template is
+  // imported for the active snapshot driver, so jobs and sessions can boot.
+  bool base_image_available = 8;
 }

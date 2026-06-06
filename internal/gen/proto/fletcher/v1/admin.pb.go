@@ -73,8 +73,18 @@ type HealthResponse struct {
 	// so `fletcher doctor` can catch the case where the endpoint is stale or
 	// missing even though the router probe looks healthy.
 	PublicEndpoint string `protobuf:"bytes,5,opt,name=public_endpoint,json=publicEndpoint,proto3" json:"public_endpoint,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// runtime is the effective runtime driver resolved at startup: "firecracker",
+	// "runc", or "mock". Exposed so `fletcher doctor` can tell whether jobs run
+	// with real isolation.
+	Runtime string `protobuf:"bytes,6,opt,name=runtime,proto3" json:"runtime,omitempty"`
+	// snapshot is the effective snapshot driver resolved at startup: "ext4",
+	// "btrfs", or "mock".
+	Snapshot string `protobuf:"bytes,7,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	// base_image_available is true when at least one base-image rootfs template is
+	// imported for the active snapshot driver, so jobs and sessions can boot.
+	BaseImageAvailable bool `protobuf:"varint,8,opt,name=base_image_available,json=baseImageAvailable,proto3" json:"base_image_available,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *HealthResponse) Reset() {
@@ -142,19 +152,43 @@ func (x *HealthResponse) GetPublicEndpoint() string {
 	return ""
 }
 
+func (x *HealthResponse) GetRuntime() string {
+	if x != nil {
+		return x.Runtime
+	}
+	return ""
+}
+
+func (x *HealthResponse) GetSnapshot() string {
+	if x != nil {
+		return x.Snapshot
+	}
+	return ""
+}
+
+func (x *HealthResponse) GetBaseImageAvailable() bool {
+	if x != nil {
+		return x.BaseImageAvailable
+	}
+	return false
+}
+
 var File_fletcher_v1_admin_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_admin_proto_rawDesc = "" +
 	"\n" +
 	"\x17fletcher/v1/admin.proto\x12\vfletcher.v1\"\x0f\n" +
-	"\rHealthRequest\"\xa2\x01\n" +
+	"\rHealthRequest\"\x8a\x02\n" +
 	"\x0eHealthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
 	"\x06commit\x18\x03 \x01(\tR\x06commit\x12\x1d\n" +
 	"\n" +
 	"started_at\x18\x04 \x01(\x03R\tstartedAt\x12'\n" +
-	"\x0fpublic_endpoint\x18\x05 \x01(\tR\x0epublicEndpoint2S\n" +
+	"\x0fpublic_endpoint\x18\x05 \x01(\tR\x0epublicEndpoint\x12\x18\n" +
+	"\aruntime\x18\x06 \x01(\tR\aruntime\x12\x1a\n" +
+	"\bsnapshot\x18\a \x01(\tR\bsnapshot\x120\n" +
+	"\x14base_image_available\x18\b \x01(\bR\x12baseImageAvailable2S\n" +
 	"\fAdminService\x12C\n" +
 	"\x06Health\x12\x1a.fletcher.v1.HealthRequest\x1a\x1b.fletcher.v1.HealthResponse\"\x00B\xb1\x01\n" +
 	"\x0fcom.fletcher.v1B\n" +

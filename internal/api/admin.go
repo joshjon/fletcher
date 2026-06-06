@@ -18,23 +18,36 @@ type PublicEndpointProvider interface {
 	PublicEndpoint() string
 }
 
+// RuntimeStatus is the daemon's effective runtime configuration resolved at
+// startup, surfaced via Health so `fletcher doctor` can assess job readiness.
+type RuntimeStatus struct {
+	// Runtime is the effective runtime driver: "firecracker", "runc", or "mock".
+	Runtime string
+	// Snapshot is the effective snapshot driver: "ext4", "btrfs", or "mock".
+	Snapshot string
+	// BaseImageAvailable is true when at least one base-image template exists for
+	// the active snapshot driver.
+	BaseImageAvailable bool
+}
+
 // AdminService implements the daemon-administration RPCs (health checks etc.)
 // exposed over the local Unix socket.
 type AdminService struct {
 	fletcherv1connect.UnimplementedAdminServiceHandler
 	startedAt int64
 	endpoint  PublicEndpointProvider
+	runtime   RuntimeStatus
 }
 
 // NewAdminService builds an admin service that reports startedAt as the
 // daemon's start time (Unix epoch seconds). endpoint may be nil (e.g. in
 // tests), in which case Health reports an empty public endpoint.
-func NewAdminService(startedAt int64, endpoint PublicEndpointProvider) *AdminService {
-	return &AdminService{startedAt: startedAt, endpoint: endpoint}
+func NewAdminService(startedAt int64, endpoint PublicEndpointProvider, runtime RuntimeStatus) *AdminService {
+	return &AdminService{startedAt: startedAt, endpoint: endpoint, runtime: runtime}
 }
 
-// Health returns the daemon's liveness state plus build identity and the
-// effective public endpoint.
+// Health returns the daemon's liveness state plus build identity, the effective
+// public endpoint, and the effective runtime configuration.
 func (s *AdminService) Health(_ context.Context, _ *connect.Request[fletcherv1.HealthRequest]) (*connect.Response[fletcherv1.HealthResponse], error) {
 	info := buildinfo.Info()
 	endpoint := ""
@@ -42,10 +55,13 @@ func (s *AdminService) Health(_ context.Context, _ *connect.Request[fletcherv1.H
 		endpoint = s.endpoint.PublicEndpoint()
 	}
 	return connect.NewResponse(&fletcherv1.HealthResponse{
-		Status:         "ok",
-		Version:        info.Version,
-		Commit:         info.Commit,
-		StartedAt:      s.startedAt,
-		PublicEndpoint: endpoint,
+		Status:             "ok",
+		Version:            info.Version,
+		Commit:             info.Commit,
+		StartedAt:          s.startedAt,
+		PublicEndpoint:     endpoint,
+		Runtime:            s.runtime.Runtime,
+		Snapshot:           s.runtime.Snapshot,
+		BaseImageAvailable: s.runtime.BaseImageAvailable,
 	}), nil
 }

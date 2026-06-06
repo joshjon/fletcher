@@ -325,6 +325,11 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		peerSync:         &tunnelPeerSyncer{peers: peerSvc, tunnel: netSetup.Tunnel, logger: logger},
 		settings:         settings.NewStore(queries),
 		settingsDefaults: settingsDefaults(cfg),
+		runtimeStatus: api.RuntimeStatus{
+			Runtime:            driverKind(cfg.RuntimeKind),
+			Snapshot:           driverKind(cfg.SnapshotKind),
+			BaseImageAvailable: baseImageAvailable(cfg),
+		},
 	}
 
 	connectSrv := newHTTPServer(startedAt.Unix(), connectDeps, logger)
@@ -369,6 +374,9 @@ type connectDeps struct {
 	// settingsDefaults maps each setting key to the daemon's resolved default,
 	// so `fletcher settings list` shows the effective value, not just "(default)".
 	settingsDefaults map[string]string
+	// runtimeStatus is the effective runtime config surfaced via Health for
+	// `fletcher doctor`.
+	runtimeStatus api.RuntimeStatus
 }
 
 // tunnelPeerSyncer is the production PeerSyncer: it pulls the current
@@ -525,7 +533,7 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	)
 
 	adminPath, adminHandler := fletcherv1connect.NewAdminServiceHandler(
-		api.NewAdminService(startedAt, deps.peers), interceptors,
+		api.NewAdminService(startedAt, deps.peers, deps.runtimeStatus), interceptors,
 	)
 	mux.Handle(adminPath, adminHandler)
 
@@ -999,6 +1007,34 @@ func driverKind(v string) string {
 		return defaultDriverKind
 	}
 	return v
+}
+
+// baseImageAvailable reports whether at least one base-image rootfs template is
+// imported for the active snapshot driver, so jobs and sessions can boot. The
+// daemon runs as the user that owns the images directory, so it can stat it
+// (the CLI running `fletcher doctor` usually cannot). Surfaced via Health.
+func baseImageAvailable(cfg Config) bool {
+	root := cfg.BtrfsRoot
+	if root == "" {
+		root = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "images"))
+	if err != nil {
+		return false
+	}
+	switch driverKind(cfg.SnapshotKind) {
+	case "ext4":
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".ext4") {
+				return true
+			}
+		}
+		return false
+	case "mock":
+		return true // the mock snapshot driver needs no imported image
+	default: // btrfs subvolume templates: any entry under images/
+		return len(entries) > 0
+	}
 }
 
 func newLogger(level string) *slog.Logger {

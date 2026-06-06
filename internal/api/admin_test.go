@@ -13,7 +13,11 @@ import (
 
 func TestHealthReportsStartedAtAndStatus(t *testing.T) {
 	const startedAt = int64(1_700_000_000)
-	svc := api.NewAdminService(startedAt, stubEndpoint("vpn.example.com:51820"))
+	svc := api.NewAdminService(startedAt, stubEndpoint("vpn.example.com:51820"), api.RuntimeStatus{
+		Runtime:            "firecracker",
+		Snapshot:           "ext4",
+		BaseImageAvailable: true,
+	})
 
 	resp, err := svc.Health(context.Background(), connect.NewRequest(&fletcherv1.HealthRequest{}))
 	require.NoError(t, err)
@@ -22,13 +26,15 @@ func TestHealthReportsStartedAtAndStatus(t *testing.T) {
 	require.NotEmpty(t, resp.Msg.GetVersion())
 	require.NotEmpty(t, resp.Msg.GetCommit())
 	require.Equal(t, "vpn.example.com:51820", resp.Msg.GetPublicEndpoint())
+	require.Equal(t, "firecracker", resp.Msg.GetRuntime())
+	require.True(t, resp.Msg.GetBaseImageAvailable())
 }
 
 // TestHealthReportsEmptyEndpointWhenUnset covers the nil-provider path
 // (the endpoint provider is optional) and the empty-endpoint case doctor
 // keys its restart remediation off.
 func TestHealthReportsEmptyEndpointWhenUnset(t *testing.T) {
-	svc := api.NewAdminService(0, nil)
+	svc := api.NewAdminService(0, nil, api.RuntimeStatus{})
 	resp, err := svc.Health(context.Background(), connect.NewRequest(&fletcherv1.HealthRequest{}))
 	require.NoError(t, err)
 	require.Empty(t, resp.Msg.GetPublicEndpoint())
