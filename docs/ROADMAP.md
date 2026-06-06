@@ -563,6 +563,38 @@ single-box, daemon-gated, no-route-into-VM-land constraints.
   a busy one keeps running and has its idle clock reset; the count cap refuses
   with a usage report; list shows disk + last-used.
 
+## Toward v1 - hardening (in progress)
+
+With M1-M6 done, the architecture is feature-complete on the thesis (ephemeral
+jobs + durable interactive sessions, both verified on real hardware). This is the
+short list being worked through before a v1 is a candidate, distinct from the
+"await a usage signal" backlog below. Release *tagging* is done manually by the
+operator and is intentionally not in this list.
+
+- **Cron scheduler (recurring jobs).** `cron` is currently only a trigger value
+  with no scheduler firing it. Build the scheduling loop so a `cron` job runs on
+  its schedule (the agent-authored-then-automated pattern, DESIGN §4). This is the
+  one genuine feature gap relative to the job-model thesis.
+- **Install ergonomics.** `scripts/install.sh` should check/install `btrfs-progs`
+  and `runc`, detect or guide a btrfs snapshot root, and default Linux installs to
+  the real runtime; `fletcher doctor` should verify runtime prereqs (binaries +
+  snapshot root) instead of failing at job time. Also: **republish the
+  `fletcher-base` ghcr image with `sshd`** (the Phase-3 addition), so brokered SSH
+  works from the published image, not only a local `make image` build.
+- **Fix the codex launcher in `fletcher-base`.** `command -v codex` fails in the
+  fork (the `~/.local/bin/codex` symlink targets an absent path). The image
+  advertises three agents but ships two working (claude, pi).
+- **MCP egress hardening.** `validateEgressURL` is permissive (no SSRF / loopback
+  / cloud-metadata guard). Given the "nothing leaves your network" positioning,
+  add an egress guard.
+
+**Deferred for now (revisit on demand, not v1-blocking).** Audit-log storage (the
+operator does not want it yet; the `audit.Noop` seam stays). Gateway breadth
+(streaming in the OpenAI-compatible translation path; a second provider). APNs
+push (polling works). NAT-PMP / PCP and DDNS (UPnP + a manual endpoint cover the
+common case). pi-extension `registerProvider` (gated on the external `pi` API
+stabilising). These stay in the backlog below.
+
 ## Backlog (not scheduled - awaiting a usage signal)
 
 Per DESIGN.md §13, these wait for real demand rather than being pre-planned.
