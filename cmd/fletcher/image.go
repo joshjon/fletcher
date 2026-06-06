@@ -130,21 +130,25 @@ and re-flattens it, replacing the template in place. Existing sessions
 keep their already-cloned forks; only new jobs and sessions use the
 updated template. With no name it updates the daemon's default_image.
 
-Needs root and docker, like 'image import':
+Needs root and docker, like 'image import'. The snapshot root and image
+name default to the daemon's configured btrfs_root and default_image, so
+the common case is just:
 
-  sudo fletcher image update --btrfs-root /var/lib/fletcher/snapshots`,
+  sudo fletcher image update
+
+Pass --btrfs-root or a [name] to override either.`,
 		Flags: []cli.Flag{btrfsRootFlag(), socketFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if runtime.GOOS != "linux" {
 				return errors.New("image update is Linux-only")
 			}
-			root := cmd.String("btrfs-root")
-			if root == "" {
-				return errors.New("set --btrfs-root (or FLETCHER_BTRFS_ROOT) to the daemon's snapshot root")
+			root, err := resolveBtrfsRoot(ctx, cmd)
+			if err != nil {
+				return err
 			}
 			name := cmd.Args().First()
 			if name == "" {
-				resolved, rerr := defaultImageSetting(ctx, cmd)
+				resolved, rerr := settingValue(ctx, cmd, settings.KeyDefaultImage)
 				if rerr != nil {
 					return rerr
 				}
@@ -184,14 +188,34 @@ Needs root and docker, like 'image import':
 	}
 }
 
-// defaultImageSetting asks the daemon for the effective default_image setting.
-func defaultImageSetting(ctx context.Context, cmd *cli.Command) (string, error) {
+// resolveBtrfsRoot returns the snapshot root to operate on: the --btrfs-root
+// flag (or its env) when set, otherwise the daemon's effective btrfs_root
+// setting. `image update` already coordinates with the daemon (it reads
+// default_image), so it should not make the caller re-specify a root the daemon
+// already knows.
+func resolveBtrfsRoot(ctx context.Context, cmd *cli.Command) (string, error) {
+	if root := cmd.String("btrfs-root"); root != "" {
+		return root, nil
+	}
+	root, err := settingValue(ctx, cmd, settings.KeyBtrfsRoot)
+	if err != nil {
+		return "", fmt.Errorf("set --btrfs-root (or FLETCHER_BTRFS_ROOT), or start the daemon so it can be resolved: %w", err)
+	}
+	if root == "" {
+		return "", errors.New("set --btrfs-root (or FLETCHER_BTRFS_ROOT) to the daemon's snapshot root")
+	}
+	return root, nil
+}
+
+// settingValue asks the daemon for the effective value of a single setting,
+// returning "" when the key is unset.
+func settingValue(ctx context.Context, cmd *cli.Command, key string) (string, error) {
 	resp, err := newSettingsClient(cmd).ListSettings(ctx, connect.NewRequest(&fletcherv1.ListSettingsRequest{}))
 	if err != nil {
-		return "", fmt.Errorf("look up default_image (is the daemon running?): %w", err)
+		return "", fmt.Errorf("look up %s (is the daemon running?): %w", key, err)
 	}
 	for _, s := range resp.Msg.GetSettings() {
-		if s.GetKey() == settings.KeyDefaultImage {
+		if s.GetKey() == key {
 			return s.GetValue(), nil
 		}
 	}
