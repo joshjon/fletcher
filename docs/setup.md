@@ -371,15 +371,15 @@ fletcher --remote 10.99.0.1:11700 --token <token> job list
 > $FLETCHER_TOKEN` and `unset` whichever is set (and remove it from your shell
 > profile). The CLI also prints a warning when it targets a remote with no token.
 
-**Spin up a microVM remotely.** A `job create` runs its command inside a
-Firecracker microVM on the server (assuming the Firecracker runtime and an
-imported base image - see [Running real agents](#running-real-agents-in-a-microvm)):
+**Spin up a microVM remotely.** Once you've run `fletcher login`, commands need
+no flags. A `job create` runs its command inside a Firecracker microVM on the
+server (assuming the Firecracker runtime and an imported base image - see
+[Running real agents](#running-real-agents-in-a-microvm)):
 
 ```sh
-fletcher --remote 10.99.0.1:11700 --token <token> \
-  job create --name remote-vm --image fletcher-base \
+fletcher job create --name remote-vm --image fletcher-base \
   --command "echo KERNEL=\$(uname -r); cat /proc/1/comm; exit 3"
-fletcher --remote 10.99.0.1:11700 --token <token> job get <job-id>
+fletcher job get <job-id>
 ```
 
 The `exit 3` makes the job fail so its captured output lands in the job's error
@@ -511,10 +511,11 @@ as everything else, generalised from HTTP to SSH. Point VS Code or JetBrains
 Remote-SSH at the host `fletcher-dev` and it connects; `scp`/`sftp` and
 port-forwarding work too. Connecting to a *stopped* session wakes it first.
 
-To drive a session on a remote daemon from a paired laptop, the `ssh` setup also
-works over the tunnel - run `fletcher --remote 10.99.0.1:11700 --token <token>
-session ssh dev` and the generated `ProxyCommand` carries the same `--remote`
-flags.
+From a logged-in laptop, `fletcher session ssh dev` works over the tunnel just
+the same - the generated `ProxyCommand` uses your stored login, so `ssh
+fletcher-dev` keeps working. (If you drive the daemon with explicit
+`--remote/--token` instead of `fletcher login`, the `ProxyCommand` carries those
+through.)
 
 ### Stop, start, and disk persistence
 
