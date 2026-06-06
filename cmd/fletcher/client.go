@@ -65,3 +65,8 @@ func newModelsClient(cmd *cli.Command) fletcherv1connect.ModelServiceClient {
 	hc, base, opts := clientTarget(cmd)
 	return fletcherv1connect.NewModelServiceClient(hc, base, opts...)
 }
+
+func newSessionsClient(cmd *cli.Command) fletcherv1connect.SessionServiceClient {
+	hc, base, opts := clientTarget(cmd)
+	return fletcherv1connect.NewSessionServiceClient(hc, base, opts...)
+}

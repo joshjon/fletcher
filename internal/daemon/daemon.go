@@ -38,6 +38,7 @@ import (
 	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
 	"github.com/joshjon/fletcher/internal/runtime/runcdriver"
 	"github.com/joshjon/fletcher/internal/secrets"
+	"github.com/joshjon/fletcher/internal/session"
 	"github.com/joshjon/fletcher/internal/settings"
 	"github.com/joshjon/fletcher/internal/snapshot"
 	"github.com/joshjon/fletcher/internal/snapshot/btrfsdriver"
@@ -261,26 +262,41 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, &http.Client{Timeout: 30 * time.Second}, approvalSvc)
 	logger.Info("mcp server ready", slog.String("base_url", mcpURL))
 
+	// Env every agent inherits: it points all agents at the daemon gateway/MCP
+	// so keys never enter a fork (DESIGN.md §6). Shared by ephemeral jobs and
+	// durable sessions - one execution engine, one environment (§4).
+	agentEnv := []string{
+		// OpenAI-compatible path (Codex, Aider, OpenHands, pi). The
+		// gateway's /v1/chat/completions handler translates to Anthropic.
+		"OPENAI_BASE_URL=" + gatewayURL + "/v1",
+		"OPENAI_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
+		// Anthropic-native path (Claude Code). The gateway's /v1/messages
+		// handler proxies the raw Messages request to api.anthropic.com.
+		"ANTHROPIC_BASE_URL=" + gatewayURL,
+		"ANTHROPIC_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
+		"FLETCHER_MCP_URL=" + mcpURL,
+		// Model catalog (Phase 14) - pi-extension and other agents fetch
+		// this on startup to discover providers without per-job config.
+		"FLETCHER_CATALOG_URL=" + gatewayURL + "/v1/catalog.json",
+	}
+
 	supervisor := job.NewSupervisor(queries, rtDriver, snapDriver, logger, job.SupervisorOptions{
-		JobEnv: []string{
-			// OpenAI-compatible path (Codex, Aider, OpenHands, pi). The
-			// gateway's /v1/chat/completions handler translates to Anthropic.
-			"OPENAI_BASE_URL=" + gatewayURL + "/v1",
-			"OPENAI_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
-			// Anthropic-native path (Claude Code). The gateway's /v1/messages
-			// handler proxies the raw Messages request to api.anthropic.com.
-			"ANTHROPIC_BASE_URL=" + gatewayURL,
-			"ANTHROPIC_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
-			"FLETCHER_MCP_URL=" + mcpURL,
-			// Model catalog (Phase 14) - pi-extension and other agents fetch
-			// this on startup to discover providers without per-job config.
-			"FLETCHER_CATALOG_URL=" + gatewayURL + "/v1/catalog.json",
-		},
+		JobEnv:          agentEnv,
 		CredentialsRoot: cfg.CredentialsDir,
 	})
 
+	// Durable sessions reuse the runtime + snapshot drivers. The session-capable
+	// runtime (firecracker) implements runtime.SessionRuntime; other runtimes
+	// leave it nil and session lifecycle calls return a clear error.
+	sessionRuntime, _ := rtDriver.(runtime.SessionRuntime)
+	sessionMgr := session.NewManager(queries, snapDriver, sessionRuntime, agentEnv, logger)
+	if err := sessionMgr.ReconcileOnBoot(ctx); err != nil {
+		return nil, fmt.Errorf("reconcile sessions: %w", err)
+	}
+
 	connectDeps := connectDeps{
 		jobs:             job.NewService(queries, supervisor),
+		sessions:         sessionMgr,
 		secrets:          secretsStore,
 		approvals:        approvalSvc,
 		peers:            peerSvc,
@@ -321,6 +337,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 // as more services land.
 type connectDeps struct {
 	jobs      api.JobsBackend
+	sessions  api.SessionsBackend
 	secrets   api.SecretsBackend
 	approvals api.ApprovalsBackend
 	peers     api.PeersBackend
@@ -462,6 +479,11 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		api.NewJobsService(deps.jobs), interceptors,
 	)
 	mux.Handle(jobsPath, jobsHandler)
+
+	sessionsPath, sessionsHandler := fletcherv1connect.NewSessionServiceHandler(
+		api.NewSessionsService(deps.sessions), interceptors,
+	)
+	mux.Handle(sessionsPath, sessionsHandler)
 
 	secretsPath, secretsHandler := fletcherv1connect.NewSecretServiceHandler(
 		api.NewSecretsService(deps.secrets), interceptors,
