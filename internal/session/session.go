@@ -237,6 +237,12 @@ func (m *Manager) Delete(ctx context.Context, ref string) (bool, error) {
 	if derr := m.snapshot.Delete(context.WithoutCancel(ctx), row.ForkID); derr != nil {
 		m.logger.Warn("delete session fork", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
 	}
+	// Drop any on-disk VM state (e.g. a hibernation snapshot) for the session.
+	if m.runtime != nil {
+		if derr := m.runtime.DiscardSession(context.WithoutCancel(ctx), row.ID); derr != nil {
+			m.logger.Warn("discard session vm state", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+		}
+	}
 	if _, derr := m.q.DeleteSession(ctx, row.ID); derr != nil {
 		return false, fmt.Errorf("delete session: %w", derr)
 	}

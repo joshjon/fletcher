@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -62,6 +63,7 @@ type Driver struct {
 	memSizeMib        int64
 	forwards          []Forward
 	log               *logrus.Entry
+	logger            *slog.Logger
 }
 
 // Options configures a Driver. FirecrackerBinary and KernelPath are the VMM
@@ -75,6 +77,10 @@ type Options struct {
 	// VcpuCount defaults to 1, MemSizeMib to 512 when zero.
 	VcpuCount  int64
 	MemSizeMib int64
+	// Logger is the driver's operational logger (session lifecycle, hibernation
+	// fallbacks). Distinct from the SDK's own logging, which stays discarded.
+	// Defaults to slog.Default() when nil.
+	Logger *slog.Logger
 }
 
 // New constructs a Driver, validating the VMM assets are present.
@@ -106,6 +112,11 @@ func New(opts Options) (*Driver, error) {
 	logger := logrus.New()
 	logger.SetOutput(io.Discard)
 
+	opLogger := opts.Logger
+	if opLogger == nil {
+		opLogger = slog.Default()
+	}
+
 	return &Driver{
 		firecrackerBinary: opts.FirecrackerBinary,
 		kernelPath:        opts.KernelPath,
@@ -114,6 +125,7 @@ func New(opts Options) (*Driver, error) {
 		memSizeMib:        mem,
 		forwards:          opts.Forwards,
 		log:               logrus.NewEntry(logger),
+		logger:            opLogger,
 	}, nil
 }
 

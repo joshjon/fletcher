@@ -59,4 +59,8 @@ type SessionHandle interface {
 // on those runtimes.
 type SessionRuntime interface {
 	StartSession(ctx context.Context, spec SessionSpec) (SessionHandle, error)
+	// DiscardSession removes a session's on-disk VM state (any hibernation
+	// snapshot and runtime sockets) when the session is deleted. The fork is
+	// owned by the snapshot driver and removed separately.
+	DiscardSession(ctx context.Context, sessionID string) error
 }

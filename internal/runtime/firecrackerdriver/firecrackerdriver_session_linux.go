@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -23,20 +24,35 @@ import (
 // booting and start listening before giving up.
 const sessionStartGrace = 30 * time.Second
 
-// StartSession boots a persistent session VM against its fork and returns a
-// handle whose Exec runs commands in it. Unlike Run, the VM stays up (the guest
-// runs as a control server) until the handle's Stop is called. Satisfies
-// runtime.SessionRuntime.
+// StartSession brings a persistent session VM up and returns a handle whose
+// Exec runs commands in it. If a valid hibernation snapshot exists it is
+// restored (instant wake, live process tree intact); otherwise the VM cold
+// boots against its fork. Unlike Run, the VM stays up until the handle's Stop.
+// Satisfies runtime.SessionRuntime.
 func (d *Driver) StartSession(ctx context.Context, spec fcruntime.SessionSpec) (fcruntime.SessionHandle, error) {
 	if spec.RootfsPath == "" {
 		return nil, errors.New("firecracker: session RootfsPath is required")
 	}
-
 	vmDir := filepath.Join(d.runDir, "session-"+sanitiseID(spec.SessionID))
-	// The vmDir is reused across starts (it is keyed by session id) and holds
-	// only ephemeral runtime sockets, never the fork. A previous run that died
-	// with the daemon leaves a stale fc.sock behind, which Firecracker refuses
-	// to overwrite; start from a clean slate so a session can boot again.
+
+	if d.hasValidSnapshot(vmDir) {
+		handle, err := d.restoreSession(ctx, spec, vmDir)
+		if err == nil {
+			return handle, nil
+		}
+		// A snapshot that won't restore is not load-bearing: disk is the source
+		// of truth (DESIGN.md §5/§11), so fall back to a cold boot.
+		d.logger.Warn("restore from hibernation snapshot failed; cold-booting from disk",
+			slog.String("session_id", spec.SessionID), slog.String("err", err.Error()))
+	}
+	return d.coldBootSession(ctx, spec, vmDir)
+}
+
+// coldBootSession boots a fresh session VM against its fork from a clean vmDir.
+func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec, vmDir string) (fcruntime.SessionHandle, error) {
+	// The vmDir is reused across starts (keyed by session id). A previous run
+	// that died with the daemon - or a snapshot we just failed to restore -
+	// leaves stale files behind; start from a clean slate.
 	if err := os.RemoveAll(vmDir); err != nil {
 		return nil, fmt.Errorf("firecracker: clear stale session vm dir: %w", err)
 	}
@@ -94,7 +110,19 @@ func (d *Driver) StartSession(ctx context.Context, spec fcruntime.SessionSpec) (
 		vmDir:    vmDir,
 		vmCancel: vmCancel,
 		env:      spec.Env,
+		snapID:   d.snapshotIdentity(),
 	}, nil
+}
+
+// DiscardSession removes a session's on-disk VM state (any hibernation snapshot
+// and sockets). Called when a session is deleted; the fork itself is owned by
+// the snapshot driver.
+func (d *Driver) DiscardSession(_ context.Context, sessionID string) error {
+	vmDir := filepath.Join(d.runDir, "session-"+sanitiseID(sessionID))
+	if err := os.RemoveAll(vmDir); err != nil {
+		return fmt.Errorf("firecracker: discard session vm dir: %w", err)
+	}
+	return nil
 }
 
 // fcSession is a running session VM. Satisfies runtime.SessionHandle.
@@ -104,6 +132,9 @@ type fcSession struct {
 	vmDir    string
 	vmCancel context.CancelFunc
 	env      []string
+	// snapID fingerprints the VMM+kernel a hibernation snapshot is tied to, so a
+	// later start can tell a usable snapshot from one a Fletcher upgrade staled.
+	snapID string
 }
 
 // Exec runs a command in the running session VM, streaming output back.
@@ -235,9 +266,20 @@ func (s *fcSession) DialSSH(ctx context.Context) (net.Conn, error) {
 	return conn, nil
 }
 
-// Stop shuts the session VM down cleanly, keeping its fork on disk.
+// Stop hibernates the session: it snapshots the VM's memory to disk and exits
+// the VMM (freeing host RAM), so a later Start wakes it instantly with its
+// process tree intact. If hibernation fails it falls back to a clean shutdown.
+// Either way the fork on disk survives.
 func (s *fcSession) Stop(ctx context.Context) error {
-	// Ask the guest to sync and reset; the VMM then exits on its own.
+	if err := s.hibernate(ctx); err != nil {
+		s.cleanShutdown(ctx)
+	}
+	return nil
+}
+
+// cleanShutdown asks the guest to sync and reset, waits for the VMM to exit,
+// and removes the vmDir (no snapshot is kept).
+func (s *fcSession) cleanShutdown(ctx context.Context) {
 	if conn, err := dialGuest(ctx, s.vsockUDS, guestproto.ControlPort); err == nil {
 		_ = guestproto.WriteRequest(conn, guestproto.Request{Kind: guestproto.RequestShutdown})
 		_ = conn.Close()
@@ -248,5 +290,4 @@ func (s *fcSession) Stop(ctx context.Context) error {
 	_ = s.machine.StopVMM()
 	s.vmCancel()
 	_ = os.RemoveAll(s.vmDir)
-	return nil
 }

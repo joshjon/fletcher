@@ -207,7 +207,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	if err != nil {
 		return nil, fmt.Errorf("init snapshot driver: %w", err)
 	}
-	rtDriver, err := buildRuntimeDriver(cfg)
+	rtDriver, err := buildRuntimeDriver(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("init runtime driver: %w", err)
 	}
@@ -863,7 +863,7 @@ func mcpSocketPath(cfg Config) string {
 }
 
 // buildRuntimeDriver constructs the runtime.Driver chosen by cfg.
-func buildRuntimeDriver(cfg Config) (runtime.Driver, error) {
+func buildRuntimeDriver(cfg Config, logger *slog.Logger) (runtime.Driver, error) {
 	kind := cfg.RuntimeKind
 	if kind == "" {
 		kind = defaultDriverKind
@@ -902,6 +902,7 @@ func buildRuntimeDriver(cfg Config) (runtime.Driver, error) {
 				{ListenAddr: cfg.GatewayListenAddr, HostSocket: gatewaySocketPath(cfg)},
 				{ListenAddr: cfg.MCPListenAddr, HostSocket: mcpSocketPath(cfg)},
 			},
+			Logger: logger,
 		})
 	default:
 		return nil, fmt.Errorf("unknown runtime kind %q", cfg.RuntimeKind)

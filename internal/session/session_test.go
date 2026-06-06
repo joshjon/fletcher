@@ -51,9 +51,10 @@ func (f *fakeSnapshot) Delete(_ context.Context, id string) error {
 
 // fakeRuntime hands out fakeHandles and records the forks it was asked to boot.
 type fakeRuntime struct {
-	mu      sync.Mutex
-	started []string // rootfs paths, in order
-	handles []*fakeHandle
+	mu        sync.Mutex
+	started   []string // rootfs paths, in order
+	handles   []*fakeHandle
+	discarded int
 }
 
 func (r *fakeRuntime) StartSession(_ context.Context, spec runtime.SessionSpec) (runtime.SessionHandle, error) {
@@ -63,6 +64,13 @@ func (r *fakeRuntime) StartSession(_ context.Context, spec runtime.SessionSpec) 
 	h := &fakeHandle{}
 	r.handles = append(r.handles, h)
 	return h, nil
+}
+
+func (r *fakeRuntime) DiscardSession(_ context.Context, _ string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.discarded++
+	return nil
 }
 
 // fakeHandle echoes the command back on stdout and counts Stop calls.
@@ -193,6 +201,7 @@ func TestDeleteDestroysFork(t *testing.T) {
 	require.Len(t, snap.deleted, 1, "delete must destroy the fork")
 	require.Len(t, snap.live, 0)
 	require.Equal(t, 1, rt.handles[0].stopped, "delete must stop a running VM")
+	require.Equal(t, 1, rt.discarded, "delete must discard on-disk VM state")
 
 	_, err = mgr.Get(ctx, "dev")
 	require.ErrorIs(t, err, session.ErrNotFound)
