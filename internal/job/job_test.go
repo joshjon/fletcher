@@ -57,7 +57,6 @@ func TestCreateValidatesRequiredFields(t *testing.T) {
 		p    job.CreateParams
 	}{
 		{"missing trigger", job.CreateParams{Name: "x", Command: "x", Image: "x"}},
-		{"missing name", job.CreateParams{Trigger: job.TriggerEphemeral, Command: "x", Image: "x"}},
 		{"missing command", job.CreateParams{Trigger: job.TriggerEphemeral, Name: "x", Image: "x"}},
 		{"missing image", job.CreateParams{Trigger: job.TriggerEphemeral, Name: "x", Command: "x"}},
 		{"invalid trigger", job.CreateParams{Trigger: "nonsense", Name: "x", Command: "x", Image: "x"}},
@@ -71,6 +70,17 @@ func TestCreateValidatesRequiredFields(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestCreateDefaultsNameFromCommand(t *testing.T) {
+	svc := newService(t)
+	created, err := svc.Create(context.Background(), job.CreateParams{
+		Trigger: job.TriggerEphemeral,
+		Command: "claude -p 'say hi'",
+		Image:   "fletcher-base",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "claude", created.Name, "name defaults to the command's program name")
 }
 
 func TestCreateCronJobIsScheduled(t *testing.T) {

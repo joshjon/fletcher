@@ -41,7 +41,7 @@ func sessionCreateCmd() *cli.Command {
 			socketFlag(),
 			outputFlag(),
 			&cli.StringFlag{Name: "name", Usage: "unique session name", Required: true},
-			&cli.StringFlag{Name: "image", Usage: "image / environment spec", Required: true},
+			&cli.StringFlag{Name: "image", Value: "fletcher-base", Usage: "image / environment spec"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			client := newSessionsClient(cmd)

@@ -38,9 +38,9 @@ func jobCreateCmd() *cli.Command {
 		Flags: []cli.Flag{
 			socketFlag(),
 			outputFlag(),
-			&cli.StringFlag{Name: "name", Usage: "human-readable job name", Required: true},
+			&cli.StringFlag{Name: "name", Usage: "human-readable job name (default: the command's program name)"},
 			&cli.StringFlag{Name: "command", Usage: "command to run inside the job environment", Required: true},
-			&cli.StringFlag{Name: "image", Usage: "image / environment spec", Required: true},
+			&cli.StringFlag{Name: "image", Value: "fletcher-base", Usage: "image / environment spec"},
 			&cli.StringFlag{
 				Name:  "trigger",
 				Value: "ephemeral",

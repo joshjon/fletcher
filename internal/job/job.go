@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -112,6 +113,12 @@ func NewService(q sqliteq.Querier, sup Coordinator) *Service {
 func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 	if err := p.validate(); err != nil {
 		return Job{}, err
+	}
+	// A name is just a human-readable label (the ID is the identifier); default
+	// it to the command's program name so `job create --command "claude ..."`
+	// needs no --name.
+	if strings.TrimSpace(p.Name) == "" {
+		p.Name = defaultJobName(p.Command)
 	}
 	creds, err := normaliseCredentials(p.Credentials)
 	if err != nil {
@@ -238,9 +245,6 @@ func (s *Service) Cancel(ctx context.Context, id string) (bool, error) {
 }
 
 func (p CreateParams) validate() error {
-	if strings.TrimSpace(p.Name) == "" {
-		return errs.New(errs.CategoryInvalidArgument, "name is required")
-	}
 	if strings.TrimSpace(p.Command) == "" {
 		return errs.New(errs.CategoryInvalidArgument, "command is required")
 	}
@@ -263,6 +267,21 @@ func (p CreateParams) validate() error {
 	default:
 		return errs.Newf(errs.CategoryInvalidArgument, "invalid trigger %q", p.Trigger)
 	}
+}
+
+// defaultJobName derives a human-readable name from the command's program name
+// (the first token's base name), e.g. "claude -p ..." -> "claude". Falls back to
+// "job" for an empty or path-only command.
+func defaultJobName(command string) string {
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return "job"
+	}
+	base := filepath.Base(fields[0])
+	if base == "" || base == "." || base == "/" {
+		return "job"
+	}
+	return base
 }
 
 // ParseSchedule parses a cron expression (5-field standard form, or a macro

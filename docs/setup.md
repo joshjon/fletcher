@@ -423,8 +423,10 @@ Running an agent needs a base-image rootfs. For the Firecracker default:
    per-job clones are reflinks. The importer injects the microVM init for you.
 2. Give the daemon an Anthropic key so the gateway can reach models:
    `fletcher secret set anthropic_api_key sk-ant-...`.
-3. Run an agent as a job:
-   `fletcher job create --image fletcher-base --command "claude -p 'say hi'"`.
+3. Run an agent as a job: `fletcher job create --command "claude -p 'say hi'"`.
+   `--image` defaults to `fletcher-base` and `--name` defaults to the command's
+   program name (here, `claude`), so only `--command` is required; pass `--image`
+   / `--name` to override.
 
 The agent runs inside the microVM, reaches Anthropic only through the daemon
 gateway (the key never enters the VM), and has no other network egress. Browse
