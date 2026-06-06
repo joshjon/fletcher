@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklog/run"
@@ -28,6 +29,7 @@ import (
 	"github.com/joshjon/fletcher/internal/buildinfo"
 	"github.com/joshjon/fletcher/internal/gateway"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
+	"github.com/joshjon/fletcher/internal/image"
 	"github.com/joshjon/fletcher/internal/job"
 	fletchermcp "github.com/joshjon/fletcher/internal/mcp"
 	"github.com/joshjon/fletcher/internal/network/wireguard"
@@ -72,6 +74,34 @@ func checkForUpgrade(ctx context.Context, logger *slog.Logger) {
 		slog.String("latest", release.TagName),
 		slog.String("url", release.HTMLURL),
 		slog.String("upgrade", "curl -fsSL https://raw.githubusercontent.com/joshjon/fletcher/main/scripts/install.sh | sudo sh"),
+	)
+}
+
+// checkForImageUpdate asks the registry, in the background at boot, whether the
+// default image's imported template is older than the registry's current
+// version. On a positive result it logs a non-fatal hint and flips updated so
+// Health (and `fletcher doctor`) can surface it. A local-only image (no recorded
+// registry digest) or any registry error leaves updated false - the daemon must
+// not fail to start because a registry is unreachable.
+func checkForImageUpdate(ctx context.Context, cfg Config, logger *slog.Logger, updated *atomic.Bool) {
+	root := cfg.BtrfsRoot
+	if root == "" {
+		root = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
+	}
+	imagesDir := filepath.Join(root, "images")
+	available, source, err := image.CheckForUpdate(ctx, imagesDir, cfg.DefaultImage)
+	if err != nil {
+		logger.Debug("image update check skipped", slog.String("err", err.Error()))
+		return
+	}
+	if !available {
+		return
+	}
+	updated.Store(true)
+	logger.Info("a newer version of the default image is available",
+		slog.String("image", cfg.DefaultImage),
+		slog.String("source", source),
+		slog.String("update", "sudo fletcher image update"),
 	)
 }
 
@@ -334,8 +364,10 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 			Runtime:            driverKind(cfg.RuntimeKind),
 			Snapshot:           driverKind(cfg.SnapshotKind),
 			BaseImageAvailable: baseImageAvailable(cfg),
+			BaseImageUpdate:    &atomic.Bool{},
 		},
 	}
+	go checkForImageUpdate(ctx, cfg, logger, connectDeps.runtimeStatus.BaseImageUpdate)
 
 	connectSrv := newHTTPServer(startedAt.Unix(), connectDeps, logger)
 	remoteSrv := newRemoteServer(remoteLn, peerSvc, connectSrv.Handler)

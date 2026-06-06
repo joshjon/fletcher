@@ -38,4 +38,7 @@ message HealthResponse {
   // base_image_available is true when at least one base-image rootfs template is
   // imported for the active snapshot driver, so jobs and sessions can boot.
   bool base_image_available = 8;
+  // base_image_update_available is true when the registry has a newer version of
+  // the default image than the imported template (checked in the background).
+  bool base_image_update_available = 9;
 }

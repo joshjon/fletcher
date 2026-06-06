@@ -83,8 +83,11 @@ type HealthResponse struct {
 	// base_image_available is true when at least one base-image rootfs template is
 	// imported for the active snapshot driver, so jobs and sessions can boot.
 	BaseImageAvailable bool `protobuf:"varint,8,opt,name=base_image_available,json=baseImageAvailable,proto3" json:"base_image_available,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// base_image_update_available is true when the registry has a newer version of
+	// the default image than the imported template (checked in the background).
+	BaseImageUpdateAvailable bool `protobuf:"varint,9,opt,name=base_image_update_available,json=baseImageUpdateAvailable,proto3" json:"base_image_update_available,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *HealthResponse) Reset() {
@@ -173,12 +176,19 @@ func (x *HealthResponse) GetBaseImageAvailable() bool {
 	return false
 }
 
+func (x *HealthResponse) GetBaseImageUpdateAvailable() bool {
+	if x != nil {
+		return x.BaseImageUpdateAvailable
+	}
+	return false
+}
+
 var File_fletcher_v1_admin_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_admin_proto_rawDesc = "" +
 	"\n" +
 	"\x17fletcher/v1/admin.proto\x12\vfletcher.v1\"\x0f\n" +
-	"\rHealthRequest\"\x8a\x02\n" +
+	"\rHealthRequest\"\xc9\x02\n" +
 	"\x0eHealthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
@@ -188,7 +198,8 @@ const file_fletcher_v1_admin_proto_rawDesc = "" +
 	"\x0fpublic_endpoint\x18\x05 \x01(\tR\x0epublicEndpoint\x12\x18\n" +
 	"\aruntime\x18\x06 \x01(\tR\aruntime\x12\x1a\n" +
 	"\bsnapshot\x18\a \x01(\tR\bsnapshot\x120\n" +
-	"\x14base_image_available\x18\b \x01(\bR\x12baseImageAvailable2S\n" +
+	"\x14base_image_available\x18\b \x01(\bR\x12baseImageAvailable\x12=\n" +
+	"\x1bbase_image_update_available\x18\t \x01(\bR\x18baseImageUpdateAvailable2S\n" +
 	"\fAdminService\x12C\n" +
 	"\x06Health\x12\x1a.fletcher.v1.HealthRequest\x1a\x1b.fletcher.v1.HealthResponse\"\x00B\xb1\x01\n" +
 	"\x0fcom.fletcher.v1B\n" +

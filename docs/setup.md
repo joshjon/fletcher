@@ -435,6 +435,15 @@ gateway (the key never enters the VM), and has no other network egress. Browse
 what the gateway can route to with `fletcher model list`. Every command has
 `--help` with more detail.
 
+The imported template is pinned: it does not change underneath you. When the
+registry has a newer build of the default image (e.g. a rebuilt rootfs with
+package updates), the daemon notices on its next start and `fletcher doctor`
+shows a "newer version is available" note. Re-pull and re-import with
+`sudo fletcher image update` when you want it; existing jobs and sessions keep
+their already-cloned forks, and new ones pick up the updated template. (`image
+update` re-imports the `default_image`; pass a template name to update a
+different one.)
+
 > For the runc fallback instead, set `runtime runc` / `snapshot btrfs`, provision
 > a btrfs snapshot root, and import with `--format subvolume` (the default). The
 > trust properties are the same; the isolation is a shared-kernel container

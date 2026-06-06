@@ -60,6 +60,17 @@ func CheckRuntimeReady(socketPath string) Checker {
 				Plan:     noBaseImagePlan(snapshotKind),
 			}
 		}
+		if resp.Msg.GetBaseImageUpdateAvailable() {
+			// Not a blocker: the imported template still boots, but the registry
+			// has a newer build (e.g. a security update to the base rootfs).
+			return Result{
+				Category: CategoryHost,
+				Name:     name,
+				Status:   StatusWarn,
+				Detail:   fmt.Sprintf("%s, base image imported (a newer version is available)", stack),
+				Plan:     imageUpdatePlan(),
+			}
+		}
 		return Result{
 			Category: CategoryHost,
 			Name:     name,
@@ -67,6 +78,21 @@ func CheckRuntimeReady(socketPath string) Checker {
 			Detail:   fmt.Sprintf("%s, base image imported", stack),
 		}
 	})
+}
+
+func imageUpdatePlan() *PlanStep {
+	return &PlanStep{
+		ID:       "update-base-image",
+		Priority: PriorityFollowup,
+		Title:    "Update the base image",
+		Why:      "The registry has a newer build of the default image than the imported template (e.g. a rebuilt rootfs with package updates). Existing jobs and sessions keep their already-cloned forks; new ones will use the updated template.",
+		Options: []PlanOption{{
+			Label: "Re-pull and re-import the default image",
+			Steps: []string{
+				"sudo fletcher image update",
+			},
+		}},
+	}
 }
 
 func mockRuntimePlan() *PlanStep {

@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"sync/atomic"
 
 	"connectrpc.com/connect"
 
@@ -28,6 +29,10 @@ type RuntimeStatus struct {
 	// BaseImageAvailable is true when at least one base-image template exists for
 	// the active snapshot driver.
 	BaseImageAvailable bool
+	// BaseImageUpdate is set by a background registry check when the default
+	// image's template is older than the registry's current version. It may be
+	// nil (no check wired up), which Health reports as no update available.
+	BaseImageUpdate *atomic.Bool
 }
 
 // AdminService implements the daemon-administration RPCs (health checks etc.)
@@ -54,14 +59,16 @@ func (s *AdminService) Health(_ context.Context, _ *connect.Request[fletcherv1.H
 	if s.endpoint != nil {
 		endpoint = s.endpoint.PublicEndpoint()
 	}
+	updateAvailable := s.runtime.BaseImageUpdate != nil && s.runtime.BaseImageUpdate.Load()
 	return connect.NewResponse(&fletcherv1.HealthResponse{
-		Status:             "ok",
-		Version:            info.Version,
-		Commit:             info.Commit,
-		StartedAt:          s.startedAt,
-		PublicEndpoint:     endpoint,
-		Runtime:            s.runtime.Runtime,
-		Snapshot:           s.runtime.Snapshot,
-		BaseImageAvailable: s.runtime.BaseImageAvailable,
+		Status:                   "ok",
+		Version:                  info.Version,
+		Commit:                   info.Commit,
+		StartedAt:                s.startedAt,
+		PublicEndpoint:           endpoint,
+		Runtime:                  s.runtime.Runtime,
+		Snapshot:                 s.runtime.Snapshot,
+		BaseImageAvailable:       s.runtime.BaseImageAvailable,
+		BaseImageUpdateAvailable: updateAvailable,
 	}), nil
 }

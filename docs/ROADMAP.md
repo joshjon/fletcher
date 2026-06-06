@@ -610,6 +610,20 @@ operator and is intentionally not in this list.
   `LICENSE` file; macOS code signing / notarization (curl-installed binaries are
   not quarantined, so not blocking).
 
+- **Default image + update detection - DONE.** `job`/`session create` default
+  `--image` to a configurable `default_image` setting (`fletcher-base` out of the
+  box), so the common path is just `--command`. Imports now record a sidecar
+  (`<name>.meta.json`: source ref, registry digest, format) - the CLI writes it,
+  the daemon reads it. The template is pinned (it does not change underneath a
+  running box); a background registry check at daemon boot does a lightweight OCI
+  manifest query (digest only, no pull) and, if the registry has a newer build
+  than the imported digest, logs a non-fatal hint and surfaces a "newer version
+  available" warning in `fletcher doctor`. `sudo fletcher image update [name]`
+  re-pulls and re-imports on demand (defaults to `default_image`). Deliberately
+  *not* auto-updating: reproducibility, supply-chain trust, and in-flight clone
+  safety argue for pin-detect-nudge-update-on-command. A local-only image (no
+  registry digest) is skipped, not flagged.
+
 **Deferred for now (revisit on demand, not v1-blocking).** Audit-log storage (the
 operator does not want it yet; the `audit.Noop` seam stays). Gateway breadth
 (streaming in the OpenAI-compatible translation path; a second provider). APNs
