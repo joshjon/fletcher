@@ -388,7 +388,7 @@ DESIGN.md §11 and §9.
   gateway over vsock, has no egress, and the gateway already stamps credentials
   (M1-M4). It is the operator's final validation, documented in setup.md.
 
-### Milestone 6 - Durable sessions (interactive, persistent workspaces) - IN PROGRESS (Phase 1 done)
+### Milestone 6 - Durable sessions (interactive, persistent workspaces) - IN PROGRESS (Phases 1-2 done)
 
 **The gap.** Today every job is ephemeral: a fresh fork runs one command and is
 torn down (the supervisor `deleteSnapshot`s on completion). There is no way to
@@ -517,8 +517,19 @@ single-box, daemon-gated, no-route-into-VM-land constraints.
   real microVMs: a file written in one exec survives stop -> start (the VM reboots
   against the same fork) and a full daemon restart; `delete` destroys the fork.
   Layer 1 of the persistence model, realised; hibernate (Layer 2) is Phase 4.
-- **Phases 2-5** - interactive shell (PTY), brokered SSH, hibernate, storage caps
-  + idle auto-stop - still to build.
+- **Phase 2 - interactive shell (PTY over vsock) - DONE.** `fletcher session
+  shell <ref>` opens an interactive login shell in a running session - the
+  zero-config terminal and rescue path. It needed a transport change: bidi
+  streams require HTTP/2, so the daemon now serves cleartext HTTP/2 (h2c)
+  alongside HTTP/1.1 (via `http.Server.Protocols`, negotiated at the connection
+  layer so existing unary clients are untouched), and the sessions client speaks
+  h2c over the same socket/tunnel. The guest opens a real PTY (creack/pty)
+  running a login shell in /workspace; stdin and window resizes flow host->guest
+  as new vsock frames, terminal output flows back, and the CLI drives it in raw
+  mode with SIGWINCH-driven resizes and exit-code propagation. Verified on a real
+  microVM (a genuine /dev/pts PTY).
+- **Phases 3-5** - brokered SSH, hibernate, storage caps + idle auto-stop - still
+  to build.
 
 ## Backlog (not scheduled - awaiting a usage signal)
 
