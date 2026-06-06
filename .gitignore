@@ -13,6 +13,8 @@ internal/runtime/firecrackerdriver/vmm/assets/*/vmlinux
 # Built guest-agent binary (the microVM init) - built from cmd/fletcher-guest
 # by `make build` and embedded; about.txt is committed.
 internal/runtime/firecrackerdriver/guestagent/assets/*/fletcher-guest
+# Stray guest binary if cmd/fletcher-guest is built directly into the repo root.
+/fletcher-guest
 
 # Test / coverage
 coverage.out

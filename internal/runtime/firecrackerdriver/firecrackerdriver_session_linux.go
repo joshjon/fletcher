@@ -104,13 +104,23 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 	}
 	_ = probe.Close()
 
+	// Bring up the gateway/MCP forwards so the agent env (ANTHROPIC_BASE_URL etc.)
+	// resolves to live listeners. Non-fatal: a session without them is still
+	// usable for a shell, just not for model/MCP calls.
+	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, spec.Env)
+	if ferr != nil {
+		d.logger.Warn("session service forwards not fully established; model gateway/MCP may be unreachable in this session",
+			slog.String("session_id", spec.SessionID), slog.String("err", ferr.Error()))
+	}
+
 	return &fcSession{
-		machine:  machine,
-		vsockUDS: vsockUDS,
-		vmDir:    vmDir,
-		vmCancel: vmCancel,
-		env:      spec.Env,
-		snapID:   d.snapshotIdentity(),
+		machine:    machine,
+		vsockUDS:   vsockUDS,
+		vmDir:      vmDir,
+		vmCancel:   vmCancel,
+		env:        spec.Env,
+		forwardLns: forwardLns,
+		snapID:     d.snapshotIdentity(),
 	}, nil
 }
 
@@ -132,9 +142,72 @@ type fcSession struct {
 	vmDir    string
 	vmCancel context.CancelFunc
 	env      []string
+	// forwardLns are the host-side proxy listeners for the session's service
+	// forwards (gateway, MCP). They live for the VM's lifetime and are closed
+	// when it stops, so a later start (or restore) can recreate them.
+	forwardLns []net.Listener
 	// snapID fingerprints the VMM+kernel a hibernation snapshot is tied to, so a
 	// later start can tell a usable snapshot from one a Fletcher upgrade staled.
 	snapID string
+}
+
+// startSessionForwards stands up the host side of the session's service forwards
+// (one unix-socket proxy per Forward, keyed by vsock port) and tells the guest
+// to bring up the matching loopback listeners. Without this a session's agent
+// env points at gateway/MCP ports with nothing listening - the ephemeral path
+// does the equivalent inline in Run. Best-effort: it returns any listeners it
+// did open alongside an error so the caller can both close them and log, leaving
+// the session usable (just without model/MCP access) rather than failing to boot.
+func (d *Driver) startSessionForwards(ctx context.Context, vsockUDS string, env []string) ([]net.Listener, error) {
+	if len(d.forwards) == 0 {
+		return nil, nil
+	}
+	lns := make([]net.Listener, 0, len(d.forwards))
+	gforwards := make([]guestproto.Forward, 0, len(d.forwards))
+	for i, f := range d.forwards {
+		port := uint32(guestproto.ForwardPortBase + i)
+		ln, err := startForwardProxy(ctx, fmt.Sprintf("%s_%d", vsockUDS, port), f.HostSocket)
+		if err != nil {
+			return lns, fmt.Errorf("forward proxy %s: %w", f.ListenAddr, err)
+		}
+		lns = append(lns, ln)
+		gforwards = append(gforwards, guestproto.Forward{ListenAddr: f.ListenAddr, VsockPort: port})
+	}
+
+	setupCtx, cancel := context.WithTimeout(ctx, sessionStartGrace)
+	defer cancel()
+	if err := sendSessionSetup(setupCtx, vsockUDS, gforwards, env); err != nil {
+		return lns, fmt.Errorf("send setup: %w", err)
+	}
+	return lns, nil
+}
+
+// sendSessionSetup tells the guest to bring up the given forwards and export the
+// session env to login shells, then waits for its ack frame so both are in place
+// before the session is reported ready.
+func sendSessionSetup(ctx context.Context, vsockUDS string, forwards []guestproto.Forward, env []string) error {
+	conn, err := dialGuest(ctx, vsockUDS, guestproto.ControlPort)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	req := guestproto.Request{Kind: guestproto.RequestSetup, Spec: guestproto.Spec{Forwards: forwards, Env: env}}
+	if err := guestproto.WriteRequest(conn, req); err != nil {
+		return err
+	}
+	if _, _, err := guestproto.ReadFrame(conn); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}
+
+// closeForwards shuts the host-side forward proxies (called when the VM stops or
+// hibernates); a later start recreates them.
+func (s *fcSession) closeForwards() {
+	for _, ln := range s.forwardLns {
+		_ = ln.Close()
+	}
+	s.forwardLns = nil
 }
 
 // Exec runs a command in the running session VM, streaming output back.
@@ -306,6 +379,7 @@ func (s *fcSession) cleanShutdown(ctx context.Context) {
 	defer cancel()
 	_ = s.machine.Wait(waitCtx)
 	_ = s.machine.StopVMM()
+	s.closeForwards()
 	s.vmCancel()
 	_ = os.RemoveAll(s.vmDir)
 }

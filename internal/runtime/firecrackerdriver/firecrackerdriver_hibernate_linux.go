@@ -5,6 +5,7 @@ package firecrackerdriver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,13 +120,24 @@ func (d *Driver) restoreSession(ctx context.Context, spec fcruntime.SessionSpec,
 	// memory file stops costing disk while the session runs.
 	removeSnapshotFiles(vmDir)
 
+	// The restored guest's loopback forwards are live again (resumed from memory),
+	// but their host-side proxy sockets were cleared with the other sockets, so
+	// recreate them. The guest's forwardsOnce already fired at its original cold
+	// boot, so the resent setup is a no-op there - it just rebuilds the host side.
+	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, spec.Env)
+	if ferr != nil {
+		d.logger.Warn("session service forwards not fully re-established after restore; model gateway/MCP may be unreachable in this session",
+			slog.String("session_id", spec.SessionID), slog.String("err", ferr.Error()))
+	}
+
 	return &fcSession{
-		machine:  machine,
-		vsockUDS: vsockUDS,
-		vmDir:    vmDir,
-		vmCancel: vmCancel,
-		env:      spec.Env,
-		snapID:   d.snapshotIdentity(),
+		machine:    machine,
+		vsockUDS:   vsockUDS,
+		vmDir:      vmDir,
+		vmCancel:   vmCancel,
+		env:        spec.Env,
+		forwardLns: forwardLns,
+		snapID:     d.snapshotIdentity(),
 	}, nil
 }
 
@@ -146,6 +158,7 @@ func (s *fcSession) hibernate(ctx context.Context) error {
 		return fmt.Errorf("write snapshot meta: %w", err)
 	}
 	_ = s.machine.StopVMM()
+	s.closeForwards()
 	s.vmCancel()
 	// Keep vmDir: it holds the snapshot the next Start restores from.
 	return nil

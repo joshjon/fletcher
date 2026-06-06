@@ -159,6 +159,8 @@ func serveControl(conn net.Conn) {
 		return
 	}
 	switch req.Kind {
+	case guestproto.RequestSetup:
+		applySetup(conn, req.Spec)
 	case guestproto.RequestExec:
 		runExec(conn, req.Spec)
 	case guestproto.RequestShell:
@@ -434,6 +436,59 @@ func hasKey(env []string, key string) bool {
 		}
 	}
 	return false
+}
+
+// setupOnce guards the session setup (service forwards + the global env file) so
+// it runs exactly once per guest lifetime. A hibernation restore resumes the
+// same guest process (forwards already listening, env file already written), so
+// a resent RequestSetup is a no-op rather than a double-bind.
+var setupOnce sync.Once
+
+// sessionEnvFile is sourced by every login shell (sshd, console), so an agent
+// started over brokered SSH or an IDE terminal - not just the guestproto exec
+// and shell paths - inherits the gateway/MCP env.
+const sessionEnvFile = "/etc/profile.d/fletcher.sh"
+
+// applySetup handles a RequestSetup: once per guest lifetime it brings up the
+// session's service forwards and writes the gateway/MCP env where login shells
+// pick it up, then acks with a single Exit frame so the host knows the loopback
+// listeners are up before it reports the session ready.
+func applySetup(conn net.Conn, spec guestproto.Spec) {
+	setupOnce.Do(func() {
+		startForwards(spec.Forwards)
+		writeSessionEnv(spec.Env)
+	})
+	if err := guestproto.WriteFrame(conn, guestproto.KindExit, guestproto.EncodeExit(0)); err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: ack setup: %v\n", err)
+	}
+}
+
+// writeSessionEnv writes the session env as a profile.d snippet so login shells
+// (brokered SSH, IDE terminals) export the gateway/MCP variables. The guestproto
+// exec/shell paths inject the same env directly; this covers sshd, which spawns
+// its login shells with only the init environment.
+func writeSessionEnv(env []string) {
+	if len(env) == 0 {
+		return
+	}
+	var b strings.Builder
+	b.WriteString("# Fletcher session environment (model gateway + MCP); written by the guest init.\n")
+	for _, kv := range env {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(&b, "export %s=%s\n", k, shellSingleQuote(v))
+	}
+	if err := os.WriteFile(sessionEnvFile, []byte(b.String()), 0o644); err != nil { //nolint:gosec // sourced by login shells; non-secret gateway URLs + placeholder keys
+		fmt.Fprintf(os.Stderr, "fletcher-guest: write session env: %v\n", err)
+	}
+}
+
+// shellSingleQuote wraps a value in single quotes for safe sourcing, escaping any
+// embedded single quotes the POSIX way ('\”).
+func shellSingleQuote(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
 }
 
 // startForwards launches a TCP->vsock relay for each forward. The agent inside

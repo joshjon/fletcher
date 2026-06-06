@@ -71,6 +71,12 @@ type Spec struct {
 type RequestKind string
 
 const (
+	// RequestSetup brings up the session's service forwards (gateway, MCP) from
+	// Request.Spec.Forwards, then acks with a single Exit frame. The host sends
+	// it once just after a session boots, since - unlike the ephemeral path - a
+	// session guest receives no initial Spec to carry the forwards. Applied once
+	// per guest lifetime, so a resend after a hibernation restore is a no-op.
+	RequestSetup RequestKind = "setup"
 	// RequestExec runs Request.Spec and frames its output back.
 	RequestExec RequestKind = "exec"
 	// RequestShutdown syncs and resets the VM so the VMM exits cleanly.
