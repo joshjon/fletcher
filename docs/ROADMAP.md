@@ -388,7 +388,7 @@ DESIGN.md §11 and §9.
   gateway over vsock, has no egress, and the gateway already stamps credentials
   (M1-M4). It is the operator's final validation, documented in setup.md.
 
-### Milestone 6 - Durable sessions (interactive, persistent workspaces) - IN PROGRESS (Phases 1-2 done)
+### Milestone 6 - Durable sessions (interactive, persistent workspaces) - IN PROGRESS (Phases 1-3 done)
 
 **The gap.** Today every job is ephemeral: a fresh fork runs one command and is
 torn down (the supervisor `deleteSnapshot`s on completion). There is no way to
@@ -528,8 +528,19 @@ single-box, daemon-gated, no-route-into-VM-land constraints.
   as new vsock frames, terminal output flows back, and the CLI drives it in raw
   mode with SIGWINCH-driven resizes and exit-code propagation. Verified on a real
   microVM (a genuine /dev/pts PTY).
-- **Phases 3-5** - brokered SSH, hibernate, storage caps + idle auto-stop - still
-  to build.
+- **Phase 3 - brokered SSH (IDE attach) - DONE.** `fletcher session ssh <ref>`
+  gives SSH and IDE Remote-SSH access, brokered over vsock so the VM stays
+  unroutable (the preview-proxy pattern generalised from HTTP to a raw byte
+  stream). The image bakes openssh-server; the guest generates host keys on
+  first boot and runs sshd on loopback with a vsock relay (SSHPort) the daemon
+  splices into. A new bidi RPC (ProxySession) carries opaque bytes via
+  SessionHandle.DialSSH. `session ssh` mints a managed ed25519 keypair, installs
+  its public key in the VM, and writes an Include-d SSH config Host block whose
+  ProxyCommand is the hidden `session ssh-proxy` (which wakes a stopped session
+  first). Verified on a real microVM: login, exit codes, scp, and wake-on-connect
+  with the disk surviving stop/start.
+- **Phases 4-5** - hibernate (snapshot/restore), storage caps + idle auto-stop -
+  still to build.
 
 ## Backlog (not scheduled - awaiting a usage signal)
 
