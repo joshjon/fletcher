@@ -141,6 +141,54 @@ func TestFirecrackerGatewayForward(t *testing.T) {
 	}
 }
 
+// TestFirecrackerSession boots a persistent session VM and runs two commands in
+// it: the second reads a file the first wrote, proving the VM stays up between
+// execs (the durable-session core).
+func TestFirecrackerSession(t *testing.T) {
+	d, rootfs := newDriver(t, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	handle, err := d.StartSession(ctx, runtime.SessionSpec{
+		SessionID:  "fc-session-test",
+		RootfsPath: rootfs,
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer func() { _ = handle.Stop(context.Background()) }()
+
+	// Exec 1: record the guest kernel and write a file.
+	var out bytes.Buffer
+	res, err := handle.Exec(ctx, runtime.Spec{
+		Command: "echo KERNEL=$(uname -r); echo persisted-value > /workspace/marker",
+	}, &out, &out)
+	if err != nil {
+		t.Fatalf("Exec 1: %v", err)
+	}
+	if res.ExitCode != 0 {
+		t.Errorf("exec 1 exit = %d, want 0 (%q)", res.ExitCode, out.String())
+	}
+	if !strings.Contains(out.String(), "KERNEL=5.10") {
+		t.Errorf("exec 1 stdout = %q, want guest kernel", out.String())
+	}
+
+	// Exec 2: a separate exec into the SAME running VM reads the file back.
+	out.Reset()
+	res2, err := handle.Exec(ctx, runtime.Spec{Command: "cat /workspace/marker"}, &out, &out)
+	if err != nil {
+		t.Fatalf("Exec 2: %v", err)
+	}
+	if res2.ExitCode != 0 {
+		t.Errorf("exec 2 exit = %d, want 0 (%q)", res2.ExitCode, out.String())
+	}
+	if !strings.Contains(out.String(), "persisted-value") {
+		t.Errorf("exec 2 stdout = %q, want persisted-value (VM did not stay up between execs)", out.String())
+	}
+	t.Logf("session ok: exec2 read %q from a file exec1 wrote", strings.TrimSpace(out.String()))
+}
+
 // serveHTTPPong answers each connection with a minimal HTTP 200 carrying "PONG".
 func serveHTTPPong(ln net.Listener) {
 	for {

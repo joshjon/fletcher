@@ -26,6 +26,10 @@ const (
 	// Port is the vsock port the guest dials on the host for the control
 	// connection (spec + output). Arbitrary but fixed.
 	Port = 1024
+	// ControlPort is the vsock port a session guest listens on for
+	// host-initiated control connections (exec, shutdown). Unlike Port (which
+	// the ephemeral guest dials out on), here the host connects to the guest.
+	ControlPort = 1025
 	// ForwardPortBase is the first vsock port used for service forwards; the
 	// host assigns ForwardPortBase, +1, +2, ... one per Forward.
 	ForwardPortBase = 1100
@@ -59,6 +63,24 @@ type Spec struct {
 	Forwards []Forward `json:"forwards,omitempty"`
 }
 
+// RequestKind is the type of a host->guest control message in session mode.
+type RequestKind string
+
+const (
+	// RequestExec runs Request.Spec and frames its output back.
+	RequestExec RequestKind = "exec"
+	// RequestShutdown syncs and resets the VM so the VMM exits cleanly.
+	RequestShutdown RequestKind = "shutdown"
+)
+
+// Request is one host->guest control message a session guest serves. The
+// ephemeral path uses Spec directly; sessions wrap it so the same connection
+// can also carry a clean shutdown.
+type Request struct {
+	Kind RequestKind `json:"kind"`
+	Spec Spec        `json:"spec,omitempty"`
+}
+
 // Frame kinds.
 const (
 	KindStdout byte = 1
@@ -71,13 +93,33 @@ const (
 const maxFrame = 16 << 20
 
 // WriteSpec sends spec as a length-prefixed JSON message.
-func WriteSpec(w io.Writer, spec Spec) error {
-	data, err := json.Marshal(spec)
+func WriteSpec(w io.Writer, spec Spec) error { return writeJSON(w, spec) }
+
+// ReadSpec reads a spec written by WriteSpec.
+func ReadSpec(r io.Reader) (Spec, error) {
+	var spec Spec
+	err := readJSON(r, &spec)
+	return spec, err
+}
+
+// WriteRequest sends a session control message as a length-prefixed JSON value.
+func WriteRequest(w io.Writer, req Request) error { return writeJSON(w, req) }
+
+// ReadRequest reads a request written by WriteRequest.
+func ReadRequest(r io.Reader) (Request, error) {
+	var req Request
+	err := readJSON(r, &req)
+	return req, err
+}
+
+// writeJSON writes v as a 4-byte-length-prefixed JSON message.
+func writeJSON(w io.Writer, v any) error {
+	data, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("marshal spec: %w", err)
+		return fmt.Errorf("marshal message: %w", err)
 	}
 	var hdr [4]byte
-	binary.BigEndian.PutUint32(hdr[:], uint32(len(data))) //nolint:gosec // JSON spec is far below 4 GiB
+	binary.BigEndian.PutUint32(hdr[:], uint32(len(data))) //nolint:gosec // JSON message is far below 4 GiB
 	if _, err := w.Write(hdr[:]); err != nil {
 		return err
 	}
@@ -85,25 +127,24 @@ func WriteSpec(w io.Writer, spec Spec) error {
 	return err
 }
 
-// ReadSpec reads a spec written by WriteSpec.
-func ReadSpec(r io.Reader) (Spec, error) {
+// readJSON reads a message written by writeJSON into v.
+func readJSON(r io.Reader, v any) error {
 	var hdr [4]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
-		return Spec{}, err
+		return err
 	}
 	n := binary.BigEndian.Uint32(hdr[:])
 	if n > maxFrame {
-		return Spec{}, fmt.Errorf("spec too large: %d bytes", n)
+		return fmt.Errorf("message too large: %d bytes", n)
 	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r, buf); err != nil {
-		return Spec{}, err
+		return err
 	}
-	var spec Spec
-	if err := json.Unmarshal(buf, &spec); err != nil {
-		return Spec{}, fmt.Errorf("unmarshal spec: %w", err)
+	if err := json.Unmarshal(buf, v); err != nil {
+		return fmt.Errorf("unmarshal message: %w", err)
 	}
-	return spec, nil
+	return nil
 }
 
 // WriteFrame writes one framed message: [kind][uint32 len][payload].

@@ -31,6 +31,13 @@ import (
 func main() {
 	mountBasics()
 	setupLoopback()
+	if sessionMode() {
+		// A durable session: stay up and serve host-initiated exec/shutdown
+		// requests until a shutdown request resets the VM.
+		serve()
+		shutdown()
+		os.Exit(0)
+	}
 	code := run()
 	// PID 1 must not simply return (the kernel panics). Trigger a reboot so the
 	// VMM exits and the host's Wait returns. Firecracker has no ACPI, so a
@@ -38,6 +45,55 @@ func main() {
 	// reset, which Firecracker intercepts and exits on.
 	shutdown()
 	os.Exit(code) // unreachable once shutdown succeeds
+}
+
+// sessionMode reports whether the kernel was booted for a durable session
+// (the daemon adds fletcher.session=1 to the cmdline for session VMs).
+func sessionMode() bool {
+	data, err := os.ReadFile("/proc/cmdline")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "fletcher.session=1")
+}
+
+// serve is the session control loop: listen on vsock and serve each
+// host-initiated connection. It returns only if the listener fails.
+func serve() {
+	ln, err := vsock.Listen(guestproto.ControlPort, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: listen control: %v\n", err)
+		return
+	}
+	defer func() { _ = ln.Close() }()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go serveControl(conn)
+	}
+}
+
+// serveControl handles one host control connection: run a command, or shut down.
+func serveControl(conn net.Conn) {
+	defer func() { _ = conn.Close() }()
+	req, err := guestproto.ReadRequest(conn)
+	if err != nil {
+		// A clean disconnect (e.g. the host's readiness probe) is not an error.
+		if !errors.Is(err, io.EOF) {
+			fmt.Fprintf(os.Stderr, "fletcher-guest: read request: %v\n", err)
+		}
+		return
+	}
+	switch req.Kind {
+	case guestproto.RequestExec:
+		runExec(conn, req.Spec)
+	case guestproto.RequestShutdown:
+		shutdown() // resets the VM; does not return
+	default:
+		fmt.Fprintf(os.Stderr, "fletcher-guest: unknown request kind %q\n", req.Kind)
+	}
 }
 
 // run dials the host, executes the job, and returns the exit code to report.
@@ -61,9 +117,14 @@ func run() int {
 	// its only path off-box - and it reaches only the daemon, never the internet.
 	startForwards(spec.Forwards)
 
+	return runExec(conn, spec)
+}
+
+// runExec runs spec and frames its stdout/stderr and exit code back over conn.
+// Shared by the ephemeral path and the session control loop.
+func runExec(conn net.Conn, spec guestproto.Spec) int {
 	fc := &frameConn{w: conn}
 	code := runCommand(spec, fc)
-
 	if err := fc.write(guestproto.KindExit, guestproto.EncodeExit(int32(code))); err != nil { //nolint:gosec // exit codes are 0-255
 		fmt.Fprintf(os.Stderr, "fletcher-guest: send exit: %v\n", err)
 	}

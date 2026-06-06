@@ -24,6 +24,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -164,7 +165,7 @@ func (d *Driver) Run(ctx context.Context, spec fcruntime.Spec, stdout, stderr io
 	}
 
 	console := &capWriter{max: 32 << 10}
-	cfg := d.machineConfig(apiSock, vsockUDS, rootfs)
+	cfg := d.machineConfig(apiSock, vsockUDS, rootfs, false)
 	fcCmd := firecracker.VMCommandBuilder{}.
 		WithBin(d.firecrackerBinary).
 		WithSocketPath(apiSock).
@@ -213,13 +214,20 @@ func (d *Driver) serveJob(ctx context.Context, ln net.Listener, gspec guestproto
 	}
 	defer func() { _ = conn.Close() }()
 
-	// Close the connection if the job is cancelled so the read loop unblocks.
-	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-	defer stop()
-
 	if err := guestproto.WriteSpec(conn, gspec); err != nil {
 		return 0, fmt.Errorf("send spec: %w", err)
 	}
+	return demuxFrames(ctx, conn, stdout, stderr)
+}
+
+// demuxFrames reads output frames from conn, writing stdout/stderr to the given
+// writers, until the guest sends an exit frame (or closes). It honours ctx
+// cancellation by closing the connection. Shared by the ephemeral job path and
+// session Exec.
+func demuxFrames(ctx context.Context, conn net.Conn, stdout, stderr io.Writer) (int32, error) {
+	// Close the connection if cancelled so the read loop unblocks.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 
 	var exitCode int32
 	gotExit := false
@@ -253,16 +261,82 @@ func (d *Driver) serveJob(ctx context.Context, ln net.Listener, gspec guestproto
 	return exitCode, nil
 }
 
+// dialGuest opens a host->guest vsock connection to a port the guest is
+// listening on, via the firecracker vsock UDS handshake (write "CONNECT
+// <port>", expect "OK ..."). It retries while the guest finishes booting and
+// starts listening.
+func dialGuest(ctx context.Context, udsPath string, port uint32) (net.Conn, error) {
+	var lastErr error
+	for range 100 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		conn, err := tryDialGuest(udsPath, port)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		time.Sleep(100 * time.Millisecond)
+	}
+	return nil, lastErr
+}
+
+func tryDialGuest(udsPath string, port uint32) (net.Conn, error) {
+	conn, err := net.Dial("unix", udsPath) //nolint:noctx // short-lived control dial; conn lifetime governs it
+	if err != nil {
+		return nil, err
+	}
+	if _, err := fmt.Fprintf(conn, "CONNECT %d\n", port); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	line, err := readLine(conn)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if !strings.HasPrefix(line, "OK") {
+		_ = conn.Close()
+		return nil, fmt.Errorf("vsock connect rejected: %q", line)
+	}
+	return conn, nil
+}
+
+// readLine reads up to a newline without buffering past it (so the rest of the
+// stream stays on the connection).
+func readLine(r io.Reader) (string, error) {
+	var sb strings.Builder
+	buf := make([]byte, 1)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if buf[0] == '\n' {
+				return sb.String(), nil
+			}
+			sb.WriteByte(buf[0])
+		}
+		if err != nil {
+			return sb.String(), err
+		}
+	}
+}
+
 // machineConfig assembles the Firecracker VM configuration: bundled kernel, the
-// per-job ext4 as the root block device, a vsock device, and no NIC.
-func (d *Driver) machineConfig(apiSock, vsockUDS, rootfs string) firecracker.Config {
+// ext4 rootfs as the root block device, a vsock device, and no NIC. When
+// sessionMode is set, the guest is told (via the kernel cmdline) to run as a
+// long-lived session server instead of the ephemeral run-one-command path.
+func (d *Driver) machineConfig(apiSock, vsockUDS, rootfs string, sessionMode bool) firecracker.Config {
+	// random.trust_cpu=on seeds the RNG from RDRAND at boot so the guest's
+	// getrandom() (Go runtime init) doesn't block for seconds on crng init.
+	kernelArgs := "console=ttyS0 reboot=k panic=1 pci=off random.trust_cpu=on"
+	if sessionMode {
+		kernelArgs += " fletcher.session=1"
+	}
+	kernelArgs += " root=/dev/vda rw init=" + guestagent.InitPath
 	return firecracker.Config{
 		SocketPath:      apiSock,
 		KernelImagePath: d.kernelPath,
-		// random.trust_cpu=on seeds the RNG from RDRAND at boot so the guest's
-		// getrandom() (Go runtime init) doesn't block for seconds on crng init.
-		KernelArgs: "console=ttyS0 reboot=k panic=1 pci=off random.trust_cpu=on root=/dev/vda rw init=" +
-			guestagent.InitPath,
+		KernelArgs:      kernelArgs,
 		Drives: []models.Drive{{
 			DriveID:      ptr("rootfs"),
 			PathOnHost:   &rootfs,
