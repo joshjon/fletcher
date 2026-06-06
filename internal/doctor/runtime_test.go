@@ -63,12 +63,14 @@ func TestCheckRuntimeReadyMockWarns(t *testing.T) {
 	require.Equal(t, "real-runtime", res.Plan.ID)
 }
 
-func TestCheckRuntimeReadyNoBaseImageWarns(t *testing.T) {
+func TestCheckRuntimeReadyNoBaseImageFails(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
 		Status: "ok", Runtime: "firecracker", Snapshot: "ext4", BaseImageAvailable: false,
 	})
 	res := CheckRuntimeReady(sock).Check(context.Background())
-	require.Equal(t, StatusWarn, res.Status)
+	// A missing base image blocks all job/session creation: Fail status and a
+	// blocker plan, kept consistent so the summary and the plan agree.
+	require.Equal(t, StatusFail, res.Status)
 	require.NotNil(t, res.Plan)
 	require.Equal(t, "import-base-image", res.Plan.ID)
 	require.Equal(t, PriorityBlocker, res.Plan.Priority)

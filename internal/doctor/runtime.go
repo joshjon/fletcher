@@ -50,10 +50,12 @@ func CheckRuntimeReady(socketPath string) Checker {
 			}
 		}
 		if !resp.Msg.GetBaseImageAvailable() {
+			// A blocker, not a warning: without a base image every job and
+			// session creation fails, so the runtime is not usable at all.
 			return Result{
 				Category: CategoryHost,
 				Name:     name,
-				Status:   StatusWarn,
+				Status:   StatusFail,
 				Detail:   fmt.Sprintf("%s, but no base image is imported; jobs and sessions can't boot until you import one", stack),
 				Plan:     noBaseImagePlan(snapshotKind),
 			}
