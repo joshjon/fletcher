@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,10 +12,15 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
+	"connectrpc.com/connect"
 	"github.com/urfave/cli/v3"
 
+	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
+	"github.com/joshjon/fletcher/internal/image"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestagent"
+	"github.com/joshjon/fletcher/internal/settings"
 )
 
 // daemonUser is the system user the daemon runs as. Imported rootfs templates
@@ -33,6 +39,7 @@ func imageCmd() *cli.Command {
 		Usage: "manage base-image rootfs templates for the runc/btrfs runtime",
 		Commands: []*cli.Command{
 			imageImportCmd(),
+			imageUpdateCmd(),
 			imageListCmd(),
 			imageRemoveCmd(),
 		},
@@ -113,6 +120,84 @@ does not carry FLETCHER_BTRFS_ROOT through by default):
 	}
 }
 
+func imageUpdateCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "update",
+		Usage:     "re-pull and re-import a template from its recorded source (e.g. a newer base image)",
+		ArgsUsage: "[name]",
+		Description: `Pulls the latest of the docker reference a template was imported from
+and re-flattens it, replacing the template in place. Existing sessions
+keep their already-cloned forks; only new jobs and sessions use the
+updated template. With no name it updates the daemon's default_image.
+
+Needs root and docker, like 'image import':
+
+  sudo fletcher image update --btrfs-root /var/lib/fletcher/snapshots`,
+		Flags: []cli.Flag{btrfsRootFlag(), socketFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if runtime.GOOS != "linux" {
+				return errors.New("image update is Linux-only")
+			}
+			root := cmd.String("btrfs-root")
+			if root == "" {
+				return errors.New("set --btrfs-root (or FLETCHER_BTRFS_ROOT) to the daemon's snapshot root")
+			}
+			name := cmd.Args().First()
+			if name == "" {
+				resolved, rerr := defaultImageSetting(ctx, cmd)
+				if rerr != nil {
+					return rerr
+				}
+				if resolved == "" {
+					return errors.New("no image name given and no default_image is configured")
+				}
+				name = resolved
+			}
+
+			imagesDir := filepath.Join(root, "images")
+			meta, found, err := image.ReadMeta(imagesDir, name)
+			if err != nil {
+				return err
+			}
+			if !found || meta.Source == "" {
+				return fmt.Errorf("no recorded source for %q; re-import it once with `fletcher image import <ref> --name %s`", name, name)
+			}
+
+			if err := requireTools("docker"); err != nil {
+				return err
+			}
+			fmt.Printf("pulling %s ...\n", meta.Source)
+			pull := exec.CommandContext(ctx, "docker", "pull", meta.Source) //nolint:gosec // recorded source ref, local admin command
+			pull.Stdout, pull.Stderr = os.Stderr, os.Stderr
+			if err := pull.Run(); err != nil {
+				return fmt.Errorf("docker pull %s: %w", meta.Source, err)
+			}
+			switch meta.Format {
+			case "ext4":
+				return importImageExt4(ctx, root, meta.Source, name, true)
+			case "subvolume", "":
+				return importImage(ctx, root, meta.Source, name, true)
+			default:
+				return fmt.Errorf("unknown recorded format %q for %q", meta.Format, name)
+			}
+		},
+	}
+}
+
+// defaultImageSetting asks the daemon for the effective default_image setting.
+func defaultImageSetting(ctx context.Context, cmd *cli.Command) (string, error) {
+	resp, err := newSettingsClient(cmd).ListSettings(ctx, connect.NewRequest(&fletcherv1.ListSettingsRequest{}))
+	if err != nil {
+		return "", fmt.Errorf("look up default_image (is the daemon running?): %w", err)
+	}
+	for _, s := range resp.Msg.GetSettings() {
+		if s.GetKey() == settings.KeyDefaultImage {
+			return s.GetValue(), nil
+		}
+	}
+	return "", nil
+}
+
 func imageListCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "ls",
@@ -182,6 +267,7 @@ func imageRemoveCmd() *cli.Command {
 			default:
 				return fmt.Errorf("no such image %q", name)
 			}
+			_ = image.RemoveMeta(filepath.Join(root, "images"), name)
 			fmt.Printf("removed %s\n", name)
 			return nil
 		},
@@ -230,6 +316,7 @@ func importImage(ctx context.Context, root, ref, name string, force bool) error 
 		_ = runBtrfs(context.Background(), "subvolume", "delete", target) //nolint:contextcheck // cleanup must run even when ctx is cancelled
 		return fmt.Errorf("chown rootfs to %q: %w", daemonUser, err)
 	}
+	writeTemplateMeta(ctx, imagesDir, name, ref, "subvolume")
 	fmt.Printf("imported %s into %s\n", ref, target)
 	fmt.Printf("run it with: fletcher job create --image %s --command \"...\"\n", name)
 	return nil
@@ -290,9 +377,45 @@ func importImageExt4(ctx context.Context, root, ref, name string, force bool) er
 		return fmt.Errorf("chown rootfs image to %q: %w", daemonUser, err)
 	}
 
+	writeTemplateMeta(ctx, imagesDir, name, ref, "ext4")
 	fmt.Printf("imported %s into %s\n", ref, target)
 	fmt.Printf("run it with: fletcher job create --image %s --command \"...\"\n", name)
 	return nil
+}
+
+// writeTemplateMeta records where a template came from (and the registry digest
+// it was built from) so `image update` can re-pull it and the daemon can flag a
+// newer version. Best-effort: a metadata failure does not fail the import.
+func writeTemplateMeta(ctx context.Context, imagesDir, name, ref, format string) {
+	meta := image.TemplateMeta{
+		Source:     ref,
+		Digest:     dockerImageDigest(ctx, ref),
+		Format:     format,
+		ImportedAt: time.Now().Unix(),
+	}
+	if err := image.WriteMeta(imagesDir, name, meta); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not record image metadata: %v\n", err)
+	}
+}
+
+// dockerImageDigest returns the registry digest ("sha256:...") of a locally
+// present image via its RepoDigests, or "" for a local-only image that was
+// never pushed (so update-checking is simply skipped for it).
+func dockerImageDigest(ctx context.Context, ref string) string {
+	out, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{json .RepoDigests}}", ref).Output() //nolint:gosec // operator-supplied ref, local admin command
+	if err != nil {
+		return ""
+	}
+	var digests []string
+	if err := json.Unmarshal(out, &digests); err != nil {
+		return ""
+	}
+	for _, d := range digests {
+		if i := strings.LastIndex(d, "@"); i >= 0 {
+			return d[i+1:]
+		}
+	}
+	return ""
 }
 
 // buildExt4Image packs the staging rootfs tree into an ext4 image at target.
