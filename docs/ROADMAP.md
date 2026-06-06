@@ -388,7 +388,7 @@ DESIGN.md §11 and §9.
   gateway over vsock, has no egress, and the gateway already stamps credentials
   (M1-M4). It is the operator's final validation, documented in setup.md.
 
-### Milestone 6 - Durable sessions (interactive, persistent workspaces) - IN PROGRESS (Phases 1-3 done)
+### Milestone 6 - Durable sessions (interactive, persistent workspaces) - IN PROGRESS (Phases 1-4 done)
 
 **The gap.** Today every job is ephemeral: a fresh fork runs one command and is
 torn down (the supervisor `deleteSnapshot`s on completion). There is no way to
@@ -539,8 +539,18 @@ single-box, daemon-gated, no-route-into-VM-land constraints.
   ProxyCommand is the hidden `session ssh-proxy` (which wakes a stopped session
   first). Verified on a real microVM: login, exit codes, scp, and wake-on-connect
   with the disk surviving stop/start.
-- **Phases 4-5** - hibernate (snapshot/restore), storage caps + idle auto-stop -
-  still to build.
+- **Phase 4 - hibernate (snapshot/restore) - DONE.** Stop now hibernates a
+  session (Firecracker pause + memory snapshot + VMM exit, freeing host RAM)
+  instead of a clean shutdown; Start restores from the snapshot for an instant
+  wake with the live process tree intact, falling back to a cold boot from the
+  fork when no valid snapshot exists. A snapshot is fingerprinted to the VMM +
+  kernel so a Fletcher upgrade invalidates it, and is consumed on restore so a
+  crash falls back to a clean disk boot rather than a stale memory image. This is
+  the Layer-2 instant-wake UX on Layer 1, never load-bearing for durability.
+  Verified on a real microVM: stop frees the VMM and writes a 512MiB snapshot;
+  start restores in ~30ms with the same boot id, a background process still
+  alive, and sshd still serving - across cycles and via SSH wake-on-connect.
+- **Phase 5** - storage caps + work-based idle auto-stop - still to build.
 
 ## Backlog (not scheduled - awaiting a usage signal)
 
