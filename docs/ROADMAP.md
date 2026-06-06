@@ -388,7 +388,7 @@ DESIGN.md §11 and §9.
   gateway over vsock, has no egress, and the gateway already stamps credentials
   (M1-M4). It is the operator's final validation, documented in setup.md.
 
-### Milestone 6 - Durable sessions (interactive, persistent workspaces) - IN PROGRESS (Phases 1-4 done)
+### Milestone 6 - Durable sessions (interactive, persistent workspaces) - DONE
 
 **The gap.** Today every job is ephemeral: a fresh fork runs one command and is
 torn down (the supervisor `deleteSnapshot`s on completion). There is no way to
@@ -550,7 +550,18 @@ single-box, daemon-gated, no-route-into-VM-land constraints.
   Verified on a real microVM: stop frees the VMM and writes a 512MiB snapshot;
   start restores in ~30ms with the same boot id, a background process still
   alive, and sshd still serving - across cycles and via SSH wake-on-connect.
-- **Phase 5** - storage caps + work-based idle auto-stop - still to build.
+- **Phase 5 - storage caps + work-based idle auto-stop - DONE.** RAM is freed
+  automatically, disk never is (the deliberate asymmetry above). A reaper actor
+  hibernates running sessions with no work in flight - an active host op
+  (exec/shell/ssh, tracked by a busy counter) or a busy guest (its 1-minute load
+  average via a new stat control message) both count as work, so a running agent
+  with no user attached is never stopped mid-task. The `session_idle_timeout`
+  setting drives it (0 disables). `session_max_count` and `session_max_disk_gb`
+  caps refuse new sessions over the limit with a report of what is using the
+  space (never auto-deleting); `session list`/`get` show each session's disk use
+  and last-used time. Verified on real microVMs: an idle session auto-stops while
+  a busy one keeps running and has its idle clock reset; the count cap refuses
+  with a usage report; list shows disk + last-used.
 
 ## Backlog (not scheduled - awaiting a usage signal)
 
