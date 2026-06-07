@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>Fletcher</title>
+<style>
+:root{
+  --bg:#000; --elev:#1c1c1e; --elev2:#2c2c2e; --term:#0b0b0c;
+  --sep:rgba(84,84,88,.55);
+  --label:#fff; --label2:rgba(235,235,245,.6); --label3:rgba(235,235,245,.3);
+  --accent:#5e5ce6; --green:#30d158; --gray:#8e8e93; --red:#ff453a; --orange:#ff9f0a; --coral:#d9775c;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  --safe-t:env(safe-area-inset-top); --safe-b:env(safe-area-inset-bottom);
+  --tabh:64px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;height:100%;background:#000;}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:var(--label);-webkit-font-smoothing:antialiased;overscroll-behavior:none;}
+i[data-icon]{display:inline-flex;}i[data-icon] svg{width:100%;height:100%;display:block;}
+#app{position:fixed;inset:0;overflow:hidden;}
+
+.screen{position:absolute;inset:0;background:var(--bg);display:flex;flex-direction:column;transform:translateX(0);transition:transform .36s cubic-bezier(.32,.72,0,1),filter .36s;will-change:transform;}
+.screen.offscreen{transform:translateX(100%);}
+.screen.parked{transform:translateX(-26%);filter:brightness(.55);}
+.scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(var(--tabh) + var(--safe-b) + 24px);}
+.scroll.notab{padding-bottom:32px;}
+
+/* nav */
+.nav{padding-top:calc(var(--safe-t) + 6px);background:rgba(0,0,0,.7);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-bottom:.5px solid var(--sep);position:relative;z-index:5;}
+.nav-inline{height:44px;display:flex;align-items:center;justify-content:center;position:relative;}
+.nav-title{font-size:17px;font-weight:600;}
+.nav-left,.nav-right{position:absolute;top:0;height:44px;display:flex;align-items:center;font-size:17px;color:var(--accent);}
+.nav-left{left:10px;gap:3px;cursor:pointer;}.nav-left i{width:12px;height:20px;}
+.nav-right{right:16px;cursor:pointer;}
+.large{padding:2px 16px 10px;}
+.large h1{font-size:34px;font-weight:700;letter-spacing:.37px;margin:0;}
+.large .sub{font-size:13px;color:var(--label2);margin-top:4px;display:flex;align-items:center;gap:6px;}
+.iconbtn{width:30px;height:30px;color:var(--accent);}
+
+/* lists */
+.group{margin:18px 16px 0;}
+.group-hd{font-size:13px;color:var(--label2);text-transform:uppercase;letter-spacing:.4px;margin:0 16px 7px;}
+.list{background:var(--elev);border-radius:12px;overflow:hidden;}
+.row{display:flex;align-items:center;gap:12px;padding:12px 16px;position:relative;min-height:44px;}
+.row+.row::before{content:"";position:absolute;left:16px;right:0;top:0;height:.5px;background:var(--sep);}
+.row .body{flex:1;min-width:0;}.row .t{font-size:17px;}.row .s{font-size:13px;color:var(--label2);margin-top:2px;}
+.row .val{font-size:17px;color:var(--label2);}
+.chev{width:8px;height:14px;color:var(--label3);flex:none;}
+.tap{cursor:pointer;}.tap:active{background:var(--elev2);}
+
+.dot{width:9px;height:9px;border-radius:50%;flex:none;}
+.dot.run{background:var(--green);box-shadow:0 0 7px rgba(48,209,88,.7);}
+.dot.stop{background:var(--gray);}
+.pill{font-size:12px;font-weight:600;padding:3px 9px;border-radius:20px;}
+.pill.run{color:var(--green);background:rgba(48,209,88,.15);}
+.pill.stop{color:var(--gray);background:rgba(142,142,147,.18);}
+
+/* ---- computer / terminal cards (Sessions) ---- */
+.machine{margin:14px 16px 0;border-radius:16px;overflow:hidden;background:var(--term);border:.5px solid #242427;box-shadow:0 6px 22px rgba(0,0,0,.45);}
+.machine.live{border-color:rgba(94,92,230,.35);box-shadow:0 6px 26px rgba(48,209,88,.06),0 6px 22px rgba(0,0,0,.5);}
+.m-bar{display:flex;align-items:center;gap:9px;padding:10px 13px;background:#161618;border-bottom:.5px solid #242427;}
+.lights{display:flex;gap:6px;flex:none;}
+.lights i{width:11px;height:11px;border-radius:50%;}
+.l1{background:#ff5f57;}.l2{background:#febc2e;}.l3{background:#28c840;}
+.lights.off i{background:#3a3a3c;}
+.m-name{font-family:var(--mono);font-size:14px;font-weight:600;}
+.m-agent{font-size:11px;color:var(--label2);background:#26262a;padding:2px 7px;border-radius:6px;margin-left:2px;}
+.m-live{margin-left:auto;display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--green);}
+.m-live .pulse{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 1.6s infinite;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(48,209,88,.55);}70%{box-shadow:0 0 0 7px rgba(48,209,88,0);}100%{box-shadow:0 0 0 0 rgba(48,209,88,0);}}
+.m-stopped{margin-left:auto;font-size:11px;color:var(--gray);}
+.m-screen{padding:12px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.5;color:#cfcfd2;white-space:pre-wrap;min-height:78px;position:relative;}
+.m-screen.dim{color:#5a5a5e;filter:saturate(.4);}
+.m-screen .coral{color:var(--coral);}.m-screen .green{color:#5fd98a;}.m-screen .gray{color:#6d6d72;}.m-screen .ind{color:#9b99f2;}
+.m-screen::after{content:"";position:absolute;left:0;right:0;bottom:0;height:26px;background:linear-gradient(transparent,var(--term));pointer-events:none;}
+.m-foot{display:flex;align-items:center;gap:8px;padding:9px 13px;background:#0f0f10;border-top:.5px solid #1f1f22;font-size:11.5px;color:var(--label2);}
+.m-foot .chip{display:flex;align-items:center;gap:4px;}
+.m-foot .open{margin-left:auto;color:var(--accent);font-weight:600;display:flex;align-items:center;gap:4px;}
+.m-foot .open i{width:13px;height:13px;}
+
+/* buttons */
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;height:50px;border-radius:13px;font-size:17px;font-weight:600;border:none;width:100%;}
+.btn i{width:20px;height:20px;}
+.btn.primary{background:var(--accent);color:#fff;}
+.btn.tinted{background:rgba(94,92,230,.16);color:var(--accent);}
+.btn:active{filter:brightness(.85);}
+.pad{padding:0 16px;}
+
+/* ---- liquid-glass tab bar (bottom) ---- */
+.tabbar{position:absolute;left:0;right:0;bottom:0;z-index:30;display:flex;height:calc(var(--tabh) + var(--safe-b));padding-bottom:var(--safe-b);
+  background:rgba(22,22,24,.6);backdrop-filter:blur(34px) saturate(200%);-webkit-backdrop-filter:blur(34px) saturate(200%);
+  border-top:.5px solid rgba(255,255,255,.12);box-shadow:inset 0 .5px 0 rgba(255,255,255,.10);}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--gray);font-size:10px;font-weight:500;cursor:pointer;}
+.tab i{width:27px;height:27px;}
+.tab.on{color:var(--accent);}
+
+/* inbox */
+.sect-hd{font-size:13px;font-weight:600;color:var(--label2);margin:20px 22px 2px;display:flex;align-items:center;gap:7px;text-transform:uppercase;letter-spacing:.4px;}
+.card{background:var(--elev);border-radius:14px;margin:11px 16px 0;padding:14px 16px;}
+.card .top{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--label2);}
+.card .top i{width:14px;height:14px;}
+.card .ttl{font-size:17px;font-weight:600;margin:7px 0 3px;}
+.card .metric{font-size:28px;font-weight:700;letter-spacing:-.5px;}
+.card .metric .down{color:var(--green);font-size:15px;font-weight:600;}
+.card .desc{font-size:14.5px;color:var(--label2);line-height:1.35;}
+.badge{font-size:11px;font-weight:700;padding:2px 7px;border-radius:6px;margin-left:auto;}
+.badge.ok{color:var(--green);background:rgba(48,209,88,.16);}
+.badge.run{color:var(--orange);background:rgba(255,159,10,.16);}
+.card.attn{border:1px solid rgba(255,159,10,.4);}
+.card.generic .raw{margin-top:9px;background:var(--term);border-radius:9px;padding:9px 11px;font-family:var(--mono);font-size:11px;color:#b9b9bd;line-height:1.5;white-space:pre-wrap;}
+
+/* terminal screen */
+#terminal{background:#000;}
+.term-nav{padding-top:calc(var(--safe-t) + 6px);background:#0c0c0d;border-bottom:.5px solid #222;}
+.term-body{flex:1;overflow-y:auto;padding:14px 14px 8px;font-family:var(--mono);font-size:13px;line-height:1.55;color:#e6e6e6;white-space:pre-wrap;word-break:break-word;}
+.term-body .coral{color:var(--coral);}.term-body .gray{color:#7d7d82;}.term-body .green{color:#5fd98a;}.term-body .ind{color:#9b99f2;}
+.cursor{display:inline-block;width:8px;height:16px;background:#e6e6e6;transform:translateY(3px);animation:blink 1.1s steps(1) infinite;}
+@keyframes blink{50%{opacity:0;}}
+.keyrow{display:flex;gap:6px;overflow-x:auto;padding:8px;background:#161617;border-top:.5px solid #2a2a2c;scrollbar-width:none;}
+.keyrow::-webkit-scrollbar{display:none;}
+.key{flex:none;min-width:38px;height:36px;border-radius:7px;background:#3a3a3c;color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center;padding:0 11px;font-family:var(--mono);}
+.key.sticky{background:#0a0a0a;border:1px solid #48484a;}.key.on{background:var(--accent);}.key:active{filter:brightness(1.4);}
+.kbhint{padding:7px 0 calc(var(--safe-b) + 7px);background:#161617;text-align:center;font-size:12px;color:#6a6a6e;}
+
+/* sheet */
+#scrim{position:absolute;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .3s;z-index:40;}
+#scrim.on{opacity:1;pointer-events:auto;}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:41;background:#1c1c1e;border-radius:16px 16px 0 0;transform:translateY(100%);transition:transform .38s cubic-bezier(.32,.72,0,1);padding-bottom:var(--safe-b);max-height:90%;display:flex;flex-direction:column;}
+.sheet.on{transform:translateY(0);}
+.grabber{width:36px;height:5px;border-radius:3px;background:#48484a;margin:8px auto 2px;}
+.sheet-nav{display:flex;align-items:center;justify-content:space-between;padding:8px 16px 8px;}
+.sheet-nav .c{color:var(--accent);font-size:17px;cursor:pointer;}.sheet-nav .ttl{font-size:17px;font-weight:600;}
+.seg{display:flex;background:#0e0e10;border-radius:9px;padding:2px;margin:4px 16px 0;}
+.seg div{flex:1;text-align:center;font-size:13px;font-weight:600;padding:7px 0;border-radius:7px;color:var(--label2);cursor:pointer;}
+.seg div.on{background:#3a3a3c;color:#fff;}
+.field{padding:11px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:46px;}
+.field .lab{font-size:17px;}
+.field input{background:none;border:none;color:var(--label);font-size:17px;text-align:right;flex:1;outline:none;font-family:inherit;}
+.field input::placeholder{color:var(--label3);}
+.field .pick{color:var(--label2);font-size:17px;display:flex;align-items:center;gap:5px;}.field .pick i{width:7px;height:12px;color:var(--label3);}
+.muted{font-size:13px;color:var(--label2);padding:9px 16px 0;line-height:1.4;}
+.ck{width:16px;height:16px;color:var(--accent);visibility:hidden;flex:none;}.ck.on{visibility:visible;}
+
+/* pairing */
+#pair{background:radial-gradient(120% 80% at 50% 0%,#1a1a2e 0%,#000 60%);}
+.brand{text-align:center;padding-top:calc(var(--safe-t) + 40px);}
+.brand .mark{width:74px;height:74px;border-radius:19px;background:linear-gradient(160deg,#6e6cf0,#4b49c9);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 10px 34px rgba(94,92,230,.45);}
+.brand .mark i{width:38px;height:38px;color:#fff;}
+.brand h1{font-size:30px;font-weight:700;margin:0;}
+.brand p{font-size:15px;color:var(--label2);margin:7px 28px 0;line-height:1.4;}
+.scanner{width:230px;height:230px;margin:34px auto 0;border-radius:24px;position:relative;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);overflow:hidden;}
+.scanner .corner{position:absolute;width:30px;height:30px;border:3px solid var(--accent);}
+.c-tl{top:14px;left:14px;border-right:0;border-bottom:0;border-radius:8px 0 0 0;}
+.c-tr{top:14px;right:14px;border-left:0;border-bottom:0;border-radius:0 8px 0 0;}
+.c-bl{bottom:14px;left:14px;border-right:0;border-top:0;border-radius:0 0 0 8px;}
+.c-br{bottom:14px;right:14px;border-left:0;border-top:0;border-radius:0 0 8px 0;}
+.scanline{position:absolute;left:18px;right:18px;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);top:20px;animation:scan 2.4s ease-in-out infinite;}
+@keyframes scan{0%,100%{top:24px;}50%{top:200px;}}
+.connecting{position:absolute;inset:0;background:#000;display:none;flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:3;}
+.connecting.on{display:flex;}
+.spinner{width:38px;height:38px;border-radius:50%;border:3px solid rgba(255,255,255,.15);border-top-color:var(--accent);animation:spin 1s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.steps{font-size:14px;color:var(--label2);text-align:center;line-height:1.9;}
+.steps .ok{color:var(--green);}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== PAIRING / ONBOARDING ===== -->
+  <div class="screen offscreen" id="pair">
+    <div class="brand">
+      <div class="mark"><i data-icon="terminal"></i></div>
+      <h1>Fletcher</h1>
+      <p>Private agent compute on hardware you own. Pair your box to begin.</p>
+    </div>
+    <div class="scanner" onclick="connectFlow()">
+      <div class="corner c-tl"></div><div class="corner c-tr"></div><div class="corner c-bl"></div><div class="corner c-br"></div>
+      <div class="scanline"></div>
+    </div>
+    <p style="text-align:center;color:var(--label2);font-size:14px;margin:22px 30px 0;line-height:1.45">Scan the code from <span style="font-family:var(--mono);color:#fff">fletcher pair</span> on your box. One code sets up the WireGuard VPN <i>and</i> signs you in.</p>
+    <div class="pad" style="margin-top:auto;padding-bottom:calc(var(--safe-b) + 18px)">
+      <div style="text-align:center;color:var(--accent);font-size:16px;padding:14px" onclick="connectFlow()">Paste code instead</div>
+    </div>
+    <div class="connecting" id="connecting">
+      <div class="spinner"></div>
+      <div class="steps" id="steps">Reading pairing code...</div>
+    </div>
+  </div>
+
+  <!-- ===== SESSIONS ===== -->
+  <div class="screen" id="sessions" data-root="sessions">
+    <div class="nav">
+      <div class="nav-inline"><span class="nav-right" onclick="present('createSheet')"><i class="iconbtn" data-icon="plus"></i></span></div>
+      <div class="large"><h1>Sessions</h1><div class="sub"><span class="dot run"></span> Connected · home-server</div></div>
+    </div>
+    <div class="scroll">
+
+      <div class="machine live" onclick="push('detail')">
+        <div class="m-bar"><span class="m-name">dev</span><span class="m-agent">claude</span><span class="m-live"><span class="pulse"></span>LIVE</span></div>
+        <div class="m-screen"><span class="ind">&gt;</span> add a /healthz endpoint to the api
+<span class="coral">●</span> Added <span class="green">GET /healthz</span>, wired the mux, added a test.
+  <span class="gray">⎿ go test ./... ✓  ·  editing router.go</span></div>
+        <div class="m-foot"><span class="chip">fletcher-base</span><span class="chip">· 2.9 GiB</span><span class="chip">· up 4h</span><span class="open">Open <i data-icon="chev"></i></span></div>
+      </div>
+
+      <div class="machine live" onclick="push('detail')">
+        <div class="m-bar"><span class="m-name">blog-rebuild</span><span class="m-agent">codex</span><span class="m-live"><span class="pulse"></span>LIVE</span></div>
+        <div class="m-screen"><span class="ind">$</span> npm run build
+<span class="gray">vite v5  building for production...</span>
+✓ 412 modules transformed. <span class="green">dist/ ready</span></div>
+        <div class="m-foot"><span class="chip">fletcher-base</span><span class="chip">· 3.4 GiB</span><span class="chip">· up 1h</span><span class="open">Open <i data-icon="chev"></i></span></div>
+      </div>
+
+      <div class="machine" onclick="push('detail')">
+        <div class="m-bar"><span class="m-name" style="color:var(--label2)">scraper</span><span class="m-agent">claude</span><span class="m-stopped">stopped · 3d ago</span></div>
+        <div class="m-screen dim"><span class="coral">●</span> Wrote scrape.py and a nightly cron.
+  <span class="gray">⎿ 1,204 listings saved to /workspace/out.json</span>
+<span class="gray">[session hibernated - tap to wake]</span></div>
+        <div class="m-foot"><span class="chip">fletcher-base</span><span class="chip">· 1.1 GiB</span><span class="chip">· on disk</span><span class="open">Wake <i data-icon="chev"></i></span></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== INBOX ===== -->
+  <div class="screen offscreen" id="inbox" data-root="inbox">
+    <div class="nav"><div class="nav-inline"></div><div class="large"><h1>Inbox</h1><div class="sub">What your automations did while you were away</div></div></div>
+    <div class="scroll">
+
+      <div class="sect-hd"><i data-icon="bolt" style="width:13px;height:13px"></i> Needs you</div>
+      <div class="card attn">
+        <div class="top"><i data-icon="clock"></i> session · dev · 18m ago <span class="badge run">APPROVE</span></div>
+        <div class="ttl">Claude wants to push to origin/main</div>
+        <div class="desc">2 commits on <b>feat/healthz</b>. The push is blocked until you allow it.</div>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="btn tinted" style="height:40px;font-size:15px" onclick="event.stopPropagation()">Deny</button>
+          <button class="btn primary" style="height:40px;font-size:15px" onclick="event.stopPropagation()">Approve</button>
+        </div>
+      </div>
+
+      <div class="sect-hd">Results</div>
+      <!-- structured: job reported a typed payload -->
+      <div class="card">
+        <div class="top"><i data-icon="clock"></i> cron · flight-watch · 7:00 AM</div>
+        <div class="ttl">SYD &rarr; TYO, June</div>
+        <div class="metric">$342 <span class="down">&darr; 12%</span></div>
+        <div class="desc" style="margin-top:4px">Cheapest in 3 weeks. Was $389 yesterday.</div>
+      </div>
+      <div class="card">
+        <div class="top"><i data-icon="clock"></i> job · nightly-build · 2:14 AM <span class="badge ok">PASSED</span></div>
+        <div class="ttl">Build #214 green</div>
+        <div class="desc">1,204 tests passed in 4m 31s. Preview is live.</div>
+        <div style="margin-top:10px"><button class="btn tinted" style="height:38px;font-size:15px" onclick="event.stopPropagation()">Open preview</button></div>
+      </div>
+      <!-- generic fallback: job emitted no structured report -->
+      <div class="card generic">
+        <div class="top"><i data-icon="clock"></i> cron · disk-report · 6:00 AM <span class="badge ok">EXIT 0</span></div>
+        <div class="ttl">disk-report finished</div>
+        <div class="desc" style="font-size:13px">No structured result - showing the last output:</div>
+        <div class="raw">/dev/vda   50G  31G  19G  62% /
+largest: /workspace/node_modules (4.2G)</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===== SETTINGS ===== -->
+  <div class="screen offscreen" id="settings" data-root="settings">
+    <div class="nav"><div class="nav-inline"></div><div class="large"><h1>Settings</h1></div></div>
+    <div class="scroll">
+      <div class="group"><div class="group-hd">Your box</div><div class="list">
+        <div class="row"><div class="body"><div class="t">home-server</div></div><span class="val" style="display:flex;align-items:center;gap:6px"><span class="dot run"></span>Connected</span></div>
+        <div class="row"><div class="body"><div class="t">WireGuard VPN</div><div class="s">On-demand · in-app tunnel</div></div><span class="pill run">on</span></div>
+        <div class="row tap" onclick="push('pair')"><div class="body"><div class="t" style="color:var(--accent)">Pair a new box</div></div><i class="chev" data-icon="chev"></i></div>
+      </div></div>
+      <div class="group"><div class="group-hd">Models</div><div class="list">
+        <div class="row"><div class="body"><div class="t">Anthropic</div></div><span class="val">Configured</span></div>
+        <div class="row tap"><div class="body"><div class="t">Default image</div></div><span class="val" style="margin-right:8px">fletcher-base</span><i class="chev" data-icon="chev"></i></div>
+      </div></div>
+      <div class="group"><div class="group-hd">Sessions</div><div class="list">
+        <div class="row tap" onclick="present('idlePicker')"><div class="body"><div class="t">Idle auto-stop</div></div><span class="val" id="idleVal" style="margin-right:8px">30 min</span><i class="chev" data-icon="chev"></i></div>
+        <div class="row tap" onclick="present('idlePicker')"><div class="body"><div class="t">Max sessions</div></div><span class="val" style="margin-right:8px">10</span><i class="chev" data-icon="chev"></i></div>
+        <div class="row tap" onclick="present('idlePicker')"><div class="body"><div class="t">Max disk</div></div><span class="val" style="margin-right:8px">50 GB</span><i class="chev" data-icon="chev"></i></div>
+      </div></div>
+      <div class="muted">These are live settings on the daemon (idle timeout, max count, max disk) - editing here is the same as <span style="font-family:var(--mono)">fletcher settings set</span>, applied to new sessions.</div>
+    </div>
+  </div>
+
+  <!-- ===== SESSION DETAIL ===== -->
+  <div class="screen offscreen" id="detail">
+    <div class="nav"><div class="nav-inline"><span class="nav-left" onclick="pop()"><i data-icon="back"></i>Sessions</span><span class="nav-title">dev</span></div></div>
+    <div class="scroll notab">
+      <div class="machine live" style="margin-top:16px">
+        <div class="m-bar"><span class="m-name">dev</span><span class="m-agent">claude</span><span class="m-live"><span class="pulse"></span>LIVE</span></div>
+        <div class="m-screen" style="min-height:96px"><span class="ind">&gt;</span> add a /healthz endpoint to the api
+<span class="coral">●</span> Added <span class="green">GET /healthz</span>, wired the mux, added a test.
+  <span class="gray">⎿ go test ./... ✓</span>
+<span class="ind">&gt;</span> <span class="cursor"></span></div>
+      </div>
+      <div class="pad" style="margin-top:16px"><button class="btn primary" onclick="push('terminal')"><i data-icon="terminal"></i> Open Terminal</button></div>
+      <div class="group" style="margin-top:18px"><div class="list">
+        <div class="row"><div class="body"><div class="t">Image</div></div><span class="val">fletcher-base</span></div>
+        <div class="row"><div class="body"><div class="t">Disk</div></div><span class="val">2.9 GiB</span></div>
+        <div class="row"><div class="body"><div class="t">Uptime</div></div><span class="val">4h 12m</span></div>
+        <div class="row tap"><div class="body"><div class="t">Preview URL</div><div class="s">localhost:3000 &rarr; proxied</div></div><i class="chev" data-icon="chev"></i></div>
+      </div></div>
+      <div class="group"><div class="list">
+        <div class="row tap"><div class="t" style="color:var(--accent)">Stop (hibernate)</div></div>
+        <div class="row tap"><div class="t" style="color:var(--red)">Delete session</div></div>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- ===== TERMINAL ===== -->
+  <div class="screen offscreen" id="terminal">
+    <div class="term-nav"><div class="nav-inline"><span class="nav-left" style="color:var(--coral)" onclick="pop()"><i data-icon="back"></i>dev</span><span class="nav-title" style="font-family:var(--mono);font-size:14px">claude</span><span class="nav-right" style="color:var(--coral)" onclick="pop()">Done</span></div></div>
+    <div class="term-body" id="termtext"></div>
+    <div class="keyrow">
+      <div class="key sticky">esc</div><div class="key sticky" onclick="this.classList.toggle('on')">ctrl</div><div class="key">tab</div>
+      <div class="key">|</div><div class="key">/</div><div class="key">~</div><div class="key">-</div>
+      <div class="key">&uarr;</div><div class="key">&darr;</div><div class="key">&larr;</div><div class="key">&rarr;</div>
+    </div>
+    <div class="kbhint">software keyboard appears here · accessory row stays pinned above it</div>
+  </div>
+
+  <!-- ===== CREATE SHEET (unified trigger) ===== -->
+  <div id="scrim" onclick="dismiss()"></div>
+  <div class="sheet" id="createSheet">
+    <div class="grabber"></div>
+    <div class="sheet-nav"><span class="c" onclick="dismiss()">Cancel</span><span class="ttl">New</span><span class="c" style="font-weight:600" onclick="dismiss()" id="createBtn">Create</span></div>
+    <div class="seg">
+      <div class="on" data-trig="interactive" onclick="setTrig(this)">Interactive</div>
+      <div data-trig="once" onclick="setTrig(this)">Run once</div>
+      <div data-trig="cron" onclick="setTrig(this)">Scheduled</div>
+    </div>
+    <div style="overflow-y:auto">
+      <div class="group" style="margin-top:14px"><div class="list">
+        <div class="field"><span class="lab">Name</span><input placeholder="auto" /></div>
+        <div class="field"><span class="lab">Image</span><span class="pick">fletcher-base <i data-icon="chev"></i></span></div>
+        <div class="field"><span class="lab">Agent</span><span class="pick">claude <i data-icon="chev"></i></span></div>
+        <div class="field" data-when="once cron"><span class="lab">Task</span><input placeholder="scrape prices, summarise..." /></div>
+        <div class="field" data-when="cron"><span class="lab">Schedule</span><span class="pick">Every day 7:00 <i data-icon="chev"></i></span></div>
+        <div class="field" data-when="once cron"><span class="lab">Send result to</span><span class="pick">Inbox <i data-icon="chev"></i></span></div>
+      </div>
+      <div class="muted" id="trigHint">A durable session you drop into and drive. Boots a microVM and opens Claude.</div></div>
+      <div class="pad" style="margin-top:18px"><button class="btn primary" onclick="dismiss()" id="trigCta">Create &amp; open terminal</button></div>
+    </div>
+  </div>
+
+  <!-- ===== IDLE PICKER ===== -->
+  <div class="sheet" id="idlePicker">
+    <div class="grabber"></div>
+    <div class="sheet-nav"><span class="c" onclick="dismiss()">Cancel</span><span class="ttl">Idle auto-stop</span><span class="c" style="font-weight:600" onclick="dismiss()">Done</span></div>
+    <div class="group" style="margin-top:8px"><div class="list">
+      <div class="row tap" onclick="pickIdle(this)"><div class="body"><div class="t">Off (never)</div></div><i class="ck" data-icon="check"></i></div>
+      <div class="row tap" onclick="pickIdle(this)"><div class="body"><div class="t">15 min</div></div><i class="ck" data-icon="check"></i></div>
+      <div class="row tap" onclick="pickIdle(this)"><div class="body"><div class="t">30 min</div></div><i class="ck on" data-icon="check"></i></div>
+      <div class="row tap" onclick="pickIdle(this)"><div class="body"><div class="t">1 hour</div></div><i class="ck" data-icon="check"></i></div>
+      <div class="row tap" onclick="pickIdle(this)"><div class="body"><div class="t">2 hours</div></div><i class="ck" data-icon="check"></i></div>
+    </div></div>
+    <div class="muted">A session stops once no work is in flight for this long, freeing the box's RAM. Its workspace stays on disk. Off disables it.</div>
+    <div style="height:20px"></div>
+  </div>
+
+  <!-- ===== TAB BAR ===== -->
+  <div class="tabbar" id="tabbar">
+    <div class="tab on" data-tab="sessions" onclick="switchTab('sessions')"><i data-icon="tabSessions"></i><span>Sessions</span></div>
+    <div class="tab" data-tab="inbox" onclick="switchTab('inbox')"><i data-icon="tabInbox"></i><span>Inbox</span></div>
+    <div class="tab" data-tab="settings" onclick="switchTab('settings')"><i data-icon="tabSettings"></i><span>Settings</span></div>
+  </div>
+</div>
+
+<script>
+const ICONS={
+ terminal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3-3 3"/><path d="M12.5 15H17"/></svg>',
+ chev:'<svg viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l6 6-6 6"/></svg>',
+ back:'<svg viewBox="0 0 12 20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 1L2 10l8 9"/></svg>',
+ plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+ clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 2" stroke-linecap="round"/></svg>',
+ bolt:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h6l-1 8 9-12h-6z"/></svg>',
+ tabSessions:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3-3 3"/><path d="M12.5 15H17"/></svg>',
+ tabInbox:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13l2.5-8h13L21 13"/><path d="M3 13v5a1 1 0 001 1h16a1 1 0 001-1v-5"/><path d="M3 13h5l1.5 2.5h5L16 13h5"/></svg>',
+ tabSettings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8 2 2 0 11-2.8 2.8 1.6 1.6 0 00-2.7 1.1 2 2 0 11-4 0 1.6 1.6 0 00-2.7-1.1 2 2 0 11-2.8-2.8A1.6 1.6 0 004.9 15a2 2 0 110-4 1.6 1.6 0 001.1-2.7 2 2 0 112.8-2.8A1.6 1.6 0 0011.5 6a2 2 0 014 0 1.6 1.6 0 002.7 1.1 2 2 0 112.8 2.8A1.6 1.6 0 0019.3 11a2 2 0 110 4z"/></svg>',
+ check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>',
+};
+document.querySelectorAll('[data-icon]').forEach(e=>e.innerHTML=ICONS[e.dataset.icon]||'');
+
+const term=`<span class="coral">✻ Welcome to Claude Code</span>
+
+  <span class="gray">/workspace · fletcher-base · session: dev</span>
+
+<span class="ind">&gt;</span> add a /healthz endpoint to the api
+
+<span class="coral">●</span> I'll add it to the router. Let me look first.
+  <span class="gray">⎿ Read internal/api/router.go (42 lines)</span>
+
+<span class="coral">●</span> Added <span class="green">GET /healthz</span> returning 200 with build info.
+  <span class="gray">⎿ Updated router.go, router_test.go · go test ./... ✓</span>
+
+<span class="ind">&gt;</span> <span class="cursor"></span>`;
+
+let rootTab='sessions';const stack=[];
+function switchTab(id){if(stack.length)return;document.querySelectorAll('[data-root]').forEach(s=>s.classList.toggle('offscreen',s.id!==id));document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.tab===id));rootTab=id;}
+function push(id){const cur=stack.length?stack[stack.length-1]:rootTab;const inc=document.getElementById(id);inc.classList.add('offscreen');void inc.offsetWidth;requestAnimationFrame(()=>{inc.classList.remove('offscreen');document.getElementById(cur).classList.add('parked');});stack.push(id);if(id==='terminal')document.getElementById('termtext').innerHTML=term;document.getElementById('tabbar').style.display='none';}
+function pop(){const id=stack.pop();const under=stack.length?stack[stack.length-1]:rootTab;document.getElementById(under).classList.remove('parked');document.getElementById(id).classList.add('offscreen');if(!stack.length)document.getElementById('tabbar').style.display='flex';}
+function present(id){document.getElementById('scrim').classList.add('on');document.getElementById(id).classList.add('on');}
+function dismiss(){document.getElementById('scrim').classList.remove('on');document.querySelectorAll('.sheet.on').forEach(s=>s.classList.remove('on'));}
+function pickIdle(el){el.closest('.list').querySelectorAll('.ck').forEach(c=>c.classList.remove('on'));el.querySelector('.ck').classList.add('on');document.getElementById('idleVal').textContent=el.querySelector('.t').textContent.replace(' (never)','');}
+
+const trigCopy={interactive:['A durable session you drop into and drive. Boots a microVM and opens Claude.','Create & open terminal'],once:['Runs the task once in a fresh fork, posts the result to the sink, then tears down.','Run once'],cron:['An agent writes the task once; a plain cron job re-runs it on schedule and reports back.','Schedule it']};
+function setTrig(el){document.querySelectorAll('.seg div').forEach(d=>d.classList.remove('on'));el.classList.add('on');const t=el.dataset.trig;document.querySelectorAll('[data-when]').forEach(f=>f.style.display=f.dataset.when.split(' ').includes(t)?'flex':'none');document.getElementById('trigHint').textContent=trigCopy[t][0];document.getElementById('trigCta').textContent=trigCopy[t][1];}
+setTrig(document.querySelector('.seg div.on'));
+
+function connectFlow(){const c=document.getElementById('connecting'),s=document.getElementById('steps');c.classList.add('on');const lines=['Reading pairing code...','<span class=ok>✓</span> Code verified','Bringing up WireGuard tunnel...','<span class=ok>✓</span> Tunnel up · home-server','Signed in'];let i=0;s.innerHTML=lines[0];const iv=setInterval(()=>{i++;if(i>=lines.length){clearInterval(iv);c.classList.remove('on');while(stack.length)pop();switchTab('sessions');return;}s.innerHTML=lines.slice(0,i+1).join('<br>');},700);}
+</script>
+</body>
+</html>

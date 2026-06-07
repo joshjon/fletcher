@@ -572,7 +572,8 @@ agents - all over the WireGuard tunnel, nothing leaving your network. This
 promotes the former "Native client app" backlog line to a committed milestone:
 durable Claude-Code sessions driven from a phone is *the* wedge (DESIGN.md §8,
 "a beautiful iOS/Mac app is the hardest thing for a bot-shaped competitor to
-copy"), not a someday GUI.
+copy"), not a someday GUI. A first-cut HTML UI mockup of these screens (approved
+as the visual direction) lives in `design/ios-mockup/`.
 
 **The substrate is already shipped.** This is a client on top of contracts M4 +
 M6 already expose; the app consumes the daemon, it does not extend it:
@@ -624,7 +625,13 @@ M6 already expose; the app consumes the daemon, it does not extend it:
 4. **Results inbox (DESIGN.md §7, the second surface).** A feed of job-output
    cards / dashboards ("today's prices", "build finished - preview"). Half of why
    monitoring use-cases are sticky and what makes a non-technical user open the
-   app daily.
+   app daily. *Open design question, to settle at implementation:* how a job
+   result becomes a structured card. Proposed direction - the §4 "sink" plus a
+   `fletcher.report` MCP tool the agent/job calls for rich cards
+   (`{title, summary, status, metric?, link?}`), with a generic
+   name / exit-code / output-tail fallback so any job gets a card with zero
+   config. Matches "agent-authored-then-automated" (write the report call once,
+   the cron'd program reuses it). Needs testing before it is settled.
 
 **Dependencies and risks to verify before betting on.**
 
