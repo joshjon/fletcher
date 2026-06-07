@@ -128,6 +128,16 @@ func setupSessionSSH(ctx context.Context, cmd *cli.Command, ref string) error {
 		return err
 	}
 
+	// A session recreated under the same ref boots a fresh VM with a new host
+	// key. ssh's strict checking accept-news a brand-new host but refuses a
+	// *changed* one, so a stale pin from a prior session would block the next
+	// connection. This setup is the chokepoint - reinstalling the key here is
+	// mandatory after a recreate - so drop the stale pin and let accept-new
+	// re-pin cleanly.
+	if err := forgetSessionHostKey(ctx, ref); err != nil {
+		return err
+	}
+
 	fmt.Printf("SSH ready. Connect with:\n\n    ssh %s\n\n", host)
 	fmt.Printf("Point an IDE's Remote-SSH at the host %q (it reads your SSH config).\n", host)
 	return nil
@@ -141,6 +151,33 @@ func fletcherSSHDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "ssh"), nil
+}
+
+// forgetSessionHostKey evicts any pinned host key for ref from Fletcher's
+// managed known_hosts, so a session recreated under the same ref re-pins its
+// fresh host key instead of tripping ssh's changed-key guard. Best-effort and
+// idempotent: a missing known_hosts means there is nothing to forget. Uses
+// ssh-keygen -R (already a hard dependency) so hashed and plain entries are
+// handled alike.
+func forgetSessionHostKey(ctx context.Context, ref string) error {
+	dir, err := fletcherSSHDir()
+	if err != nil {
+		return err
+	}
+	knownHosts := filepath.Join(dir, "known_hosts")
+	if _, err := os.Stat(knownHosts); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat known_hosts: %w", err)
+	}
+	out, err := exec.CommandContext(ctx, "ssh-keygen", "-R", ref, "-f", knownHosts).CombinedOutput() //nolint:gosec // fixed args; knownHosts is Fletcher's own managed path
+	if err != nil {
+		return fmt.Errorf("evict host key for %s: %s", ref, strings.TrimSpace(string(out)))
+	}
+	// ssh-keygen -R leaves a .old backup beside the file; keep the managed dir tidy.
+	_ = os.Remove(knownHosts + ".old")
+	return nil
 }
 
 // ensureSSHKeypair returns the managed public key, generating the keypair on

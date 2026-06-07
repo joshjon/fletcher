@@ -154,6 +154,11 @@ func sessionDeleteCmd() *cli.Command {
 			}
 			if resp.Msg.GetDeleted() {
 				fmt.Printf("deleted %s\n", ref)
+				// Clear the stale SSH host-key pin so a future session reusing
+				// this ref connects cleanly. Cleanup only - never fail a delete.
+				if err := forgetSessionHostKey(ctx, ref); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not evict ssh host key for %s: %v\n", ref, err)
+				}
 			} else {
 				fmt.Printf("%s did not exist\n", ref)
 			}
