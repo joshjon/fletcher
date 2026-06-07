@@ -10,13 +10,13 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"syscall"
 	"time"
 
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/joshjon/fletcher/internal/approval"
 	"github.com/joshjon/fletcher/internal/buildinfo"
+	"github.com/joshjon/fletcher/internal/netguard"
 )
 
 // maxEgressBody caps how much of an egress response body the daemon reads back
@@ -194,27 +194,14 @@ func validateEgressURL(rawURL string) error {
 }
 
 // NewEgressHTTPClient builds the HTTP client the daemon-mediated egress tool
-// uses. Its dialer refuses to connect to any non-global address - the SSRF
-// guard - checked against the IP actually being dialed (after DNS), so an agent
-// in a fork cannot use the daemon to reach its own loopback admin surface, the
-// cloud-metadata endpoint, or the operator's LAN.
+// uses. Its dialer refuses to connect to any non-global address (the shared
+// netguard SSRF guard), checked against the IP actually being dialed (after
+// DNS), so an agent in a fork cannot use the daemon to reach its own loopback
+// admin surface, the cloud-metadata endpoint, or the operator's LAN.
 func NewEgressHTTPClient(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{
 		Timeout: 10 * time.Second,
-		Control: func(_, address string, _ syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return fmt.Errorf("egress: bad dial address %q: %w", address, err)
-			}
-			ip := net.ParseIP(host)
-			if ip == nil {
-				return fmt.Errorf("egress: cannot parse dial address %q", host)
-			}
-			if disallowedEgressIP(ip) {
-				return fmt.Errorf("egress to %s is blocked (loopback, link-local, private, or metadata address)", ip)
-			}
-			return nil
-		},
+		Control: netguard.DialControl,
 	}
 	return &http.Client{
 		Timeout: timeout,
@@ -227,20 +214,6 @@ func NewEgressHTTPClient(timeout time.Duration) *http.Client {
 			ExpectContinueTimeout: time.Second,
 		},
 	}
-}
-
-// disallowedEgressIP reports whether ip is an address the egress tool must
-// never reach: loopback, link-local (which includes the 169.254.169.254 cloud
-// metadata endpoint), private (RFC1918 / ULA), unspecified, or multicast. Only
-// globally-routable unicast addresses are allowed out.
-func disallowedEgressIP(ip net.IP) bool {
-	return ip.IsLoopback() ||
-		ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() ||
-		ip.IsInterfaceLocalMulticast() ||
-		ip.IsMulticast() ||
-		ip.IsUnspecified() ||
-		ip.IsPrivate()
 }
 
 // requestApprovalTool lets agents ask the human for permission to perform
