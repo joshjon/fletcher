@@ -22,6 +22,7 @@ type Driver struct{}
 type Forward struct {
 	ListenAddr string
 	HostSocket string
+	Egress     bool
 }
 
 // Options matches the Linux build's surface so call sites need no build guards.
@@ -30,6 +31,7 @@ type Options struct {
 	KernelPath        string
 	RunDir            string
 	Forwards          []Forward
+	EgressOpenSocket  string
 	VcpuCount         int64
 	MemSizeMib        int64
 	Logger            *slog.Logger
