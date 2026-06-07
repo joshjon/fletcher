@@ -580,8 +580,8 @@ M6 already expose; the app consumes the daemon, it does not extend it:
 - **Remote API over WireGuard (M4).** The remote listener serves the same Connect
   handler as the local socket (`newRemoteServer(..., connectSrv.Handler)`), so
   `SessionsService` and `JobsService` are reachable from a paired peer. The phone
-  pairs as a WireGuard peer via the login blob; `AdminService` stays local-socket
-  only.
+  reaches it as a WireGuard peer (M7's pairing delivers that peer config - see the
+  pairing phase below); `AdminService` stays local-socket only.
 - **Interactive terminal as a streaming RPC (M6).** `ShellSession` is
   bidirectional streaming (`stream ShellSessionRequest` -> `stream
   ShellSessionResponse`): the in-app terminal pumps that PTY stream (stdin /
@@ -598,10 +598,22 @@ M6 already expose; the app consumes the daemon, it does not extend it:
 
 **New work (the app, sequenced by dependency).**
 
-1. **Swift client + pairing.** A generated Connect-Swift (or grpc-swift) client;
-   WireGuard on iOS via WireGuardKit / NetworkExtension; consume the login blob
-   (QR-scan the `fletcher login` token). Proven by listing / creating / stopping
-   sessions over the tunnel. Foundation for everything else.
+1. **Swift client + embedded WireGuard + unified pairing.** Embed **WireGuardKit**
+   in a packet-tunnel Network Extension and drive it from the app via
+   `NETunnelProviderManager`, so the tunnel comes up *inside* Fletcher - no
+   separate WireGuard app to install or cycle between (the official WireGuard app,
+   Tailscale, and Mullvad all ship this way). One-time iOS VPN-consent prompt,
+   then one tap or on-demand; the tunnel runs in the extension process, so it
+   survives app backgrounding. This requires a **unified pairing payload**: one
+   QR/token that carries the WireGuard config (daemon pubkey, public endpoint,
+   allowed IPs) *and* the RPC token, with the app generating its own WireGuard
+   keypair locally and registering its pubkey during pairing. That collapses
+   today's two-step setup (configure WireGuard, then `fletcher login`) into a
+   single in-app tap. Daemon-side it is mostly repackaging what `fletcher peer`
+   already issues into the pairing blob (today `{remote, token}` only); no new
+   networking. A generated Connect-Swift (or grpc-swift) client rides the tunnel.
+   Proven by pairing a clean phone and listing / creating / stopping sessions.
+   Foundation for everything else.
 2. **In-app terminal (the hero interaction).** A SwiftUI terminal over
    `ShellSession`: attach to a session, run `claude`, detach and reattach.
    Backgrounding the app never kills the session - durability is server-side
@@ -616,8 +628,14 @@ M6 already expose; the app consumes the daemon, it does not extend it:
 
 **Dependencies and risks to verify before betting on.**
 
-- **WireGuard on iOS** via WireGuardKit (NetworkExtension entitlement) - the
-  network plane; the daemon already speaks `wireguard-go`.
+- **Embedded WireGuard on iOS** via WireGuardKit in a packet-tunnel Network
+  Extension (the Network Extensions capability + a paid Apple developer account; a
+  separate extension target). The daemon already speaks `wireguard-go`, so only
+  the client and the pairing payload change. App Store review scrutinises VPN
+  apps, but the tunnel is to the user's own box (not a commercial VPN service), so
+  it is routine: needs a privacy policy and clear disclosure, and is a non-issue
+  for TestFlight / personal distribution. The extension's memory cap is
+  comfortable for WireGuardKit.
 - **gRPC bidi streaming from iOS over the tunnel** - confirm Connect-Swift carries
   `ShellSession` cleanly; the gRPC-Web surface is the fallback if not.
 - **iOS backgrounding** truncates long-lived streams - acceptable by design: the
