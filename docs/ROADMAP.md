@@ -648,8 +648,18 @@ M6 already expose; the app consumes the daemon, it does not extend it:
   local-socket only today, so the app has no daemon-status call. A small addition
   if the control panel needs one.
 
-**Deferred within this milestone.** The **Mac app** (shares the Swift client core;
-iOS is the hero, Mac follows). The **web client** (the gRPC-Web surface already
+**Deferred within this milestone.** The **Mac app's UI** - but the architecture is
+built for it from day one. The client, models, view-models, pairing, and
+WireGuardKit config building live in a **shared Swift package** behind a
+multiplatform target, so adding Mac is a UI-only port, not a rewrite; only the
+Mac-specific UI (windowing, menu bar, sidebar, pointer + hardware-keyboard
+terminal UX) and its NetworkExtension packaging are deferred. Rationale: iOS is
+the hero and owns the hard problems (touch terminal, small screen, app
+backgrounding); a Mac already has a working path today (the `fletcher` CLI plus
+brokered SSH / IDE Remote-SSH from M6), so a Mac app is a convenience on an
+already-working flow, not an unblock the way the iOS app is; and carrying two UIs
+through early churn would halve iteration speed. Ship iOS, port the Mac UI once
+the iOS design has stabilised. The **web client** (the gRPC-Web surface already
 exists). Multi-account / multi-box switching (one box, one user is the thesis;
 DESIGN.md out-of-scope).
 
