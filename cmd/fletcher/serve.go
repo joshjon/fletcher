@@ -39,6 +39,12 @@ func serveCmd() *cli.Command {
 				Value:   "127.0.0.1:11600",
 			},
 			&cli.StringFlag{
+				Name:    "proxy-listen",
+				Usage:   "in-fork loopback address agents point HTTP_PROXY at (relayed to the daemon egress proxy)",
+				Sources: cli.EnvVars("FLETCHER_PROXY_LISTEN"),
+				Value:   "127.0.0.1:11700",
+			},
+			&cli.StringFlag{
 				Name:    "age-key",
 				Usage:   "age identity file path (auto-generated if missing)",
 				Sources: cli.EnvVars("FLETCHER_AGE_KEY"),
@@ -97,6 +103,7 @@ func serveCmd() *cli.Command {
 				LogLevel:            cmd.String("log-level"),
 				GatewayListenAddr:   cmd.String("gateway-listen"),
 				MCPListenAddr:       cmd.String("mcp-listen"),
+				ProxyListenAddr:     cmd.String("proxy-listen"),
 				AgeIdentityPath:     cmd.String("age-key"),
 				RuntimeKind:         cmd.String("runtime"),
 				SnapshotKind:        cmd.String("snapshot"),

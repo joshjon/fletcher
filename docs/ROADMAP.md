@@ -750,9 +750,20 @@ intentionally not in this list.
   the daemon. So headless / `-p` / job agents have daemon-mediated web access
   today. Note this does *not* unblock the interactive TUI (still gated by the
   `api.anthropic.com` check) - that needs Phase B or the stopgap relay.
-  **Phase B - PLANNED.** The per-job forward-proxy, policy model, always-on LAN
-  guard, audit log, and default `allowlist`; this also subsumes the interactive
-  TUI fix. Supersedes the "MCP egress policy/approvals" backlog item below.
+  **Phase B (forward-proxy) - B1+B2 DONE (2026-06-07), B3 PLANNED.** B1 landed
+  the proxy core (internal/egress: a CONNECT/HTTP proxy with Deny/Open/Allowlist
+  policies) and a shared LAN guard (internal/netguard) reused by the MCP egress
+  client. B2 wired it to the fork: the egress proxy serves a unix socket reached
+  via a third loopback->vsock forward, with HTTP_PROXY/HTTPS_PROXY/NO_PROXY in
+  the agent env, enforcing one global default `allowlist` (Anthropic infra, git
+  hosts, package registries), LAN-guarded and audit-logged via slog. Verified on
+  hardware: allowlisted hosts tunnel through (HTTPS via CONNECT, TLS end-to-end),
+  non-allowlisted hosts get 403, and the interactive Claude Code TUI now starts -
+  its api.anthropic.com and platform.claude.com startup checks ride the proxy.
+  **B3 - PLANNED:** per-job policy (none / open / custom allowlist) via a
+  session/job field + a `--egress` flag + a default-policy setting, replacing the
+  single global allowlist. Supersedes the "MCP egress policy/approvals" backlog
+  item below.
 - **macOS client release - DONE.** One binary, no split CLI (the Consul/Vault
   model): the daemon is Linux-only, the client runs anywhere. Restored the
   darwin cross-build (two non-linux driver stubs had drifted) and guarded it with

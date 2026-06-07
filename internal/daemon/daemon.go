@@ -27,6 +27,7 @@ import (
 	"github.com/joshjon/fletcher/internal/approval"
 	"github.com/joshjon/fletcher/internal/audit"
 	"github.com/joshjon/fletcher/internal/buildinfo"
+	"github.com/joshjon/fletcher/internal/egress"
 	"github.com/joshjon/fletcher/internal/gateway"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/image"
@@ -126,6 +127,7 @@ type Config struct {
 	LogLevel          string
 	GatewayListenAddr string
 	MCPListenAddr     string
+	ProxyListenAddr   string
 	AgeIdentityPath   string
 
 	// RuntimeKind selects the runtime.Driver: "mock" (default), "runc",
@@ -246,6 +248,9 @@ type services struct {
 	mcpLn          net.Listener
 	gatewayUnixLn  net.Listener
 	mcpUnixLn      net.Listener
+	proxySrv       *http.Server
+	proxyUnixLn    net.Listener
+	proxyUnix      string
 	remoteSrv      *http.Server
 	remoteLn       net.Listener
 	remoteAddr     string
@@ -311,6 +316,22 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		return nil, fmt.Errorf("mcp unix listener: %w", err)
 	}
 
+	// Egress forward-proxy: a fork with egress points HTTP_PROXY/HTTPS_PROXY at
+	// the in-fork forwarder, which relays to this unix socket. The proxy gates
+	// each connection on the policy + the netguard LAN guard. B2 enforces a
+	// single global allowlist; Phase B3 makes it per-job.
+	proxyUnix := proxySocketPath(cfg)
+	proxyUnixLn, err := listenUnix(ctx, proxyUnix)
+	if err != nil {
+		return nil, fmt.Errorf("egress proxy unix listener: %w", err)
+	}
+	egressPolicy := egress.NewAllowlist(defaultEgressAllowlist)
+	egressProxy := egress.New(egressPolicy, logger)
+	logger.Info("egress proxy ready",
+		slog.String("policy", egressPolicy.Name()),
+		slog.Int("allowlist_size", len(defaultEgressAllowlist)),
+	)
+
 	approvalSvc := approval.NewService(queries, approval.ServiceOptions{})
 	apiEndpoint := remoteAPIAddr()
 	peerSvc := peer.NewService(queries, peer.Options{
@@ -336,6 +357,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	// Env every agent inherits: it points all agents at the daemon gateway/MCP
 	// so keys never enter a fork (DESIGN.md §6). Shared by ephemeral jobs and
 	// durable sessions - one execution engine, one environment (§4).
+	proxyURL := "http://" + proxyListenAddr(cfg)
 	agentEnv := []string{
 		// OpenAI-compatible path (Codex, Aider, OpenHands, pi). The
 		// gateway's /v1/chat/completions handler translates to Anthropic.
@@ -349,6 +371,17 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		// Model catalog (Phase 14) - pi-extension and other agents fetch
 		// this on startup to discover providers without per-job config.
 		"FLETCHER_CATALOG_URL=" + gatewayURL + "/v1/catalog.json",
+		// Fork egress: agents' HTTP(S) clients (npm, pip, git, curl, WebFetch,
+		// and Claude Code's startup connectivity check) route through the daemon
+		// forward-proxy, which enforces the egress policy + LAN guard. Loopback
+		// stays direct (NO_PROXY) so the gateway/MCP calls above are not proxied.
+		// Both cases set because tools vary on which they read.
+		"HTTP_PROXY=" + proxyURL,
+		"HTTPS_PROXY=" + proxyURL,
+		"NO_PROXY=127.0.0.1,localhost,::1",
+		"http_proxy=" + proxyURL,
+		"https_proxy=" + proxyURL,
+		"no_proxy=127.0.0.1,localhost,::1",
 	}
 
 	supervisor := job.NewSupervisor(queries, rtDriver, snapDriver, logger, job.SupervisorOptions{
@@ -405,6 +438,9 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		mcpLn:          mcpLn,
 		gatewayUnixLn:  gatewayUnixLn,
 		mcpUnixLn:      mcpUnixLn,
+		proxySrv:       newProxyHTTPServer(egressProxy),
+		proxyUnixLn:    proxyUnixLn,
+		proxyUnix:      proxyUnix,
 		remoteSrv:      remoteSrv,
 		remoteLn:       remoteLn,
 		remoteAddr:     apiEndpoint,
@@ -487,6 +523,8 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	g.Add(httpServeActor(logger, "gateway-unix", s.gatewaySrv, s.gatewayUnixLn, "unix:"+s.gatewayUnix))
 	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
 	g.Add(httpServeActor(logger, "mcp-unix", s.mcpSrv, s.mcpUnixLn, "unix:"+s.mcpUnix))
+	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
+	g.Add(httpServeActor(logger, "egress-unix", s.proxySrv, s.proxyUnixLn, "unix:"+s.proxyUnix))
 	if s.remoteSrv != nil {
 		//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
 		g.Add(httpServeActor(logger, "remote-api", s.remoteSrv, s.remoteLn, "http://"+s.remoteAddr))
@@ -682,6 +720,13 @@ func newMCPHTTPServer(mcp *fletchermcp.Server) *http.Server {
 	streamable := mcpserver.NewStreamableHTTPServer(mcp.Inner())
 	return &http.Server{
 		Handler:           streamable,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+}
+
+func newProxyHTTPServer(p *egress.Proxy) *http.Server {
+	return &http.Server{
+		Handler:           p,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 }
@@ -1017,6 +1062,48 @@ func mcpSocketPath(cfg Config) string {
 	return filepath.Join(filepath.Dir(cfg.SocketPath), "mcp.sock")
 }
 
+// proxySocketPath is the daemon-side unix socket the egress forward-proxy
+// listens on; a fork reaches it via the in-fork forwarder (HTTP_PROXY) and the
+// loopback->vsock relay, the same way it reaches the gateway and MCP sockets.
+func proxySocketPath(cfg Config) string {
+	return filepath.Join(filepath.Dir(cfg.SocketPath), "egress.sock")
+}
+
+const defaultProxyListen = "127.0.0.1:11700"
+
+// proxyListenAddr is the in-fork loopback address agents point HTTP_PROXY at;
+// the in-fork forwarder relays it to proxySocketPath over vsock.
+func proxyListenAddr(cfg Config) string {
+	if cfg.ProxyListenAddr == "" {
+		return defaultProxyListen
+	}
+	return cfg.ProxyListenAddr
+}
+
+// defaultEgressAllowlist is the curated host set the egress proxy permits under
+// the default `allowlist` policy: Anthropic infrastructure (so Claude Code's
+// startup connectivity check and API work), common package registries, and git
+// hosts. The netguard LAN guard still applies on top. Per-job overrides
+// (none / open / a custom allowlist) land in Phase B3.
+var defaultEgressAllowlist = []string{
+	// Anthropic infra: api / console / statsig under *.anthropic.com; the
+	// Claude Code TUI also reaches claude.ai (OAuth) and platform.claude.com
+	// (Console auth) for its startup checks.
+	"anthropic.com", "*.anthropic.com",
+	"claude.ai", "*.claude.ai",
+	"claude.com", "*.claude.com",
+	// Git hosts.
+	"github.com", "*.github.com", "*.githubusercontent.com",
+	"gitlab.com", "*.gitlab.com",
+	// Package registries.
+	"registry.npmjs.org", "*.npmjs.org",
+	"pypi.org", "*.pypi.org", "files.pythonhosted.org",
+	"crates.io", "static.crates.io",
+	"proxy.golang.org", "sum.golang.org", "*.golang.org",
+	// Debian apt (the base image is debian-based).
+	"deb.debian.org", "*.debian.org",
+}
+
 // buildRuntimeDriver constructs the runtime.Driver chosen by cfg.
 func buildRuntimeDriver(cfg Config, logger *slog.Logger) (runtime.Driver, error) {
 	kind := cfg.RuntimeKind
@@ -1037,6 +1124,7 @@ func buildRuntimeDriver(cfg Config, logger *slog.Logger) (runtime.Driver, error)
 			Forwards: []runcdriver.Forward{
 				{Listen: cfg.GatewayListenAddr, HostSocket: gatewaySocketPath(cfg)},
 				{Listen: cfg.MCPListenAddr, HostSocket: mcpSocketPath(cfg)},
+				{Listen: proxyListenAddr(cfg), HostSocket: proxySocketPath(cfg)},
 			},
 		})
 	case "firecracker":
@@ -1056,6 +1144,7 @@ func buildRuntimeDriver(cfg Config, logger *slog.Logger) (runtime.Driver, error)
 			Forwards: []firecrackerdriver.Forward{
 				{ListenAddr: cfg.GatewayListenAddr, HostSocket: gatewaySocketPath(cfg)},
 				{ListenAddr: cfg.MCPListenAddr, HostSocket: mcpSocketPath(cfg)},
+				{ListenAddr: proxyListenAddr(cfg), HostSocket: proxySocketPath(cfg)},
 			},
 			Logger: logger,
 		})
