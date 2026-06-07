@@ -707,9 +707,52 @@ intentionally not in this list.
 - **Fix the codex launcher in `fletcher-base`.** `command -v codex` fails in the
   fork (the `~/.local/bin/codex` symlink targets an absent path). The image
   advertises three agents but ships two working (claude, pi).
-- **MCP egress hardening.** `validateEgressURL` is permissive (no SSRF / loopback
-  / cloud-metadata guard). Given the "nothing leaves your network" positioning,
-  add an egress guard.
+- **Agent egress: per-job policy + daemon forward-proxy - PLANNED.** Surfaced
+  while debugging why interactive Claude Code fails in a session (2026-06-07).
+  Two findings drive this:
+  - *Interactive Claude Code does a hardcoded connectivity check to
+    `api.anthropic.com:443` that ignores `ANTHROPIC_BASE_URL`.* Headless
+    `claude -p` routes through the gateway and works; the TUI opens a direct TLS
+    connection to `api.anthropic.com` (proven by mapping the host to loopback and
+    capturing the ClientHello, SNI `api.anthropic.com`), which the no-egress fork
+    cannot resolve or reach, so it renders "Unable to connect to Anthropic
+    services". The gateway env fix (`9d549f6`) is correct and unrelated - this is
+    a separate gap. Stopgap for the impatient: `claude -p` works today.
+  - *The daemon's egress capability is under-wired.* The `http_get` MCP tool
+    reaches the public internet behind the SSRF guard (refuses loopback / private
+    / link-local / metadata), but it is not registered in the base image's Claude
+    config (`mcpServers` is empty) and is GET-only, so agents cannot use it yet.
+
+  Decision (operator, 2026-06-07): make egress a per-job/environment property,
+  all mediated by the daemon, so "nothing leaves your network except through your
+  own box" still holds (DESIGN.md §5). One mechanism: a daemon HTTP/HTTPS
+  forward-proxy (CONNECT), reached from the fork over the existing
+  loopback->vsock relay (the fork keeps no NIC); the fork's `HTTP_PROXY` /
+  `HTTPS_PROXY` point at it. CONNECT keeps TLS end-to-end, so no MITM/CA is
+  needed, and `npm`/`pip`/`cargo`/`go`/`git`/`curl`/`WebFetch` and the Claude TUI
+  check all work through it. Policy per job: `none` (today's airtight fork;
+  default for private-data work), `tools` (MCP tools only), `allowlist: [...]`
+  (named hosts: registries, git, your APIs, Anthropic infra), `open` (any public
+  host). Default policy: `allowlist` with a curated set (package registries, git
+  hosts, Anthropic infra, common docs). Two invariants on every policy: the
+  LAN/metadata guard stays on (a prompt-injected agent can never reach private
+  ranges or the router), and every destination is audit-logged. This subsumes the
+  interactive-TUI fix (Anthropic hosts are always allowlisted) and unblocks
+  coding / research / long-running-service agents while keeping private-data jobs
+  airtight.
+
+  Phasing: **Phase A - DONE (2026-06-07).** The daemon's MCP tools are now wired
+  into the base image's Claude config (`mcpServers.fletcher` -> `${FLETCHER_MCP_URL}`,
+  baked for both the `fletcher` login user and root; user-scope so no trust
+  prompt), and a general `http_request` tool (method / body / headers, same SSRF
+  guard) sits alongside `http_get`. Verified end to end in a session: `claude mcp
+  list` shows the server connected, and `claude -p` fetches a public URL through
+  the daemon. So headless / `-p` / job agents have daemon-mediated web access
+  today. Note this does *not* unblock the interactive TUI (still gated by the
+  `api.anthropic.com` check) - that needs Phase B or the stopgap relay.
+  **Phase B - PLANNED.** The per-job forward-proxy, policy model, always-on LAN
+  guard, audit log, and default `allowlist`; this also subsumes the interactive
+  TUI fix. Supersedes the "MCP egress policy/approvals" backlog item below.
 - **macOS client release - DONE.** One binary, no split CLI (the Consul/Vault
   model): the daemon is Linux-only, the client runs anywhere. Restored the
   darwin cross-build (two non-linux driver stubs had drifted) and guarded it with
@@ -771,7 +814,9 @@ Listed so they are visible, not lost. Items that became milestones are above.
 - **Audit log storage** - swap `audit.Noop` for a SQLite recorder (phase 4 seam).
 - **MCP egress policy/approvals** - the SSRF guard landed (the egress client
   refuses non-global addresses at dial time). Still open: policy-gated egress
-  (allowlists, approvals) on top of the guard (phase 6).
+  (allowlists, approvals) on top of the guard (phase 6). Now folded into the
+  broader **Agent egress: per-job policy + daemon forward-proxy** plan under
+  "Toward v1 - hardening" above (decided 2026-06-07).
 
 **Agents + image**
 

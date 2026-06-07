@@ -2,12 +2,14 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +18,11 @@ import (
 	"github.com/joshjon/fletcher/internal/approval"
 	"github.com/joshjon/fletcher/internal/buildinfo"
 )
+
+// maxEgressBody caps how much of an egress response body the daemon reads back
+// to a fork, so a single fetch cannot exhaust daemon memory. Shared by the
+// GET shim and the general request tool.
+const maxEgressBody = 256 * 1024
 
 // ApprovalBackend is the subset of approval.Service the MCP tool needs.
 // Keeping it as an interface lets tests stub it cleanly.
@@ -78,15 +85,92 @@ func httpGetTool(httpClient *http.Client) Tool {
 			}
 			defer func() { _ = resp.Body.Close() }()
 
-			// Cap body size to avoid runaway memory; agents fetching anything
-			// huge should be using a streaming tool we'll add later.
-			const maxBody = 256 * 1024
-			body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+			body, err := io.ReadAll(io.LimitReader(resp.Body, maxEgressBody))
 			if err != nil {
 				return mcpgo.NewToolResultError(fmt.Sprintf("read body: %s", err)), nil
 			}
 			return mcpgo.NewToolResultText(fmt.Sprintf("status=%d\n%s", resp.StatusCode, string(body))), nil
 		},
+	}
+}
+
+// httpRequestTool generalises httpGetTool to non-GET methods so agents can call
+// JSON APIs (search backends, REST endpoints) through the daemon, still behind
+// the SSRF guard in NewEgressHTTPClient. Method defaults to GET; body and
+// headers are optional; the response body is size-capped like http_get.
+// Per-host egress policy (the Phase B forward-proxy) layers on top of this.
+func httpRequestTool(httpClient *http.Client) Tool {
+	return Tool{
+		Spec: mcpgo.NewTool("http_request",
+			mcpgo.WithDescription("Perform an HTTP request through the daemon (the fork has no direct network egress). Supports GET/POST/PUT/PATCH/DELETE/HEAD with an optional body and headers. Returns the status and response body as text."),
+			mcpgo.WithString("url",
+				mcpgo.Required(),
+				mcpgo.Description("Absolute http or https URL."),
+			),
+			mcpgo.WithString("method",
+				mcpgo.Description("HTTP method: GET, POST, PUT, PATCH, DELETE, or HEAD. Defaults to GET."),
+			),
+			mcpgo.WithString("body",
+				mcpgo.Description("Optional request body sent as-is."),
+			),
+			mcpgo.WithString("headers_json",
+				mcpgo.Description(`Optional request headers as a JSON object, e.g. {"content-type":"application/json"}.`),
+			),
+		),
+		Handler: func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+			rawURL, err := req.RequireString("url")
+			if err != nil {
+				return mcpgo.NewToolResultError(err.Error()), nil
+			}
+			if err := validateEgressURL(rawURL); err != nil {
+				return mcpgo.NewToolResultError(err.Error()), nil
+			}
+			method := strings.ToUpper(req.GetString("method", http.MethodGet))
+			if !allowedEgressMethod(method) {
+				return mcpgo.NewToolResultError(fmt.Sprintf("unsupported method %q", method)), nil
+			}
+
+			var bodyReader io.Reader = http.NoBody
+			if b := req.GetString("body", ""); b != "" {
+				bodyReader = strings.NewReader(b)
+			}
+			httpReq, err := http.NewRequestWithContext(ctx, method, rawURL, bodyReader)
+			if err != nil {
+				return mcpgo.NewToolResultError(fmt.Sprintf("build request: %s", err)), nil
+			}
+			if hj := req.GetString("headers_json", ""); hj != "" {
+				var hdrs map[string]string
+				if err := json.Unmarshal([]byte(hj), &hdrs); err != nil {
+					return mcpgo.NewToolResultError(fmt.Sprintf("headers_json must be a JSON object of string values: %s", err)), nil
+				}
+				for k, v := range hdrs {
+					httpReq.Header.Set(k, v)
+				}
+			}
+
+			resp, err := httpClient.Do(httpReq)
+			if err != nil {
+				return mcpgo.NewToolResultError(fmt.Sprintf("perform request: %s", err)), nil
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			body, err := io.ReadAll(io.LimitReader(resp.Body, maxEgressBody))
+			if err != nil {
+				return mcpgo.NewToolResultError(fmt.Sprintf("read body: %s", err)), nil
+			}
+			return mcpgo.NewToolResultText(fmt.Sprintf("status=%d\n%s", resp.StatusCode, string(body))), nil
+		},
+	}
+}
+
+// allowedEgressMethod restricts the general request tool to ordinary HTTP
+// methods, so an agent cannot smuggle an arbitrary verb through the daemon.
+func allowedEgressMethod(m string) bool {
+	switch m {
+	case http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -243,6 +327,7 @@ func RegisterBuiltinTools(srv *Server, startedAt time.Time, httpClient *http.Cli
 	}
 	srv.RegisterTool(daemonHealthTool(startedAt))
 	srv.RegisterTool(httpGetTool(httpClient))
+	srv.RegisterTool(httpRequestTool(httpClient))
 	if approvals != nil {
 		srv.RegisterTool(requestApprovalTool(approvals))
 	}

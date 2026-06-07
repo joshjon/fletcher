@@ -125,6 +125,21 @@ RUN ln -sf /home/fletcher/.local/bin/claude /usr/local/bin/claude && \
     ln -sf /home/fletcher/.local/bin/codex /usr/local/bin/codex && \
     ln -sf /home/fletcher/.local/bin/pi /usr/local/bin/pi
 
+# Wire the daemon's MCP tool surface (daemon-mediated web egress via
+# http_get / http_request, plus approvals) into Claude Code so agents can
+# reach it - the fork has no direct egress (DESIGN.md §5), so this is the
+# agent's path to the internet. The URL resolves from FLETCHER_MCP_URL, which
+# the daemon injects per job (DESIGN.md §6); the ${...} placeholder is written
+# literally so Claude expands it at runtime, tracking the daemon's actual MCP
+# address. Set for both the login user (interactive SSH) and root (the
+# exec/job path). User-scope mcpServers are trusted, so no approval prompt.
+RUN for home in /home/fletcher /root; do \
+        f="$home/.claude.json"; \
+        [ -s "$f" ] || echo '{}' > "$f"; \
+        jq '.mcpServers.fletcher = {"type":"http","url":"${FLETCHER_MCP_URL}"}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; \
+    done && \
+    chown fletcher:fletcher /home/fletcher/.claude.json
+
 # Fletcher pi-extension (Phase 14): fetches the daemon's model catalog on
 # pi startup so users see provider/model lists without per-job env-var
 # fiddling. Pattern mirrors exe.dev's `exe-dev` pi-extension.
