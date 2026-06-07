@@ -55,11 +55,18 @@ message Session {
   optional int64 last_used_at = 7;
   // disk_bytes is the session fork's on-disk size.
   int64 disk_bytes = 8;
+  // egress_policy gates the fork's outbound network via the daemon proxy:
+  // "none" (no egress), "allowlist" (curated hosts), or "open" (any public
+  // host; the LAN guard still applies). DESIGN.md §5.
+  string egress_policy = 9;
 }
 
 message CreateSessionRequest {
   string name = 1;
   string image = 2;
+  // egress_policy is "none" | "allowlist" | "open"; empty uses the daemon's
+  // default_egress_policy setting.
+  string egress_policy = 3;
 }
 
 message CreateSessionResponse {

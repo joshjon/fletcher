@@ -307,12 +307,13 @@ func (s *Supervisor) runOne(jobCtx context.Context, row sqliteq.Job) {
 	// stderr share one buffer (interleaved, as a terminal would show them).
 	out := &cappedBuffer{max: 16 << 10}
 	result, err := s.runtime.Run(jobCtx, runtime.Spec{
-		JobID:   row.ID,
-		Image:   row.Image,
-		Command: row.Command,
-		WorkDir: snap.Path,
-		Env:     s.jobEnv,
-		Mounts:  mounts,
+		JobID:        row.ID,
+		Image:        row.Image,
+		Command:      row.Command,
+		WorkDir:      snap.Path,
+		Env:          s.jobEnv,
+		Mounts:       mounts,
+		EgressPolicy: row.EgressPolicy,
 	}, out, out)
 
 	// Two cancellation paths share ctx.Canceled: targeted CancelRunning

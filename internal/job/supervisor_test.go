@@ -45,7 +45,7 @@ func newSupervisorRig(t *testing.T) *supervisorRig {
 		PollInterval:  50 * time.Millisecond,
 		DrainDeadline: 5 * time.Second,
 	})
-	svc := job.NewService(queries, sup, "mock")
+	svc := job.NewService(queries, sup, "mock", "allowlist")
 	return &supervisorRig{db: db, queries: queries, svc: svc, sup: sup}
 }
 

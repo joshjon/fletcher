@@ -19,6 +19,10 @@ type Spec struct {
 	Command string
 	WorkDir string
 	Env     []string // "KEY=value" entries; merged onto the driver's defaults
+	// EgressPolicy gates the fork's outbound network: "none" | "allowlist" |
+	// "open" (empty is treated as "allowlist"). Drivers without egress wiring
+	// (mock) ignore it.
+	EgressPolicy string
 	// Mounts are bind-mounts the runtime should set up inside the fork.
 	// Used by the job supervisor to surface trusted-credential dirs
 	// (DESIGN.md §5 "Credential modes"); drivers without a notion of

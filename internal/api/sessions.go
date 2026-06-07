@@ -18,7 +18,7 @@ import (
 // SessionsBackend is what the SessionService handler needs from the session
 // manager.
 type SessionsBackend interface {
-	Create(ctx context.Context, name, image string) (session.Session, error)
+	Create(ctx context.Context, name, image, egressPolicy string) (session.Session, error)
 	Get(ctx context.Context, ref string) (session.Session, error)
 	List(ctx context.Context) ([]session.Session, error)
 	Start(ctx context.Context, ref string) (session.Session, error)
@@ -43,7 +43,7 @@ func NewSessionsService(backend SessionsBackend) *SessionsService {
 // CreateSession provisions a session and boots its VM. Categorised errors
 // (e.g. a duplicate name) map to the wire code via the ErrorInterceptor.
 func (s *SessionsService) CreateSession(ctx context.Context, req *connect.Request[fletcherv1.CreateSessionRequest]) (*connect.Response[fletcherv1.CreateSessionResponse], error) {
-	sess, err := s.backend.Create(ctx, req.Msg.GetName(), req.Msg.GetImage())
+	sess, err := s.backend.Create(ctx, req.Msg.GetName(), req.Msg.GetImage(), req.Msg.GetEgressPolicy())
 	if err != nil {
 		return nil, err
 	}
@@ -249,13 +249,14 @@ func clampUint16(v uint32) uint16 {
 
 func sessionToProto(s session.Session) *fletcherv1.Session {
 	p := &fletcherv1.Session{
-		Id:        s.ID,
-		Name:      s.Name,
-		Image:     s.Image,
-		State:     stateToProto(s.State),
-		CreatedAt: s.CreatedAt.Unix(),
-		UpdatedAt: s.UpdatedAt.Unix(),
-		DiskBytes: s.DiskBytes,
+		Id:           s.ID,
+		Name:         s.Name,
+		Image:        s.Image,
+		State:        stateToProto(s.State),
+		CreatedAt:    s.CreatedAt.Unix(),
+		UpdatedAt:    s.UpdatedAt.Unix(),
+		DiskBytes:    s.DiskBytes,
+		EgressPolicy: s.EgressPolicy,
 	}
 	if s.LastUsedAt != nil {
 		v := s.LastUsedAt.Unix()

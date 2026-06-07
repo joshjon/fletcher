@@ -16,6 +16,7 @@ import (
 	"github.com/robfig/cron/v3"
 	"go.jetify.com/typeid"
 
+	"github.com/joshjon/fletcher/internal/egress"
 	"github.com/joshjon/fletcher/internal/errs"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
 )
@@ -75,6 +76,9 @@ type Job struct {
 	NextRunAt *time.Time
 	// ParentID links a run to the cron definition that spawned it.
 	ParentID *string
+	// EgressPolicy gates the fork's outbound network: "none" | "allowlist" |
+	// "open".
+	EgressPolicy string
 }
 
 // CreateParams are the caller-supplied fields for a new job.
@@ -86,6 +90,9 @@ type CreateParams struct {
 	Credentials []string
 	// Schedule is required when Trigger is cron: a cron expression.
 	Schedule string
+	// EgressPolicy is "none"|"allowlist"|"open"; empty resolves to the service's
+	// configured default.
+	EgressPolicy string
 }
 
 // Coordinator is what Service needs from the running supervisor: a way to
@@ -98,9 +105,10 @@ type Coordinator interface {
 
 // Service is the high-level façade over the jobs storage layer.
 type Service struct {
-	q            sqliteq.Querier
-	sup          Coordinator
-	defaultImage string
+	q             sqliteq.Querier
+	sup           Coordinator
+	defaultImage  string
+	defaultEgress string
 }
 
 // NewService wires a Service to a sqlc-generated querier (anything that
@@ -108,8 +116,8 @@ type Service struct {
 // The supervisor argument may be nil for tests that only exercise CRUD.
 // defaultImage is used when a job is created with no image (empty makes the
 // image required).
-func NewService(q sqliteq.Querier, sup Coordinator, defaultImage string) *Service {
-	return &Service{q: q, sup: sup, defaultImage: defaultImage}
+func NewService(q sqliteq.Querier, sup Coordinator, defaultImage, defaultEgress string) *Service {
+	return &Service{q: q, sup: sup, defaultImage: defaultImage, defaultEgress: defaultEgress}
 }
 
 // Create validates inputs, generates a typeid, and inserts a new queued job.
@@ -119,6 +127,10 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 	if strings.TrimSpace(p.Image) == "" {
 		p.Image = s.defaultImage
 	}
+	if strings.TrimSpace(p.EgressPolicy) == "" {
+		p.EgressPolicy = s.defaultEgress
+	}
+	p.EgressPolicy = egress.Normalize(p.EgressPolicy)
 	if err := p.validate(); err != nil {
 		return Job{}, err
 	}
@@ -158,17 +170,18 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 
 	nowUnix := now.Unix()
 	row, err := s.q.CreateJob(ctx, sqliteq.CreateJobParams{
-		ID:          id.String(),
-		Status:      string(status),
-		TriggerKind: string(p.Trigger),
-		Name:        p.Name,
-		Command:     p.Command,
-		Image:       p.Image,
-		Credentials: credsEncoded,
-		CreatedAt:   nowUnix,
-		UpdatedAt:   nowUnix,
-		Schedule:    p.Schedule,
-		NextRunAt:   nextRun,
+		ID:           id.String(),
+		Status:       string(status),
+		TriggerKind:  string(p.Trigger),
+		Name:         p.Name,
+		Command:      p.Command,
+		Image:        p.Image,
+		Credentials:  credsEncoded,
+		CreatedAt:    nowUnix,
+		UpdatedAt:    nowUnix,
+		Schedule:     p.Schedule,
+		NextRunAt:    nextRun,
+		EgressPolicy: p.EgressPolicy,
 	})
 	if err != nil {
 		return Job{}, fmt.Errorf("create job: %w", err)
@@ -339,6 +352,7 @@ func jobFromRow(r sqliteq.Job) (Job, error) {
 		Schedule:     r.Schedule,
 		NextRunAt:    timePtrFromUnix(r.NextRunAt),
 		ParentID:     r.ParentID,
+		EgressPolicy: r.EgressPolicy,
 	}, nil
 }
 

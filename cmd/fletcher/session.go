@@ -42,12 +42,14 @@ func sessionCreateCmd() *cli.Command {
 			outputFlag(),
 			&cli.StringFlag{Name: "name", Usage: "unique session name", Required: true},
 			&cli.StringFlag{Name: "image", Usage: "image / environment spec (default: the daemon's default_image setting)"},
+			&cli.StringFlag{Name: "egress", Usage: "fork network egress: none | allowlist | open (default: the daemon's default_egress_policy setting)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			client := newSessionsClient(cmd)
 			resp, err := client.CreateSession(ctx, connect.NewRequest(&fletcherv1.CreateSessionRequest{
-				Name:  cmd.String("name"),
-				Image: cmd.String("image"),
+				Name:         cmd.String("name"),
+				Image:        cmd.String("image"),
+				EgressPolicy: cmd.String("egress"),
 			}))
 			if err != nil {
 				return err
@@ -220,6 +222,7 @@ func writeSessionDetails(w io.Writer, s *fletcherv1.Session) error {
 	fmt.Fprintf(tw, "name:\t%s\n", s.GetName())
 	fmt.Fprintf(tw, "state:\t%s\n", coloredSessionState(s.GetState()))
 	fmt.Fprintf(tw, "image:\t%s\n", s.GetImage())
+	fmt.Fprintf(tw, "egress:\t%s\n", s.GetEgressPolicy())
 	fmt.Fprintf(tw, "disk:\t%s\n", humanBytes(s.GetDiskBytes()))
 	fmt.Fprintf(tw, "created_at:\t%s\n", formatUnix(s.GetCreatedAt()))
 	fmt.Fprintf(tw, "updated_at:\t%s\n", formatUnix(s.GetUpdatedAt()))

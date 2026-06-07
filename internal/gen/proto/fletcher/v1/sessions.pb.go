@@ -81,7 +81,11 @@ type Session struct {
 	UpdatedAt  int64  `protobuf:"varint,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	LastUsedAt *int64 `protobuf:"varint,7,opt,name=last_used_at,json=lastUsedAt,proto3,oneof" json:"last_used_at,omitempty"`
 	// disk_bytes is the session fork's on-disk size.
-	DiskBytes     int64 `protobuf:"varint,8,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
+	DiskBytes int64 `protobuf:"varint,8,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
+	// egress_policy gates the fork's outbound network via the daemon proxy:
+	// "none" (no egress), "allowlist" (curated hosts), or "open" (any public
+	// host; the LAN guard still applies). DESIGN.md §5.
+	EgressPolicy  string `protobuf:"bytes,9,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -172,10 +176,20 @@ func (x *Session) GetDiskBytes() int64 {
 	return 0
 }
 
+func (x *Session) GetEgressPolicy() string {
+	if x != nil {
+		return x.EgressPolicy
+	}
+	return ""
+}
+
 type CreateSessionRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Image         string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Image string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
+	// egress_policy is "none" | "allowlist" | "open"; empty uses the daemon's
+	// default_egress_policy setting.
+	EgressPolicy  string `protobuf:"bytes,3,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -220,6 +234,13 @@ func (x *CreateSessionRequest) GetName() string {
 func (x *CreateSessionRequest) GetImage() string {
 	if x != nil {
 		return x.Image
+	}
+	return ""
+}
+
+func (x *CreateSessionRequest) GetEgressPolicy() string {
+	if x != nil {
+		return x.EgressPolicy
 	}
 	return ""
 }
@@ -1299,7 +1320,7 @@ var File_fletcher_v1_sessions_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\n" +
-	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\x89\x02\n" +
+	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\xae\x02\n" +
 	"\aSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -1312,11 +1333,13 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\flast_used_at\x18\a \x01(\x03H\x00R\n" +
 	"lastUsedAt\x88\x01\x01\x12\x1d\n" +
 	"\n" +
-	"disk_bytes\x18\b \x01(\x03R\tdiskBytesB\x0f\n" +
-	"\r_last_used_at\"@\n" +
+	"disk_bytes\x18\b \x01(\x03R\tdiskBytes\x12#\n" +
+	"\regress_policy\x18\t \x01(\tR\fegressPolicyB\x0f\n" +
+	"\r_last_used_at\"e\n" +
 	"\x14CreateSessionRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05image\x18\x02 \x01(\tR\x05image\"G\n" +
+	"\x05image\x18\x02 \x01(\tR\x05image\x12#\n" +
+	"\regress_policy\x18\x03 \x01(\tR\fegressPolicy\"G\n" +
 	"\x15CreateSessionResponse\x12.\n" +
 	"\asession\x18\x01 \x01(\v2\x14.fletcher.v1.SessionR\asession\"%\n" +
 	"\x11GetSessionRequest\x12\x10\n" +

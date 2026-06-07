@@ -33,6 +33,7 @@ import (
 	models "github.com/firecracker-microvm/firecracker-go-sdk/client/models"
 	"github.com/sirupsen/logrus"
 
+	"github.com/joshjon/fletcher/internal/egress"
 	fcruntime "github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestagent"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestproto"
@@ -52,6 +53,11 @@ const shutdownGrace = 20 * time.Second
 type Forward struct {
 	ListenAddr string
 	HostSocket string
+	// Egress marks the forward that reaches the daemon egress proxy. Unlike the
+	// fixed gateway/MCP forwards, it is rewritten per fork by the egress policy:
+	// dropped for "none", repointed to the open-proxy socket for "open", or left
+	// at HostSocket (the allowlist proxy) otherwise.
+	Egress bool
 }
 
 // Driver is the Firecracker-backed runtime.Driver.
@@ -62,6 +68,7 @@ type Driver struct {
 	vcpuCount         int64
 	memSizeMib        int64
 	forwards          []Forward
+	egressOpenSocket  string
 	log               *logrus.Entry
 	logger            *slog.Logger
 }
@@ -72,8 +79,14 @@ type Options struct {
 	FirecrackerBinary string
 	KernelPath        string
 	RunDir            string
-	// Forwards are the loopback services (gateway, MCP) relayed into each VM.
+	// Forwards are the loopback services (gateway, MCP, egress proxy) relayed
+	// into each VM. The forward marked Egress is rewritten per fork by the
+	// egress policy.
 	Forwards []Forward
+	// EgressOpenSocket is the daemon unix socket of the "open" egress proxy (any
+	// public host, LAN-guarded). The Egress forward's own HostSocket is the
+	// "allowlist" proxy; a fork with the "open" policy is repointed here.
+	EgressOpenSocket string
 	// VcpuCount defaults to 1, MemSizeMib to 512 when zero.
 	VcpuCount  int64
 	MemSizeMib int64
@@ -124,9 +137,61 @@ func New(opts Options) (*Driver, error) {
 		vcpuCount:         vcpu,
 		memSizeMib:        mem,
 		forwards:          opts.Forwards,
+		egressOpenSocket:  opts.EgressOpenSocket,
 		log:               logrus.NewEntry(logger),
 		logger:            opLogger,
 	}, nil
+}
+
+// forwardsForPolicy returns the guest forwards for a fork with the given egress
+// policy: the fixed gateway/MCP forwards always, plus the Egress forward
+// repointed to the open-proxy socket ("open"), left at its allowlist socket
+// ("allowlist"/default), or dropped entirely ("none").
+func (d *Driver) forwardsForPolicy(policy string) []Forward {
+	policy = egress.Normalize(policy)
+	out := make([]Forward, 0, len(d.forwards))
+	for _, f := range d.forwards {
+		if !f.Egress {
+			out = append(out, f)
+			continue
+		}
+		switch policy {
+		case egress.PolicyNone:
+			// No egress: drop the forward so HTTP_PROXY has nothing to reach.
+		case egress.PolicyOpen:
+			f.HostSocket = d.egressOpenSocket
+			out = append(out, f)
+		default: // allowlist
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// envForPolicy strips the HTTP(S)_PROXY vars when egress is "none", so an agent
+// in a no-egress fork is not pointed at a proxy address that does not exist.
+func envForPolicy(policy string, env []string) []string {
+	if egress.Normalize(policy) != egress.PolicyNone {
+		return env
+	}
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if isProxyEnv(kv) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
+func isProxyEnv(kv string) bool {
+	k, _, _ := strings.Cut(kv, "=")
+	switch strings.ToUpper(k) {
+	case "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY":
+		return true
+	default:
+		return false
+	}
 }
 
 // Run boots a microVM for spec, runs the command, and returns its exit code.
@@ -157,10 +222,12 @@ func (d *Driver) Run(ctx context.Context, spec fcruntime.Spec, stdout, stderr io
 	}
 	defer func() { _ = ln.Close() }()
 
-	// Set up the host side of the service forwards (gateway, MCP) and the
-	// matching guest forward descriptors for the spec.
-	gforwards := make([]guestproto.Forward, 0, len(d.forwards))
-	for i, f := range d.forwards {
+	// Set up the host side of the service forwards (gateway, MCP, and the egress
+	// proxy as gated by the job's egress policy) and the matching guest forward
+	// descriptors for the spec.
+	forwards := d.forwardsForPolicy(spec.EgressPolicy)
+	gforwards := make([]guestproto.Forward, 0, len(forwards))
+	for i, f := range forwards {
 		port := uint32(guestproto.ForwardPortBase + i)
 		proxyLn, perr := startForwardProxy(ctx, fmt.Sprintf("%s_%d", vsockUDS, port), f.HostSocket)
 		if perr != nil {
@@ -171,7 +238,7 @@ func (d *Driver) Run(ctx context.Context, spec fcruntime.Spec, stdout, stderr io
 	}
 	gspec := guestproto.Spec{
 		Command:  spec.Command,
-		Env:      spec.Env,
+		Env:      envForPolicy(spec.EgressPolicy, spec.Env),
 		WorkDir:  guestWorkDir,
 		Forwards: gforwards,
 	}

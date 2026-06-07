@@ -9,6 +9,25 @@ package egress
 
 import "strings"
 
+// Policy names persisted per session/job and resolved into a Policy value.
+const (
+	PolicyNone      = "none"
+	PolicyAllowlist = "allowlist"
+	PolicyOpen      = "open"
+)
+
+// Normalize maps a stored policy string to a known value, defaulting empty or
+// unrecognised input to the safer "allowlist". Callers that want a different
+// default (e.g. the daemon's default_egress_policy setting) resolve that first.
+func Normalize(p string) string {
+	switch p {
+	case PolicyNone, PolicyAllowlist, PolicyOpen:
+		return p
+	default:
+		return PolicyAllowlist
+	}
+}
+
 // Policy decides whether the fork may reach a given host through the proxy.
 // The netguard LAN/metadata guard applies on top of every policy at dial
 // time, so even Open can never reach the operator's LAN or the metadata

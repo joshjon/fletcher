@@ -19,6 +19,7 @@ import (
 
 	"go.jetify.com/typeid"
 
+	"github.com/joshjon/fletcher/internal/egress"
 	"github.com/joshjon/fletcher/internal/errs"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/snapshot"
@@ -48,6 +49,9 @@ type Session struct {
 	UpdatedAt  time.Time
 	LastUsedAt *time.Time
 	DiskBytes  int64
+	// EgressPolicy gates the fork's outbound network: "none" | "allowlist" |
+	// "open". Fixed at create time.
+	EgressPolicy string
 }
 
 // ErrNotFound is returned when a session ref matches nothing.
@@ -65,6 +69,9 @@ type Options struct {
 	// DefaultImage is used when a session is created with no image; empty makes
 	// the image required.
 	DefaultImage string
+	// DefaultEgressPolicy is the egress policy used when create is called with an
+	// empty policy: "none" | "allowlist" | "open".
+	DefaultEgressPolicy string
 }
 
 // idleLoadThreshold is the guest 1-minute load average below which a session
@@ -119,13 +126,19 @@ func (m *Manager) requireRuntime() error {
 }
 
 // Create provisions a session's persistent fork, boots its VM, and records it.
-func (m *Manager) Create(ctx context.Context, name, image string) (Session, error) {
+// egressPolicy is "none"|"allowlist"|"open"; empty resolves to the manager's
+// configured default.
+func (m *Manager) Create(ctx context.Context, name, image, egressPolicy string) (Session, error) {
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
 	if strings.TrimSpace(name) == "" {
 		return Session{}, errs.New(errs.CategoryInvalidArgument, "name is required")
 	}
+	if strings.TrimSpace(egressPolicy) == "" {
+		egressPolicy = m.opts.DefaultEgressPolicy
+	}
+	egressPolicy = egress.Normalize(egressPolicy)
 	if strings.TrimSpace(image) == "" {
 		image = m.opts.DefaultImage
 	}
@@ -148,9 +161,10 @@ func (m *Manager) Create(ctx context.Context, name, image string) (Session, erro
 	}
 
 	handle, err := m.runtime.StartSession(ctx, runtime.SessionSpec{
-		SessionID:  sessionID,
-		RootfsPath: fork.Path,
-		Env:        m.env,
+		SessionID:    sessionID,
+		RootfsPath:   fork.Path,
+		Env:          m.env,
+		EgressPolicy: egressPolicy,
 	})
 	if err != nil {
 		_ = m.snapshot.Delete(context.WithoutCancel(ctx), fork.ID)
@@ -159,14 +173,15 @@ func (m *Manager) Create(ctx context.Context, name, image string) (Session, erro
 
 	now := time.Now().Unix()
 	row, err := m.q.CreateSession(ctx, sqliteq.CreateSessionParams{
-		ID:        sessionID,
-		Name:      name,
-		Image:     image,
-		State:     string(StateRunning),
-		ForkID:    fork.ID,
-		ForkPath:  fork.Path,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:           sessionID,
+		Name:         name,
+		Image:        image,
+		State:        string(StateRunning),
+		ForkID:       fork.ID,
+		ForkPath:     fork.Path,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		EgressPolicy: egressPolicy,
 	})
 	if err != nil {
 		_ = handle.Stop(context.WithoutCancel(ctx))
@@ -217,9 +232,10 @@ func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 	}
 
 	handle, err := m.runtime.StartSession(ctx, runtime.SessionSpec{
-		SessionID:  row.ID,
-		RootfsPath: row.ForkPath,
-		Env:        m.env,
+		SessionID:    row.ID,
+		RootfsPath:   row.ForkPath,
+		Env:          m.env,
+		EgressPolicy: row.EgressPolicy,
 	})
 	if err != nil {
 		return Session{}, fmt.Errorf("start session vm: %w", err)
@@ -299,7 +315,10 @@ func (m *Manager) Exec(ctx context.Context, ref, command string) (ExecResult, er
 	defer m.unmarkBusy(row.ID)
 
 	var stdout, stderr strings.Builder
-	res, err := handle.Exec(ctx, runtime.Spec{Command: command, Env: m.env}, &stdout, &stderr)
+	// Leave Env unset so the handle uses the session's own environment (the
+	// global agent env with the egress proxy vars resolved for this session's
+	// policy), keeping exec consistent with the login-shell and shell paths.
+	res, err := handle.Exec(ctx, runtime.Spec{Command: command}, &stdout, &stderr)
 	if err != nil {
 		return ExecResult{}, fmt.Errorf("exec in session: %w", err)
 	}
@@ -566,14 +585,15 @@ func (c *busyConn) Close() error {
 
 func sessionFromRow(r sqliteq.Session) Session {
 	return Session{
-		ID:         r.ID,
-		Name:       r.Name,
-		Image:      r.Image,
-		State:      State(r.State),
-		CreatedAt:  time.Unix(r.CreatedAt, 0),
-		UpdatedAt:  time.Unix(r.UpdatedAt, 0),
-		LastUsedAt: timePtrFromUnix(r.LastUsedAt),
-		DiskBytes:  forkBytes(r.ForkPath),
+		ID:           r.ID,
+		Name:         r.Name,
+		Image:        r.Image,
+		State:        State(r.State),
+		CreatedAt:    time.Unix(r.CreatedAt, 0),
+		UpdatedAt:    time.Unix(r.UpdatedAt, 0),
+		LastUsedAt:   timePtrFromUnix(r.LastUsedAt),
+		DiskBytes:    forkBytes(r.ForkPath),
+		EgressPolicy: r.EgressPolicy,
 	}
 }
 

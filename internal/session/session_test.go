@@ -135,7 +135,7 @@ func TestCreateBootsAndRecords(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	s, err := mgr.Create(ctx, "dev", "ubuntu")
+	s, err := mgr.Create(ctx, "dev", "ubuntu", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, s.ID)
 	require.Equal(t, "dev", s.Name)
@@ -152,9 +152,9 @@ func TestCreateDuplicateNameConflicts(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
 	require.NoError(t, err)
-	_, err = mgr.Create(ctx, "dev", "ubuntu")
+	_, err = mgr.Create(ctx, "dev", "ubuntu", "")
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryConflict, errs.CategoryOf(err))
 }
@@ -165,7 +165,7 @@ func TestStopThenStartReusesFork(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	created, err := mgr.Create(ctx, "dev", "ubuntu")
+	created, err := mgr.Create(ctx, "dev", "ubuntu", "")
 	require.NoError(t, err)
 	forkPath := rt.started[0]
 
@@ -188,7 +188,7 @@ func TestExecRequiresRunning(t *testing.T) {
 	mgr := newManager(t, rt, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
 	require.NoError(t, err)
 
 	res, err := mgr.Exec(ctx, "dev", "echo hi")
@@ -210,7 +210,7 @@ func TestDeleteDestroysFork(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
 	require.NoError(t, err)
 
 	deleted, err := mgr.Delete(ctx, "dev")
@@ -231,7 +231,7 @@ func TestReconcileOnBootResetsRunning(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	created, err := mgr.Create(ctx, "dev", "ubuntu")
+	created, err := mgr.Create(ctx, "dev", "ubuntu", "")
 	require.NoError(t, err)
 	require.Equal(t, session.StateRunning, created.State)
 
@@ -248,9 +248,9 @@ func TestCreateRefusedAtCountCap(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{MaxCount: 1})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "a", "ubuntu")
+	_, err := mgr.Create(ctx, "a", "ubuntu", "")
 	require.NoError(t, err)
-	_, err = mgr.Create(ctx, "b", "ubuntu")
+	_, err = mgr.Create(ctx, "b", "ubuntu", "")
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }
@@ -260,7 +260,7 @@ func TestReapIdleStopsIdleSession(t *testing.T) {
 	mgr := newManagerWithOpts(t, rt, newFakeSnapshot(), session.Options{IdleTimeout: time.Millisecond})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
 	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond) // let it age past the idle timeout
 
@@ -278,7 +278,7 @@ func TestReapIdleKeepsBusySession(t *testing.T) {
 	mgr := newManagerWithOpts(t, rt, newFakeSnapshot(), session.Options{IdleTimeout: time.Millisecond})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
 	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond)
 
@@ -294,7 +294,7 @@ func TestReapIdleKeepsBusySession(t *testing.T) {
 func TestReapIdleDisabledIsNoop(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{}) // IdleTimeout 0
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
 	require.NoError(t, err)
 
 	n, err := mgr.ReapIdle(ctx)
@@ -305,7 +305,7 @@ func TestReapIdleDisabledIsNoop(t *testing.T) {
 func TestSessionsRequireSessionRuntime(t *testing.T) {
 	// A nil runtime models a non-session-capable runtime (e.g. mock/runc).
 	mgr := newManager(t, nil, newFakeSnapshot())
-	_, err := mgr.Create(context.Background(), "dev", "ubuntu")
+	_, err := mgr.Create(context.Background(), "dev", "ubuntu", "")
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }

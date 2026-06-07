@@ -16,6 +16,10 @@ type SessionSpec struct {
 	RootfsPath string
 	// Env is the default environment for commands run in the session.
 	Env []string
+	// EgressPolicy gates the fork's outbound network: "none" | "allowlist" |
+	// "open" (empty is treated as "allowlist"). The driver uses it to pick the
+	// egress proxy socket the fork's HTTP_PROXY reaches, or to deny egress.
+	EgressPolicy string
 }
 
 // ShellSpec parameterises an interactive PTY in a session VM.

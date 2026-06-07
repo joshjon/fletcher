@@ -760,10 +760,18 @@ intentionally not in this list.
   hardware: allowlisted hosts tunnel through (HTTPS via CONNECT, TLS end-to-end),
   non-allowlisted hosts get 403, and the interactive Claude Code TUI now starts -
   its api.anthropic.com and platform.claude.com startup checks ride the proxy.
-  **B3 - PLANNED:** per-job policy (none / open / custom allowlist) via a
-  session/job field + a `--egress` flag + a default-policy setting, replacing the
-  single global allowlist. Supersedes the "MCP egress policy/approvals" backlog
-  item below.
+  **B3 - DONE (2026-06-08).** Egress policy is now per session/job: an
+  `egress_policy` column (sessions + jobs), a `--egress none|allowlist|open` flag
+  on `session`/`job create`, and a `default_egress_policy` setting (default
+  `allowlist`). The daemon runs two global LAN-guarded proxies (allowlist + open);
+  the Firecracker driver, per the fork's policy, points the egress forward at the
+  matching proxy socket - or drops the forward and strips HTTP_PROXY for `none`.
+  Verified on hardware: a `none` fork cannot resolve or reach anything; an
+  `allowlist` fork reaches GitHub but gets 403 on a non-listed host; an `open`
+  fork reaches any public host (LAN still blocked). Scope note: enforcement is on
+  the Firecracker runtime; runc (degraded fallback) keeps the global allowlist.
+  Custom per-job allowlists (beyond the curated default) remain a follow-up.
+  Supersedes the "MCP egress policy/approvals" backlog item below.
 - **macOS client release - DONE.** One binary, no split CLI (the Consul/Vault
   model): the daemon is Linux-only, the client runs anywhere. Restored the
   darwin cross-build (two non-linux driver stubs had drifted) and guarded it with

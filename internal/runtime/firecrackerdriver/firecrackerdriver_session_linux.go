@@ -104,10 +104,13 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 	}
 	_ = probe.Close()
 
-	// Bring up the gateway/MCP forwards so the agent env (ANTHROPIC_BASE_URL etc.)
+	// Bring up the gateway/MCP forwards (and the egress proxy forward as gated by
+	// the session's egress policy) so the agent env (ANTHROPIC_BASE_URL etc.)
 	// resolves to live listeners. Non-fatal: a session without them is still
-	// usable for a shell, just not for model/MCP calls.
-	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, spec.Env)
+	// usable for a shell, just not for model/MCP calls. envForPolicy strips the
+	// proxy vars for a "none" session so they match its (absent) egress forward.
+	effEnv := envForPolicy(spec.EgressPolicy, spec.Env)
+	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv)
 	if ferr != nil {
 		d.logger.Warn("session service forwards not fully established; model gateway/MCP may be unreachable in this session",
 			slog.String("session_id", spec.SessionID), slog.String("err", ferr.Error()))
@@ -118,7 +121,7 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 		vsockUDS:   vsockUDS,
 		vmDir:      vmDir,
 		vmCancel:   vmCancel,
-		env:        spec.Env,
+		env:        effEnv,
 		forwardLns: forwardLns,
 		snapID:     d.snapshotIdentity(),
 	}, nil
@@ -158,13 +161,13 @@ type fcSession struct {
 // does the equivalent inline in Run. Best-effort: it returns any listeners it
 // did open alongside an error so the caller can both close them and log, leaving
 // the session usable (just without model/MCP access) rather than failing to boot.
-func (d *Driver) startSessionForwards(ctx context.Context, vsockUDS string, env []string) ([]net.Listener, error) {
-	if len(d.forwards) == 0 {
+func (d *Driver) startSessionForwards(ctx context.Context, vsockUDS string, forwards []Forward, env []string) ([]net.Listener, error) {
+	if len(forwards) == 0 {
 		return nil, nil
 	}
-	lns := make([]net.Listener, 0, len(d.forwards))
-	gforwards := make([]guestproto.Forward, 0, len(d.forwards))
-	for i, f := range d.forwards {
+	lns := make([]net.Listener, 0, len(forwards))
+	gforwards := make([]guestproto.Forward, 0, len(forwards))
+	for i, f := range forwards {
 		port := uint32(guestproto.ForwardPortBase + i)
 		ln, err := startForwardProxy(ctx, fmt.Sprintf("%s_%d", vsockUDS, port), f.HostSocket)
 		if err != nil {

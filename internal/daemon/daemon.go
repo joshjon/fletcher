@@ -169,6 +169,10 @@ type Config struct {
 	// DefaultImage is the base image used by job/session create when --image is
 	// omitted; empty makes --image required. Settings-managed (default_image).
 	DefaultImage string
+	// DefaultEgressPolicy is the fork egress policy used when a job/session is
+	// created without an explicit --egress: "none" | "allowlist" | "open".
+	// Settings-managed (default_egress_policy); empty resolves to "allowlist".
+	DefaultEgressPolicy string
 }
 
 // Defaults for the session settings, applied when not explicitly set.
@@ -177,6 +181,7 @@ const (
 	defaultSessionMaxCount    = 10
 	defaultSessionMaxDiskGB   = 50
 	defaultDefaultImage       = "fletcher-base"
+	defaultEgressPolicy       = egress.PolicyAllowlist
 )
 
 // shutdownTimeout caps how long the daemon waits for in-flight work before
@@ -237,28 +242,31 @@ func Run(ctx context.Context, cfg Config) error {
 // Splitting construction out keeps Run's funlen reasonable while still
 // surfacing every component in one place.
 type services struct {
-	cfg            Config
-	supervisor     *job.Supervisor
-	sessions       *session.Manager
-	connectSrv     *http.Server
-	gatewaySrv     *http.Server
-	mcpSrv         *http.Server
-	connectLn      net.Listener
-	gatewayLn      net.Listener
-	mcpLn          net.Listener
-	gatewayUnixLn  net.Listener
-	mcpUnixLn      net.Listener
-	proxySrv       *http.Server
-	proxyUnixLn    net.Listener
-	proxyUnix      string
-	remoteSrv      *http.Server
-	remoteLn       net.Listener
-	remoteAddr     string
-	gatewayUnix    string
-	mcpUnix        string
-	gatewayBaseURL string
-	mcpBaseURL     string
-	tunnel         wireguard.Tunnel
+	cfg             Config
+	supervisor      *job.Supervisor
+	sessions        *session.Manager
+	connectSrv      *http.Server
+	gatewaySrv      *http.Server
+	mcpSrv          *http.Server
+	connectLn       net.Listener
+	gatewayLn       net.Listener
+	mcpLn           net.Listener
+	gatewayUnixLn   net.Listener
+	mcpUnixLn       net.Listener
+	proxySrv        *http.Server
+	proxyUnixLn     net.Listener
+	proxyUnix       string
+	proxyOpenSrv    *http.Server
+	proxyOpenUnixLn net.Listener
+	proxyOpenUnix   string
+	remoteSrv       *http.Server
+	remoteLn        net.Listener
+	remoteAddr      string
+	gatewayUnix     string
+	mcpUnix         string
+	gatewayBaseURL  string
+	mcpBaseURL      string
+	tunnel          wireguard.Tunnel
 }
 
 //nolint:funlen // the single construction hub that wires every subsystem; splitting further would scatter the boot sequence
@@ -325,11 +333,16 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	if err != nil {
 		return nil, fmt.Errorf("egress proxy unix listener: %w", err)
 	}
-	egressPolicy := egress.NewAllowlist(defaultEgressAllowlist)
-	egressProxy := egress.New(egressPolicy, logger)
-	logger.Info("egress proxy ready",
-		slog.String("policy", egressPolicy.Name()),
+	egressProxy := egress.New(egress.NewAllowlist(defaultEgressAllowlist), logger)
+	proxyOpenUnix := proxyOpenSocketPath(cfg)
+	proxyOpenUnixLn, err := listenUnix(ctx, proxyOpenUnix)
+	if err != nil {
+		return nil, fmt.Errorf("egress open proxy unix listener: %w", err)
+	}
+	egressOpenProxy := egress.New(egress.Open{}, logger)
+	logger.Info("egress proxies ready",
 		slog.Int("allowlist_size", len(defaultEgressAllowlist)),
+		slog.String("default_policy", egressDefaultPolicy(cfg)),
 	)
 
 	approvalSvc := approval.NewService(queries, approval.ServiceOptions{})
@@ -394,17 +407,18 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	// leave it nil and session lifecycle calls return a clear error.
 	sessionRuntime, _ := rtDriver.(runtime.SessionRuntime)
 	sessionMgr := session.NewManager(queries, snapDriver, sessionRuntime, agentEnv, logger, session.Options{
-		IdleTimeout:  cfg.SessionIdleTimeout,
-		MaxCount:     cfg.SessionMaxCount,
-		MaxDiskBytes: int64(cfg.SessionMaxDiskGB) << 30,
-		DefaultImage: cfg.DefaultImage,
+		IdleTimeout:         cfg.SessionIdleTimeout,
+		MaxCount:            cfg.SessionMaxCount,
+		MaxDiskBytes:        int64(cfg.SessionMaxDiskGB) << 30,
+		DefaultImage:        cfg.DefaultImage,
+		DefaultEgressPolicy: egressDefaultPolicy(cfg),
 	})
 	if err := sessionMgr.ReconcileOnBoot(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile sessions: %w", err)
 	}
 
 	connectDeps := connectDeps{
-		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage),
+		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg)),
 		sessions:         sessionMgr,
 		secrets:          secretsStore,
 		approvals:        approvalSvc,
@@ -427,28 +441,31 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	remoteSrv := newRemoteServer(remoteLn, peerSvc, connectSrv.Handler)
 
 	return &services{
-		cfg:            cfg,
-		supervisor:     supervisor,
-		sessions:       sessionMgr,
-		connectSrv:     connectSrv,
-		gatewaySrv:     newGatewayHTTPServer(gw),
-		mcpSrv:         newMCPHTTPServer(mcpServer),
-		connectLn:      connectLn,
-		gatewayLn:      gatewayLn,
-		mcpLn:          mcpLn,
-		gatewayUnixLn:  gatewayUnixLn,
-		mcpUnixLn:      mcpUnixLn,
-		proxySrv:       newProxyHTTPServer(egressProxy),
-		proxyUnixLn:    proxyUnixLn,
-		proxyUnix:      proxyUnix,
-		remoteSrv:      remoteSrv,
-		remoteLn:       remoteLn,
-		remoteAddr:     apiEndpoint,
-		gatewayUnix:    gatewayUnix,
-		mcpUnix:        mcpUnix,
-		gatewayBaseURL: gatewayURL,
-		mcpBaseURL:     mcpURL,
-		tunnel:         netSetup.Tunnel,
+		cfg:             cfg,
+		supervisor:      supervisor,
+		sessions:        sessionMgr,
+		connectSrv:      connectSrv,
+		gatewaySrv:      newGatewayHTTPServer(gw),
+		mcpSrv:          newMCPHTTPServer(mcpServer),
+		connectLn:       connectLn,
+		gatewayLn:       gatewayLn,
+		mcpLn:           mcpLn,
+		gatewayUnixLn:   gatewayUnixLn,
+		mcpUnixLn:       mcpUnixLn,
+		proxySrv:        newProxyHTTPServer(egressProxy),
+		proxyUnixLn:     proxyUnixLn,
+		proxyUnix:       proxyUnix,
+		proxyOpenSrv:    newProxyHTTPServer(egressOpenProxy),
+		proxyOpenUnixLn: proxyOpenUnixLn,
+		proxyOpenUnix:   proxyOpenUnix,
+		remoteSrv:       remoteSrv,
+		remoteLn:        remoteLn,
+		remoteAddr:      apiEndpoint,
+		gatewayUnix:     gatewayUnix,
+		mcpUnix:         mcpUnix,
+		gatewayBaseURL:  gatewayURL,
+		mcpBaseURL:      mcpURL,
+		tunnel:          netSetup.Tunnel,
 	}, nil
 }
 
@@ -525,6 +542,8 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	g.Add(httpServeActor(logger, "mcp-unix", s.mcpSrv, s.mcpUnixLn, "unix:"+s.mcpUnix))
 	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
 	g.Add(httpServeActor(logger, "egress-unix", s.proxySrv, s.proxyUnixLn, "unix:"+s.proxyUnix))
+	//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
+	g.Add(httpServeActor(logger, "egress-open-unix", s.proxyOpenSrv, s.proxyOpenUnixLn, "unix:"+s.proxyOpenUnix))
 	if s.remoteSrv != nil {
 		//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
 		g.Add(httpServeActor(logger, "remote-api", s.remoteSrv, s.remoteLn, "http://"+s.remoteAddr))
@@ -923,6 +942,7 @@ func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logg
 	cfg.SessionMaxCount = defaultSessionMaxCount
 	cfg.SessionMaxDiskGB = defaultSessionMaxDiskGB
 	cfg.DefaultImage = defaultDefaultImage
+	cfg.DefaultEgressPolicy = defaultEgressPolicy
 
 	vals, err := store.Values(ctx)
 	if err != nil {
@@ -970,6 +990,8 @@ func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logg
 			}
 		case settings.KeyDefaultImage:
 			cfg.DefaultImage = v
+		case settings.KeyDefaultEgressPolicy:
+			cfg.DefaultEgressPolicy = v
 		default:
 			continue // unknown key persisted by an older/newer version; ignore
 		}
@@ -1069,6 +1091,13 @@ func proxySocketPath(cfg Config) string {
 	return filepath.Join(filepath.Dir(cfg.SocketPath), "egress.sock")
 }
 
+// proxyOpenSocketPath is the daemon-side unix socket of the "open" egress proxy
+// (any public host, LAN-guarded). A fork with the "open" policy is relayed here
+// instead of to the allowlist proxy at proxySocketPath.
+func proxyOpenSocketPath(cfg Config) string {
+	return filepath.Join(filepath.Dir(cfg.SocketPath), "egress-open.sock")
+}
+
 const defaultProxyListen = "127.0.0.1:11700"
 
 // proxyListenAddr is the in-fork loopback address agents point HTTP_PROXY at;
@@ -1078,6 +1107,12 @@ func proxyListenAddr(cfg Config) string {
 		return defaultProxyListen
 	}
 	return cfg.ProxyListenAddr
+}
+
+// egressDefaultPolicy resolves the daemon's default fork egress policy (empty
+// settings value falls back to "allowlist").
+func egressDefaultPolicy(cfg Config) string {
+	return egress.Normalize(cfg.DefaultEgressPolicy)
 }
 
 // defaultEgressAllowlist is the curated host set the egress proxy permits under
@@ -1144,9 +1179,10 @@ func buildRuntimeDriver(cfg Config, logger *slog.Logger) (runtime.Driver, error)
 			Forwards: []firecrackerdriver.Forward{
 				{ListenAddr: cfg.GatewayListenAddr, HostSocket: gatewaySocketPath(cfg)},
 				{ListenAddr: cfg.MCPListenAddr, HostSocket: mcpSocketPath(cfg)},
-				{ListenAddr: proxyListenAddr(cfg), HostSocket: proxySocketPath(cfg)},
+				{ListenAddr: proxyListenAddr(cfg), HostSocket: proxySocketPath(cfg), Egress: true},
 			},
-			Logger: logger,
+			EgressOpenSocket: proxyOpenSocketPath(cfg),
+			Logger:           logger,
 		})
 	default:
 		return nil, fmt.Errorf("unknown runtime kind %q", cfg.RuntimeKind)

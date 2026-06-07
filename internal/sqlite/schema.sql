@@ -147,3 +147,11 @@ ALTER TABLE jobs_new RENAME TO jobs;
 CREATE INDEX idx_jobs_status_created_at ON jobs (status, created_at DESC);
 CREATE INDEX idx_jobs_created_at        ON jobs (created_at DESC);
 CREATE INDEX idx_jobs_parent_id         ON jobs (parent_id);
+
+-- File: 0011_egress_policy.up.sql
+-- Per-fork egress policy (DESIGN.md §5): "none" | "allowlist" | "open". Gates
+-- the daemon forward-proxy that brokers a fork's outbound network. Default
+-- "allowlist" so existing forks keep the curated default; the create path
+-- overrides it from the default_egress_policy setting (or an explicit --egress).
+ALTER TABLE jobs ADD COLUMN egress_policy TEXT NOT NULL DEFAULT 'allowlist';
+ALTER TABLE sessions ADD COLUMN egress_policy TEXT NOT NULL DEFAULT 'allowlist';

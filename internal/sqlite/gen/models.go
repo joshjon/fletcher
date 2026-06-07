@@ -21,6 +21,7 @@ type Job struct {
 	Schedule     string
 	NextRunAt    *int64
 	ParentID     *string
+	EgressPolicy string
 }
 
 type Peer struct {
@@ -53,15 +54,16 @@ type Secret struct {
 }
 
 type Session struct {
-	ID         string
-	Name       string
-	Image      string
-	State      string
-	ForkID     string
-	ForkPath   string
-	CreatedAt  int64
-	UpdatedAt  int64
-	LastUsedAt *int64
+	ID           string
+	Name         string
+	Image        string
+	State        string
+	ForkID       string
+	ForkPath     string
+	CreatedAt    int64
+	UpdatedAt    int64
+	LastUsedAt   *int64
+	EgressPolicy string
 }
 
 type Setting struct {

@@ -160,7 +160,10 @@ type Job struct {
 	// next_run_at is when a scheduled cron job next fires (Unix epoch seconds).
 	NextRunAt *int64 `protobuf:"varint,15,opt,name=next_run_at,json=nextRunAt,proto3,oneof" json:"next_run_at,omitempty"`
 	// parent_id links a run spawned by a cron job back to its definition.
-	ParentId      *string `protobuf:"bytes,16,opt,name=parent_id,json=parentId,proto3,oneof" json:"parent_id,omitempty"`
+	ParentId *string `protobuf:"bytes,16,opt,name=parent_id,json=parentId,proto3,oneof" json:"parent_id,omitempty"`
+	// egress_policy gates the fork's outbound network via the daemon proxy:
+	// "none" | "allowlist" | "open". DESIGN.md §5.
+	EgressPolicy  string `protobuf:"bytes,17,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -307,6 +310,13 @@ func (x *Job) GetParentId() string {
 	return ""
 }
 
+func (x *Job) GetEgressPolicy() string {
+	if x != nil {
+		return x.EgressPolicy
+	}
+	return ""
+}
+
 type CreateJobRequest struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Trigger JobTrigger             `protobuf:"varint,1,opt,name=trigger,proto3,enum=fletcher.v1.JobTrigger" json:"trigger,omitempty"`
@@ -317,7 +327,10 @@ type CreateJobRequest struct {
 	Credentials []string `protobuf:"bytes,5,rep,name=credentials,proto3" json:"credentials,omitempty"`
 	// schedule is required when trigger is CRON: a 5-field cron expression
 	// (e.g. "*/5 * * * *") or a macro (@hourly, @daily, ...).
-	Schedule      string `protobuf:"bytes,6,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	Schedule string `protobuf:"bytes,6,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	// egress_policy is "none" | "allowlist" | "open"; empty uses the daemon's
+	// default_egress_policy setting.
+	EgressPolicy  string `protobuf:"bytes,7,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -390,6 +403,13 @@ func (x *CreateJobRequest) GetCredentials() []string {
 func (x *CreateJobRequest) GetSchedule() string {
 	if x != nil {
 		return x.Schedule
+	}
+	return ""
+}
+
+func (x *CreateJobRequest) GetEgressPolicy() string {
+	if x != nil {
+		return x.EgressPolicy
 	}
 	return ""
 }
@@ -730,7 +750,7 @@ var File_fletcher_v1_jobs_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_jobs_proto_rawDesc = "" +
 	"\n" +
-	"\x16fletcher/v1/jobs.proto\x12\vfletcher.v1\"\xde\x04\n" +
+	"\x16fletcher/v1/jobs.proto\x12\vfletcher.v1\"\x83\x05\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12.\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x16.fletcher.v1.JobStatusR\x06status\x121\n" +
@@ -751,21 +771,23 @@ const file_fletcher_v1_jobs_proto_rawDesc = "" +
 	"\vcredentials\x18\r \x03(\tR\vcredentials\x12\x1a\n" +
 	"\bschedule\x18\x0e \x01(\tR\bschedule\x12#\n" +
 	"\vnext_run_at\x18\x0f \x01(\x03H\x03R\tnextRunAt\x88\x01\x01\x12 \n" +
-	"\tparent_id\x18\x10 \x01(\tH\x04R\bparentId\x88\x01\x01B\r\n" +
+	"\tparent_id\x18\x10 \x01(\tH\x04R\bparentId\x88\x01\x01\x12#\n" +
+	"\regress_policy\x18\x11 \x01(\tR\fegressPolicyB\r\n" +
 	"\v_started_atB\x0f\n" +
 	"\r_completed_atB\f\n" +
 	"\n" +
 	"_exit_codeB\x0e\n" +
 	"\f_next_run_atB\f\n" +
 	"\n" +
-	"_parent_id\"\xc7\x01\n" +
+	"_parent_id\"\xec\x01\n" +
 	"\x10CreateJobRequest\x121\n" +
 	"\atrigger\x18\x01 \x01(\x0e2\x17.fletcher.v1.JobTriggerR\atrigger\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\acommand\x18\x03 \x01(\tR\acommand\x12\x14\n" +
 	"\x05image\x18\x04 \x01(\tR\x05image\x12 \n" +
 	"\vcredentials\x18\x05 \x03(\tR\vcredentials\x12\x1a\n" +
-	"\bschedule\x18\x06 \x01(\tR\bschedule\"7\n" +
+	"\bschedule\x18\x06 \x01(\tR\bschedule\x12#\n" +
+	"\regress_policy\x18\a \x01(\tR\fegressPolicy\"7\n" +
 	"\x11CreateJobResponse\x12\"\n" +
 	"\x03job\x18\x01 \x01(\v2\x10.fletcher.v1.JobR\x03job\"\x1f\n" +
 	"\rGetJobRequest\x12\x0e\n" +

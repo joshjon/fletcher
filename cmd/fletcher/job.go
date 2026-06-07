@@ -54,6 +54,7 @@ func jobCreateCmd() *cli.Command {
 				Name:  "credential",
 				Usage: "bind-mount a named credential dir into the fork (repeatable; allowed: claude, codex, gemini)",
 			},
+			&cli.StringFlag{Name: "egress", Usage: "fork network egress: none | allowlist | open (default: the daemon's default_egress_policy setting)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			trigger, err := triggerFromString(cmd.String("trigger"))
@@ -62,12 +63,13 @@ func jobCreateCmd() *cli.Command {
 			}
 			client := newJobsClient(cmd)
 			resp, err := client.CreateJob(ctx, connect.NewRequest(&fletcherv1.CreateJobRequest{
-				Trigger:     trigger,
-				Name:        cmd.String("name"),
-				Command:     cmd.String("command"),
-				Image:       cmd.String("image"),
-				Credentials: cmd.StringSlice("credential"),
-				Schedule:    cmd.String("schedule"),
+				Trigger:      trigger,
+				Name:         cmd.String("name"),
+				Command:      cmd.String("command"),
+				Image:        cmd.String("image"),
+				Credentials:  cmd.StringSlice("credential"),
+				Schedule:     cmd.String("schedule"),
+				EgressPolicy: cmd.String("egress"),
 			}))
 			if err != nil {
 				return err

@@ -124,7 +124,8 @@ func (d *Driver) restoreSession(ctx context.Context, spec fcruntime.SessionSpec,
 	// but their host-side proxy sockets were cleared with the other sockets, so
 	// recreate them. The guest's forwardsOnce already fired at its original cold
 	// boot, so the resent setup is a no-op there - it just rebuilds the host side.
-	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, spec.Env)
+	effEnv := envForPolicy(spec.EgressPolicy, spec.Env)
+	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv)
 	if ferr != nil {
 		d.logger.Warn("session service forwards not fully re-established after restore; model gateway/MCP may be unreachable in this session",
 			slog.String("session_id", spec.SessionID), slog.String("err", ferr.Error()))
@@ -135,7 +136,7 @@ func (d *Driver) restoreSession(ctx context.Context, spec fcruntime.SessionSpec,
 		vsockUDS:   vsockUDS,
 		vmDir:      vmDir,
 		vmCancel:   vmCancel,
-		env:        spec.Env,
+		env:        effEnv,
 		forwardLns: forwardLns,
 		snapID:     d.snapshotIdentity(),
 	}, nil

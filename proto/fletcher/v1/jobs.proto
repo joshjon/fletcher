@@ -61,6 +61,9 @@ message Job {
   optional int64 next_run_at = 15;
   // parent_id links a run spawned by a cron job back to its definition.
   optional string parent_id = 16;
+  // egress_policy gates the fork's outbound network via the daemon proxy:
+  // "none" | "allowlist" | "open". DESIGN.md §5.
+  string egress_policy = 17;
 }
 
 message CreateJobRequest {
@@ -73,6 +76,9 @@ message CreateJobRequest {
   // schedule is required when trigger is CRON: a 5-field cron expression
   // (e.g. "*/5 * * * *") or a macro (@hourly, @daily, ...).
   string schedule = 6;
+  // egress_policy is "none" | "allowlist" | "open"; empty uses the daemon's
+  // default_egress_policy setting.
+  string egress_policy = 7;
 }
 
 message CreateJobResponse {

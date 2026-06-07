@@ -37,6 +37,8 @@ const (
 	KeySessionMaxDiskGB   = "session_max_disk_gb"
 
 	KeyDefaultImage = "default_image"
+
+	KeyDefaultEgressPolicy = "default_egress_policy"
 )
 
 // definition describes a settable key: its help text and an optional validator.
@@ -61,6 +63,7 @@ var registry = []definition{
 	{KeySessionMaxCount, "maximum number of sessions; 0 disables the cap", nonNegInt},
 	{KeySessionMaxDiskGB, "maximum total session disk in GB; 0 disables the cap", nonNegInt},
 	{KeyDefaultImage, "base image used by `job`/`session create` when --image is omitted; empty makes --image required", nil},
+	{KeyDefaultEgressPolicy, "default fork egress policy when --egress is omitted: none | allowlist | open", oneOf("none", "allowlist", "open")},
 }
 
 // View is one setting's full picture for `fletcher settings list`.
