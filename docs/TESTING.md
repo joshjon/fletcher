@@ -528,6 +528,117 @@ fletcher --remote $ADDR health                      # -> 401 unauthorized
 fletcher health                                     # local socket, no token -> ok
 ```
 
+### 5. Durable sessions, published ports, and deployments (M6 / M8 / M9)
+
+**What this proves:** a session is a persistent microVM you can exec/shell into;
+a port it serves can be published over the tunnel and (opt-in) on the public
+internet over HTTPS; and `deploy` turns a Docker image into a running, published
+app in one command - from the box or a remote client.
+
+Prerequisites: the Firecracker runtime (the default) and a base image imported
+(test 2). All commands run from the box unless a step says "remote client".
+
+#### 5a. Session + publish a port over the tunnel (M6 + M8 Layer A)
+
+```sh
+fletcher session create --name dev                 # boots a persistent microVM
+fletcher session exec dev "nohup python3 -m http.server 8000 >/tmp/http.log 2>&1 &"
+fletcher session publish dev 8000                  # tunnel-only (no --host)
+fletcher session ports dev                         # shows TUNNEL ADDRESS, e.g. 10.99.0.1:41xxx
+curl http://10.99.0.1:<tunnel_port>/               # the directory listing
+```
+
+Proves the published-port broker forwards the tunnel IP into the VM over vsock.
+`fletcher session unpublish dev 8000` stops it.
+
+> Note: a hand-started process like this does **not** survive a session restart
+> (a daemon restart cold-boots the session). That is exactly what `deploy --app`
+> fixes; this manual flow is for ad-hoc port sharing.
+
+#### 5b. Publish a port publicly over HTTPS (M8 Layer B)
+
+One-time enable (off by default - this opens 80/443 on the box):
+
+```sh
+fletcher settings set public_web true
+fletcher settings set acme_staging true            # untrusted certs, no LE rate limits - for testing
+make install                                       # the unit needs CAP_NET_BIND_SERVICE; restarts the daemon
+```
+
+Then publish publicly and follow the printed DNS guidance:
+
+```sh
+fletcher session publish dev 8000 --public --host app.example.com
+# -> prints: create A record  app.example.com -> <your-public-ip>
+fletcher session ports dev                         # DNS column flips to "ok" once it resolves here
+```
+
+Add that A record at your DNS provider, then open `https://app.example.com` from
+outside the network (staging = browser warning, expected). Switch to a real cert
+with `fletcher settings set acme_staging false && fletcher daemon restart`, then
+re-hit it. Proves certmagic issues on-demand only for published hosts and the
+daemon reverse-proxies into the VM.
+
+#### 5c. Deploy a Docker image (M9) - all variations
+
+`deploy` = import + a `--app` session (runs the image's entrypoint) + publish, in
+one command. `nginx:alpine` is a good test image (EXPOSEs 80, runs as root).
+
+```sh
+# Public image, tunnel-only (quickest; no DNS needed). Port auto-detected from EXPOSE.
+fletcher deploy nginx:alpine --name web
+fletcher session ports web && curl http://10.99.0.1:<tunnel_port>/
+
+# Public image, public over HTTPS (needs public_web from 5b + a DNS A record):
+fletcher deploy nginx:alpine --name web --host nginx.example.com
+
+# Private registry image (basic auth on the pull):
+fletcher deploy ghcr.io/you/app:v1 --registry-auth you:TOKEN --host app.example.com
+
+# Local Dockerfile directory (HOST-ONLY: the build needs the cwd, the import needs root):
+sudo fletcher deploy ./myapp --host app.example.com
+
+# From a REMOTE CLIENT (laptop) - a registry ref works over the tunnel, no local docker:
+fletcher --remote 10.99.0.1:11700 --token <token> deploy nginx:alpine --name web --host nginx.example.com
+```
+
+For a registry ref the **daemon** pulls and flattens the image in-process (no
+Docker on the host), which is why it works from a remote client. `fletcher image
+pull <ref> [--registry-auth user:token]` does just the import without deploying.
+
+#### 5d. Deploy lifecycle: logs and durability
+
+```sh
+fletcher session logs web                          # the app's stdout/stderr
+fletcher session get web                           # state + "app: runs the image's entrypoint"
+
+# Durability: the app comes back on its own after a restart (unlike 5a's manual server):
+fletcher session stop web && fletcher session start web
+fletcher session logs web                           # nginx serving again
+
+fletcher session delete web                         # teardown (also removes published ports)
+fletcher image rm nginx                             # optional: drop the imported template
+```
+
+Proves app-mode supervision (restart on crash) + boot auto-start of deployed
+sessions.
+
+#### Gotchas
+
+- **`--public`/`--host` need `public_web true`** (5b); otherwise publish is
+  refused with a clear message.
+- **App mode is Firecracker-only** (it relies on the guest init), the default
+  runtime.
+- **Server-side import needs the images dir daemon-writable.** A pre-existing
+  install where `sudo image import` created `<snapshot-root>/images` as root will
+  fail a remote deploy with `truncate: ... Permission denied`; fix once with
+  `sudo chown fletcher:fletcher /var/lib/fletcher/snapshots/images` (new imports
+  set this automatically).
+- **Ownership fidelity:** the daemon extracts a server-side import as its own
+  user, so rootfs files are daemon-owned - fine for images that run as root; an
+  image needing setuid binaries / non-root file ownership should use the
+  root-privileged CLI `fletcher image import` instead.
+
 ### Power-user CLI
 
 `fletcher peer add` (the pre-Phase-15 CLI surface) still exists for
