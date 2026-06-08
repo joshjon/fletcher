@@ -1529,8 +1529,12 @@ func (x *PublishPortRequest) GetHost() string {
 }
 
 type PublishPortResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Port          *PublishedPort         `protobuf:"bytes,1,opt,name=port,proto3" json:"port,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Port  *PublishedPort         `protobuf:"bytes,1,opt,name=port,proto3" json:"port,omitempty"`
+	// public_ip is the daemon's discovered public IP (host of the public
+	// endpoint), so the client can tell the operator the exact A record to create
+	// for a --public port. Empty if no public endpoint is known.
+	PublicIp      string `protobuf:"bytes,2,opt,name=public_ip,json=publicIp,proto3" json:"public_ip,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1570,6 +1574,13 @@ func (x *PublishPortResponse) GetPort() *PublishedPort {
 		return x.Port
 	}
 	return nil
+}
+
+func (x *PublishPortResponse) GetPublicIp() string {
+	if x != nil {
+		return x.PublicIp
+	}
+	return ""
 }
 
 type UnpublishPortRequest struct {
@@ -1705,8 +1716,11 @@ func (x *ListPortsRequest) GetRef() string {
 }
 
 type ListPortsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ports         []*PublishedPort       `protobuf:"bytes,1,rep,name=ports,proto3" json:"ports,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Ports []*PublishedPort       `protobuf:"bytes,1,rep,name=ports,proto3" json:"ports,omitempty"`
+	// public_ip is the daemon's discovered public IP, so the client can show
+	// whether each public port's hostname resolves to this box yet.
+	PublicIp      string `protobuf:"bytes,2,opt,name=public_ip,json=publicIp,proto3" json:"public_ip,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1746,6 +1760,13 @@ func (x *ListPortsResponse) GetPorts() []*PublishedPort {
 		return x.Ports
 	}
 	return nil
+}
+
+func (x *ListPortsResponse) GetPublicIp() string {
+	if x != nil {
+		return x.PublicIp
+	}
+	return ""
 }
 
 var File_fletcher_v1_sessions_proto protoreflect.FileDescriptor
@@ -1848,18 +1869,20 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"guest_port\x18\x02 \x01(\rR\tguestPort\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x16\n" +
 	"\x06public\x18\x04 \x01(\bR\x06public\x12\x12\n" +
-	"\x04host\x18\x05 \x01(\tR\x04host\"E\n" +
+	"\x04host\x18\x05 \x01(\tR\x04host\"b\n" +
 	"\x13PublishPortResponse\x12.\n" +
-	"\x04port\x18\x01 \x01(\v2\x1a.fletcher.v1.PublishedPortR\x04port\"G\n" +
+	"\x04port\x18\x01 \x01(\v2\x1a.fletcher.v1.PublishedPortR\x04port\x12\x1b\n" +
+	"\tpublic_ip\x18\x02 \x01(\tR\bpublicIp\"G\n" +
 	"\x14UnpublishPortRequest\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x1d\n" +
 	"\n" +
 	"guest_port\x18\x02 \x01(\rR\tguestPort\"\x17\n" +
 	"\x15UnpublishPortResponse\"$\n" +
 	"\x10ListPortsRequest\x12\x10\n" +
-	"\x03ref\x18\x01 \x01(\tR\x03ref\"E\n" +
+	"\x03ref\x18\x01 \x01(\tR\x03ref\"b\n" +
 	"\x11ListPortsResponse\x120\n" +
-	"\x05ports\x18\x01 \x03(\v2\x1a.fletcher.v1.PublishedPortR\x05ports*c\n" +
+	"\x05ports\x18\x01 \x03(\v2\x1a.fletcher.v1.PublishedPortR\x05ports\x12\x1b\n" +
+	"\tpublic_ip\x18\x02 \x01(\tR\bpublicIp*c\n" +
 	"\fSessionState\x12\x1d\n" +
 	"\x19SESSION_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATE_RUNNING\x10\x01\x12\x19\n" +

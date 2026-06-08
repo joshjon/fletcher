@@ -478,6 +478,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	connectDeps := connectDeps{
 		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg), defaultGateway(cfg)),
 		sessions:         sessionMgr,
+		publicIP:         publicEndpointHost(netSetup.EffectivePublicEndpoint),
 		secrets:          secretsStore,
 		approvals:        approvalSvc,
 		peers:            peerSvc,
@@ -542,6 +543,9 @@ type connectDeps struct {
 	models    api.CatalogBuilder
 	peerSync  api.PeerSyncer
 	settings  api.SettingsBackend
+	// publicIP is the daemon's discovered public IP (host of the effective public
+	// endpoint), passed to the sessions service for --public DNS guidance.
+	publicIP string
 	// settingsDefaults maps each setting key to the daemon's resolved default,
 	// so `fletcher settings list` shows the effective value, not just "(default)".
 	settingsDefaults map[string]string
@@ -818,7 +822,7 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	mux.Handle(jobsPath, jobsHandler)
 
 	sessionsPath, sessionsHandler := fletcherv1connect.NewSessionServiceHandler(
-		api.NewSessionsService(deps.sessions), interceptors,
+		api.NewSessionsService(deps.sessions, deps.publicIP), interceptors,
 	)
 	mux.Handle(sessionsPath, sessionsHandler)
 
@@ -1197,6 +1201,19 @@ func applyPublicWebSetting(cfg *Config, k, v string) bool {
 		return false // unknown key persisted by an older/newer version; ignore
 	}
 	return true
+}
+
+// publicEndpointHost extracts the host (IP) from an "ip:port" public endpoint,
+// or returns the endpoint unchanged if it has no port. Empty stays empty. Used
+// to tell a --public publisher the A record to create.
+func publicEndpointHost(endpoint string) string {
+	if endpoint == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(endpoint); err == nil {
+		return host
+	}
+	return endpoint
 }
 
 // remoteAPIPort is the TCP port the daemon exposes its Connect API on, bound to

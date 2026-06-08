@@ -228,6 +228,10 @@ message PublishPortRequest {
 
 message PublishPortResponse {
   PublishedPort port = 1;
+  // public_ip is the daemon's discovered public IP (host of the public
+  // endpoint), so the client can tell the operator the exact A record to create
+  // for a --public port. Empty if no public endpoint is known.
+  string public_ip = 2;
 }
 
 message UnpublishPortRequest {
@@ -243,4 +247,7 @@ message ListPortsRequest {
 
 message ListPortsResponse {
   repeated PublishedPort ports = 1;
+  // public_ip is the daemon's discovered public IP, so the client can show
+  // whether each public port's hostname resolves to this box yet.
+  string public_ip = 2;
 }

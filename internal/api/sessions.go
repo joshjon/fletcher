@@ -36,11 +36,16 @@ type SessionsBackend interface {
 type SessionsService struct {
 	fletcherv1connect.UnimplementedSessionServiceHandler
 	backend SessionsBackend
+	// publicIP is the daemon's discovered public IP (host of the public
+	// endpoint), surfaced so the client can tell the operator the exact A record
+	// to create for a --public port. Empty when no public endpoint is known.
+	publicIP string
 }
 
-// NewSessionsService wires a SessionsService to a backend.
-func NewSessionsService(backend SessionsBackend) *SessionsService {
-	return &SessionsService{backend: backend}
+// NewSessionsService wires a SessionsService to a backend. publicIP is the
+// daemon's public IP for --public DNS guidance ("" if unknown).
+func NewSessionsService(backend SessionsBackend, publicIP string) *SessionsService {
+	return &SessionsService{backend: backend, publicIP: publicIP}
 }
 
 // CreateSession provisions a session and boots its VM. Categorised errors
@@ -242,7 +247,7 @@ func (s *SessionsService) PublishPort(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&fletcherv1.PublishPortResponse{Port: publishedToProto(pp)}), nil
+	return connect.NewResponse(&fletcherv1.PublishPortResponse{Port: publishedToProto(pp), PublicIp: s.publicIP}), nil
 }
 
 // UnpublishPort stops forwarding a session's published port.
@@ -263,7 +268,7 @@ func (s *SessionsService) ListPorts(ctx context.Context, req *connect.Request[fl
 	for i, pp := range ports {
 		out[i] = publishedToProto(pp)
 	}
-	return connect.NewResponse(&fletcherv1.ListPortsResponse{Ports: out}), nil
+	return connect.NewResponse(&fletcherv1.ListPortsResponse{Ports: out, PublicIp: s.publicIP}), nil
 }
 
 func publishedToProto(p session.PublishedPort) *fletcherv1.PublishedPort {

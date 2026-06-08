@@ -8,7 +8,9 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/urfave/cli/v3"
@@ -240,7 +242,7 @@ func sessionPublishCmd() *cli.Command {
 			if err != nil {
 				return err
 			}
-			return renderPublishedPort(os.Stdout, cmd.String("output"), resp.Msg.GetPort(), tunnelHostHint(cmd))
+			return renderPublishedPort(ctx, os.Stdout, cmd.String("output"), resp.Msg.GetPort(), tunnelHostHint(cmd), resp.Msg.GetPublicIp())
 		},
 	}
 }
@@ -293,7 +295,7 @@ func sessionPortsCmd() *cli.Command {
 			if cmd.String("output") == "json" {
 				return writeProtoJSON(os.Stdout, resp.Msg)
 			}
-			return writePublishedPortsTable(os.Stdout, resp.Msg.GetPorts(), tunnelHostHint(cmd))
+			return writePublishedPortsTable(ctx, os.Stdout, resp.Msg.GetPorts(), tunnelHostHint(cmd), resp.Msg.GetPublicIp())
 		},
 	}
 }
@@ -314,7 +316,7 @@ func tunnelHostHint(cmd *cli.Command) string {
 
 // --- output rendering ---
 
-func renderPublishedPort(w io.Writer, format string, p *fletcherv1.PublishedPort, tunnelHost string) error {
+func renderPublishedPort(ctx context.Context, w io.Writer, format string, p *fletcherv1.PublishedPort, tunnelHost, publicIP string) error {
 	if format == "json" {
 		return writeProtoJSON(w, p)
 	}
@@ -331,9 +333,47 @@ func renderPublishedPort(w io.Writer, format string, p *fletcherv1.PublishedPort
 	}
 	fmt.Fprintln(w, "\n"+publishedReach(p, tunnelHost))
 	if p.GetPublic() {
-		fmt.Fprintf(w, "publicly at https://%s (TLS cert is issued on the first request - allow a few seconds)\n", p.GetHost())
+		writePublicDNSGuidance(ctx, w, p.GetHost(), publicIP)
 	}
 	return nil
+}
+
+// writePublicDNSGuidance tells the operator the exact DNS record to create for a
+// public port and immediately checks whether it already points here - so the
+// set-and-confirm loop stays inside Fletcher.
+func writePublicDNSGuidance(ctx context.Context, w io.Writer, host, publicIP string) {
+	if publicIP == "" {
+		fmt.Fprintf(w, "\n%s Fletcher could not determine your public IP (no public endpoint).\n  Set one with `fletcher settings set public_endpoint <ip:port>` or check `fletcher doctor`.\n", yellow("!"))
+		return
+	}
+	status, ok := dnsStatus(ctx, host, publicIP)
+	fmt.Fprintf(w, "\nTo serve %s publicly, create this DNS record at your provider:\n", bold(host))
+	fmt.Fprintf(w, "    %s.\tA\t%s\n", host, publicIP)
+	if ok {
+		fmt.Fprintf(w, "%s the record already resolves here; https://%s is live (the TLS cert issues on the first request).\n", green("✓"), host)
+		return
+	}
+	fmt.Fprintf(w, "%s %s\n  Re-check after adding it with `fletcher session ports <session>`.\n", yellow("…"), status)
+}
+
+// dnsStatus resolves host and reports whether it points at wantIP. The bool is
+// true only on a confirmed match.
+func dnsStatus(ctx context.Context, host, wantIP string) (string, bool) {
+	if wantIP == "" {
+		return gray("public IP unknown"), false
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupHost(lookupCtx, host)
+	if err != nil {
+		return "not resolving yet - add the record above", false
+	}
+	for _, a := range addrs {
+		if a == wantIP {
+			return "DNS ✓", true
+		}
+	}
+	return fmt.Sprintf("points to %s, not %s", strings.Join(addrs, ", "), wantIP), false
 }
 
 // publishedReach is the human hint for where to reach a published port over the
@@ -348,9 +388,9 @@ func publishedReach(p *fletcherv1.PublishedPort, tunnelHost string) string {
 	return fmt.Sprintf("reachable from a paired client at the daemon's tunnel IP, port %d", p.GetTunnelPort())
 }
 
-func writePublishedPortsTable(w io.Writer, ports []*fletcherv1.PublishedPort, tunnelHost string) error {
+func writePublishedPortsTable(ctx context.Context, w io.Writer, ports []*fletcherv1.PublishedPort, tunnelHost, publicIP string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tGUEST PORT\tTUNNEL ADDRESS\tPUBLIC URL")
+	fmt.Fprintln(tw, "NAME\tGUEST PORT\tTUNNEL ADDRESS\tPUBLIC URL\tDNS")
 	for _, p := range ports {
 		addr := fmt.Sprintf("%d", p.GetTunnelPort())
 		if p.GetTunnelPort() == 0 {
@@ -358,11 +398,17 @@ func writePublishedPortsTable(w io.Writer, ports []*fletcherv1.PublishedPort, tu
 		} else if tunnelHost != "" {
 			addr = fmt.Sprintf("%s:%d", tunnelHost, p.GetTunnelPort())
 		}
-		public := "-"
+		public, dns := "-", "-"
 		if p.GetPublic() {
 			public = "https://" + p.GetHost()
+			msg, ok := dnsStatus(ctx, p.GetHost(), publicIP)
+			if ok {
+				dns = green("ok")
+			} else {
+				dns = yellow(msg)
+			}
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", p.GetName(), p.GetGuestPort(), addr, public)
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\n", p.GetName(), p.GetGuestPort(), addr, public, dns)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
