@@ -67,6 +67,14 @@ over the tunnel: run `fletcher login <token>` once (the token is printed by
 command. Subcommand help is the source of truth: `fletcher --help`,
 `fletcher job --help`, etc.
 
+Beyond one-shot jobs, Fletcher hosts **durable sessions** - persistent microVMs
+you shell or SSH into (with hibernate/restore) - and can **deploy a web app** from
+a Docker image: `fletcher deploy <image> --host app.example.com` builds or pulls
+the image, runs it, and serves it publicly over HTTPS on a domain you own, with
+the app sandboxed in a no-egress microVM. The daemon pulls registry images itself,
+so `deploy` works from a laptop over the tunnel with no local Docker. Walkthroughs
+for both are in [`docs/setup.md`](docs/setup.md).
+
 ## Documentation
 
 - [`docs/setup.md`](docs/setup.md) - end-user install, first run,

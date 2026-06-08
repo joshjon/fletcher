@@ -571,3 +571,92 @@ fletcher session delete dev     # stops the VM and destroys its fork (disk)
 
 Deleting is the only thing that frees a session's disk, and it's irreversible -
 prune intentionally.
+
+## Publishing a port: reach a service from your devices or the web
+
+A session can serve something - a dev server, a web app, an API - and Fletcher
+exposes that port two ways, both brokered by the daemon so the VM itself never
+gets a network route (the same trust boundary as SSH).
+
+**To your paired devices, over the tunnel.** No setup, nothing public:
+
+```sh
+fletcher session exec dev "nohup python3 -m http.server 8000 >/tmp/log 2>&1 &"
+fletcher session publish dev 8000        # prints a tunnel address like 10.99.0.1:41xxx
+fletcher session ports dev               # list what's published
+```
+
+Any device on your WireGuard tunnel can reach that address. `fletcher session
+unpublish dev 8000` stops it.
+
+**To the public internet, over HTTPS, on your own domain.** This is opt-in: it
+opens ports 80/443 on your box (the only thing besides the silent WireGuard port
+that faces the internet), so it stays off until you turn it on:
+
+```sh
+fletcher settings set public_web true
+fletcher settings set acme_staging true     # a free, untrusted cert first (no rate limits) - for testing
+sudo fletcher daemon restart                # on a source build use `make install`; the unit needs a capability
+```
+
+Then publish with a hostname you control:
+
+```sh
+fletcher session publish dev 8000 --public --host app.example.com
+```
+
+Fletcher prints the exact DNS record to create (`app.example.com  A
+<your-public-ip>` - it already knows your public IP), and `fletcher session ports
+dev` shows when the hostname resolves back to you. Add that record at your DNS
+provider, then open `https://app.example.com`: Fletcher obtains a Let's Encrypt
+certificate automatically on the first request. When it works, switch to a real
+(trusted) cert:
+
+```sh
+fletcher settings set acme_staging false
+sudo fletcher daemon restart
+```
+
+The daemon terminates TLS and reverse-proxies into the VM. It serves **only** the
+ports you publish, and only issues certificates for hostnames you've actually
+published. This needs a real public IP (not behind CGNAT) with 80/443 reachable -
+Fletcher tries to forward them via UPnP, or forward them on your router.
+
+## Deploying an app from a Docker image
+
+`fletcher deploy` is the one-command path from a Docker image to a running,
+published app on your own box: it builds (or pulls) the image, runs it as a
+session that boots the image's own start command, and publishes its port.
+
+```sh
+# A public image, served on your domain over HTTPS (port taken from the image's EXPOSE):
+fletcher deploy nginx:alpine --host app.example.com
+
+# Tunnel-only (no domain needed) - reachable from your paired devices:
+fletcher deploy nginx:alpine --name web
+
+# A private registry image (basic auth on the pull):
+fletcher deploy ghcr.io/you/app:v1 --registry-auth you:TOKEN --host app.example.com
+
+# A local project with a Dockerfile (builds on this box; needs root + docker):
+sudo fletcher deploy ./myapp --host app.example.com
+```
+
+For a **registry image the daemon does the pull and flatten itself**, so `deploy`
+(and `fletcher image pull <ref>`) work from a laptop over the tunnel with no local
+Docker - your code never leaves your network to be deployed onto it. Building from
+a local Dockerfile is the one host-side case (it needs the working directory).
+
+A deployed app is durable: it restarts if it crashes and comes back on its own
+after a reboot. Manage it like any session:
+
+```sh
+fletcher session logs <name>     # the app's output
+fletcher session get <name>      # state, port, public URL
+fletcher session delete <name>   # stop and remove
+```
+
+Notes: `--public`/`--host` need `public_web` enabled (above). The app runs as the
+image's user (root unless the image sets one). Want a private registry of your
+own? Run one in a session and `deploy` from it - to Fletcher it is just a registry
+it pulls, no special setup.
