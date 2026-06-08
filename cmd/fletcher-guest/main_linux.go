@@ -81,49 +81,148 @@ func cmdlineHas(flag string) bool {
 const appLogPath = "/var/log/fletcher-app.log"
 
 // startApp launches the image's own app (captured at import into appspec.Path)
-// in the background, with the image's env and working dir, logging to a file.
-// The control server keeps running alongside it so the session is still
-// shell-able. Crash-restart and precise USER mapping are follow-up M9 items.
+// under a supervisor that restarts it if it exits, logging to appLogPath. The
+// control server keeps running alongside it so the session is still shell-able.
 func startApp() {
 	spec, err := appspec.Read(appspec.Path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fletcher-guest: app mode on but no app spec (%v); nothing to run\n", err)
 		return
 	}
-	argv := spec.Argv()
-	if len(argv) == 0 {
+	if len(spec.Argv()) == 0 {
 		fmt.Fprintln(os.Stderr, "fletcher-guest: app spec has no command")
 		return
 	}
+	go superviseApp(spec)
+}
+
+// appRestartBackoff is the minimum gap between app restarts, so a crash-looping
+// app does not spin the CPU (matches the sshd relaunch backoff).
+const appRestartBackoff = time.Second
+
+// superviseApp runs the app and restarts it whenever it exits (a deployed server
+// should stay up). Output for the whole boot goes to one log file; image env and
+// working dir are applied, and the image USER if set (else root, what most app
+// images expect).
+func superviseApp(spec appspec.Spec) {
+	argv := spec.Argv()
+	workDir := spec.WorkingDir
+	if workDir == "" {
+		workDir = "/"
+	}
+	env := withDefaults(spec.Env, loginUser{})
+
 	_ = os.MkdirAll("/var/log", 0o755) //nolint:gosec // standard log dir perms inside the VM
 	logf, err := os.OpenFile(appLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fletcher-guest: open app log: %v\n", err)
 		return
 	}
-	workDir := spec.WorkingDir
-	if workDir == "" {
-		workDir = "/"
+	defer func() { _ = logf.Close() }()
+
+	for {
+		cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...) //nolint:gosec // running the image's own app is the entire purpose of app mode
+		cmd.Dir = workDir
+		cmd.Env = env
+		cmd.Stdout = logf
+		cmd.Stderr = logf
+		applyAppUser(cmd, spec.User)
+
+		started := time.Now()
+		if err := cmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "fletcher-guest: start app %v: %v\n", argv, err)
+			time.Sleep(appRestartBackoff)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "fletcher-guest: started app pid %d: %v\n", cmd.Process.Pid, argv)
+		_ = cmd.Wait()
+		fmt.Fprintf(os.Stderr, "fletcher-guest: app exited; restarting\n")
+		// Pace restarts only when the app dies almost immediately (crash loop); a
+		// long-lived app that just died restarts without delay.
+		if elapsed := time.Since(started); elapsed < appRestartBackoff {
+			time.Sleep(appRestartBackoff - elapsed)
+		}
 	}
-	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...) //nolint:gosec // running the image's own app is the entire purpose of app mode
-	cmd.Dir = workDir
-	// Run as root (PID 1's uid), which is what most app images expect; honoring a
-	// non-root image USER precisely is a follow-up. loginUser{} keeps the root
-	// HOME/USER env defaults.
-	cmd.Env = withDefaults(spec.Env, loginUser{})
-	cmd.Stdout = logf
-	cmd.Stderr = logf
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "fletcher-guest: start app %v: %v\n", argv, err)
-		_ = logf.Close()
+}
+
+// applyAppUser runs the app as the image's USER when set and resolvable; an
+// empty/root user (or one that cannot be resolved) runs as root, which is what
+// most app images expect.
+func applyAppUser(cmd *exec.Cmd, u string) {
+	u = strings.TrimSpace(u)
+	if u == "" || u == "root" || u == "0" {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "fletcher-guest: started app pid %d: %v\n", cmd.Process.Pid, argv)
-	// Reap when it exits; crash-restart is a later M9 item.
-	go func() {
-		_ = cmd.Wait()
-		_ = logf.Close()
-	}()
+	uid, gid, ok := resolveUserGroup(u)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: image USER %q unresolved; running app as root\n", u)
+		return
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uid, Gid: gid}
+}
+
+// resolveUserGroup parses an image USER ("name", "uid", "name:group", or
+// "uid:gid") to numeric ids using the rootfs's passwd/group databases.
+func resolveUserGroup(spec string) (uid, gid uint32, ok bool) {
+	userPart, groupPart, hasGroup := strings.Cut(spec, ":")
+	u, err := lookupUser(userPart)
+	if err != nil {
+		return 0, 0, false
+	}
+	uid = u.uid
+	gid = u.gid
+	if hasGroup {
+		g, gerr := lookupGroupID(groupPart)
+		if gerr != nil {
+			return 0, 0, false
+		}
+		gid = g
+	}
+	return uid, gid, true
+}
+
+type resolvedUser struct{ uid, gid uint32 }
+
+// lookupUser resolves a username or numeric uid to uid/gid.
+func lookupUser(name string) (resolvedUser, error) {
+	if n, err := strconv.Atoi(name); err == nil && n >= 0 && n <= math.MaxUint32 {
+		// Numeric uid: try to find its primary gid, else mirror the uid.
+		if u, lerr := user.LookupId(name); lerr == nil {
+			if gid, gerr := strconv.Atoi(u.Gid); gerr == nil {
+				return resolvedUser{uid: uint32(n), gid: uint32(gid)}, nil //nolint:gosec // bounded above
+			}
+		}
+		return resolvedUser{uid: uint32(n), gid: uint32(n)}, nil
+	}
+	u, err := user.Lookup(name)
+	if err != nil {
+		return resolvedUser{}, err
+	}
+	uid, uerr := strconv.Atoi(u.Uid)
+	gid, gerr := strconv.Atoi(u.Gid)
+	if uerr != nil || gerr != nil || uid < 0 || gid < 0 || uid > math.MaxUint32 || gid > math.MaxUint32 {
+		return resolvedUser{}, fmt.Errorf("bad uid/gid for %q", name)
+	}
+	return resolvedUser{uid: uint32(uid), gid: uint32(gid)}, nil
+}
+
+// lookupGroupID resolves a group name or numeric gid.
+func lookupGroupID(name string) (uint32, error) {
+	if n, err := strconv.Atoi(name); err == nil && n >= 0 && n <= math.MaxUint32 {
+		return uint32(n), nil
+	}
+	g, err := user.LookupGroup(name)
+	if err != nil {
+		return 0, err
+	}
+	gid, err := strconv.Atoi(g.Gid)
+	if err != nil || gid < 0 || gid > math.MaxUint32 {
+		return 0, fmt.Errorf("bad gid for %q", name)
+	}
+	return uint32(gid), nil
 }
 
 // serve is the session control loop: listen on vsock and serve each

@@ -750,6 +750,32 @@ func (m *Manager) ReconcileOnBoot(ctx context.Context) error {
 	return nil
 }
 
+// StartDeployedOnBoot boots every app session (run_app) after a daemon restart,
+// so a deployed app comes back on its own rather than waiting for an inbound
+// request to wake it. Best-effort: a session that fails to boot is logged and
+// skipped. Call after ReconcileOnBoot has reset stale running rows to stopped.
+func (m *Manager) StartDeployedOnBoot(ctx context.Context) {
+	if m.runtime == nil {
+		return
+	}
+	rows, err := m.q.ListSessions(ctx)
+	if err != nil {
+		m.logger.Warn("start deployed sessions on boot", slog.String("err", err.Error()))
+		return
+	}
+	for _, r := range rows {
+		if r.RunApp == 0 {
+			continue
+		}
+		if _, serr := m.Start(ctx, r.ID); serr != nil {
+			m.logger.Warn("auto-start deployed app session on boot",
+				slog.String("session_id", r.ID), slog.String("name", r.Name), slog.String("err", serr.Error()))
+			continue
+		}
+		m.logger.Info("auto-started deployed app session on boot", slog.String("name", r.Name))
+	}
+}
+
 // lookup resolves ref (id or name) to a row, returning ErrNotFound if missing.
 func (m *Manager) lookup(ctx context.Context, ref string) (sqliteq.Session, error) {
 	row, err := m.q.GetSessionByRef(ctx, ref)

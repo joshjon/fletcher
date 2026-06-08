@@ -467,6 +467,9 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	if err := sessionMgr.ReconcilePorts(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile published ports: %w", err)
 	}
+	// Bring deployed app sessions (created --app) back up after a restart, in the
+	// background so booting their VMs does not delay daemon startup.
+	go sessionMgr.StartDeployedOnBoot(ctx)
 
 	// Public web (Milestone 8 Phase 2): serve `session publish --public` ports on
 	// the internet over HTTPS, certmagic terminating TLS and reverse-proxying into
