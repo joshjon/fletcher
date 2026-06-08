@@ -1,0 +1,19 @@
+{
+  "name": "fletcher-docs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Documentation site for Fletcher",
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.3"
+  },
+  "packageManager": "pnpm@11.5.2",
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

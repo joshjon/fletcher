@@ -1,0 +1,124 @@
+/**
+ * Fletcher docs theme.
+ *
+ * A restrained, near-monochrome look: deep neutral backgrounds, one calm blue
+ * accent used sparingly for links and interactive state. Dark-first, but the
+ * light theme is tuned to the same palette.
+ */
+
+/* ---------------------------------------------------------------------------
+ * Brand accent - a single muted blue, no gradients, no bright colour.
+ * ------------------------------------------------------------------------- */
+:root {
+  --vp-c-brand-1: #2f5d9e;
+  --vp-c-brand-2: #274d83;
+  --vp-c-brand-3: #2f5d9e;
+  --vp-c-brand-soft: rgba(47, 93, 158, 0.12);
+
+  --vp-c-brand-text: #ffffff;
+
+  /* Slightly tighter, calmer radii than the default. */
+  --vp-c-gutter: var(--vp-c-divider);
+}
+
+.dark {
+  /* Neutral, near-black surfaces. */
+  --vp-c-bg: #0c0c0e;
+  --vp-c-bg-alt: #131316;
+  --vp-c-bg-elv: #161619;
+  --vp-c-bg-soft: #161619;
+
+  /* Quiet borders and dividers. */
+  --vp-c-border: #2a2a2f;
+  --vp-c-divider: #232327;
+  --vp-c-gutter: #1c1c20;
+
+  /* Text: high-contrast but not pure white. */
+  --vp-c-text-1: #e7e7ea;
+  --vp-c-text-2: #a6a6ad;
+  --vp-c-text-3: #6f6f78;
+
+  /* Accent reads brighter on dark surfaces. */
+  --vp-c-brand-1: #8db4e2;
+  --vp-c-brand-2: #a8c7ec;
+  --vp-c-brand-3: #34537c;
+  --vp-c-brand-soft: rgba(141, 180, 226, 0.14);
+}
+
+/* ---------------------------------------------------------------------------
+ * Home hero - monochrome, no rainbow gradient on the name or the blurred blob.
+ * ------------------------------------------------------------------------- */
+:root {
+  --vp-home-hero-name-color: var(--vp-c-text-1);
+  --vp-home-hero-name-background: transparent;
+
+  --vp-home-hero-image-background-image: none;
+  --vp-home-hero-image-filter: none;
+}
+
+.VPHero .name {
+  letter-spacing: -0.02em;
+}
+
+.VPHero .text {
+  color: var(--vp-c-text-2);
+  font-weight: 500;
+}
+
+/* ---------------------------------------------------------------------------
+ * Buttons - flatter, quieter than the default.
+ * ------------------------------------------------------------------------- */
+.dark .VPButton.brand {
+  color: #ffffff;
+}
+
+.VPButton.alt {
+  border-color: var(--vp-c-border);
+}
+
+/* ---------------------------------------------------------------------------
+ * Feature cards on the home page - subtle border, no heavy fill.
+ * ------------------------------------------------------------------------- */
+.VPFeature {
+  border: 1px solid var(--vp-c-border);
+  background-color: var(--vp-c-bg-soft);
+  transition: border-color 0.25s, background-color 0.25s;
+}
+
+.VPFeature:hover {
+  border-color: var(--vp-c-brand-1);
+}
+
+/* ---------------------------------------------------------------------------
+ * Typography & content polish.
+ * ------------------------------------------------------------------------- */
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3 {
+  letter-spacing: -0.01em;
+}
+
+.vp-doc h2 {
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+/* Inline code: quieter, no loud accent colour. */
+.vp-doc :not(pre) > code {
+  color: var(--vp-c-text-1);
+  background-color: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  font-size: 0.85em;
+}
+
+/* Links: underline on hover only, accent colour, no bold. */
+.vp-doc a {
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.vp-doc a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
