@@ -34,6 +34,14 @@ const (
 	// loopback sshd, so the daemon can broker SSH into the VM without the VM
 	// having any network route (the preview-proxy pattern, for SSH).
 	SSHPort = 1026
+	// PortForwardPort is the vsock port a session guest listens on for generic
+	// host-initiated loopback forwards. The host dials it, writes a 2-byte
+	// big-endian target port (WriteDialPort), and the guest splices the rest of
+	// the connection to that loopback port inside the VM. This generalises the
+	// SSH relay (a fixed loopback:22 forward) to any port a published session
+	// serves, so the daemon can broker a preview/published port the same way -
+	// the VM still has no network route.
+	PortForwardPort = 1027
 	// ForwardPortBase is the first vsock port used for service forwards; the
 	// host assigns ForwardPortBase, +1, +2, ... one per Forward.
 	ForwardPortBase = 1100
@@ -105,6 +113,25 @@ func ReadStat(r io.Reader) (Stat, error) {
 	var stat Stat
 	err := readJSON(r, &stat)
 	return stat, err
+}
+
+// WriteDialPort writes the 2-byte big-endian target-port header the guest's
+// generic port-forward relay (PortForwardPort) reads to learn which loopback
+// port to splice the rest of the connection to.
+func WriteDialPort(w io.Writer, port uint16) error {
+	var b [2]byte
+	binary.BigEndian.PutUint16(b[:], port)
+	_, err := w.Write(b[:])
+	return err
+}
+
+// ReadDialPort reads the target-port header written by WriteDialPort.
+func ReadDialPort(r io.Reader) (uint16, error) {
+	var b [2]byte
+	if _, err := io.ReadFull(r, b[:]); err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint16(b[:]), nil
 }
 
 // ShellSpec parameterises an interactive PTY session.

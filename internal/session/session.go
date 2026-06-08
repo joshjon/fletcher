@@ -93,7 +93,47 @@ type Manager struct {
 	mu      sync.Mutex
 	handles map[string]runtime.SessionHandle
 	busy    map[string]int // sessions with an in-flight host op (exec/shell/ssh)
+
+	// startLocks serialises Start per session id so concurrent wakes (e.g.
+	// several inbound connections to a published port at once) boot at most one
+	// VM. A sync.Map's zero value is ready to use.
+	startLocks sync.Map
+
+	// broker opens/closes the host-side forwarders for published ports. nil when
+	// the tunnel is down (published ports are recorded but unreachable until it
+	// comes up). Set once at startup via SetBroker, before serving.
+	broker PortBroker
 }
+
+// PortBroker opens and closes the host-side forwarders that make a session's
+// published port reachable. The Manager owns the published_ports rows; the
+// broker owns the live listeners. The split lets the broker dial back into the
+// Manager (DialPort) to reach the guest without an import cycle.
+type PortBroker interface {
+	// Open starts forwarding for a published port, binding its host-side
+	// listener (reusing pp.TunnelPort when non-zero, else picking a free port)
+	// and returning the actual bound tunnel port.
+	Open(pp PublishedPort) (tunnelPort int, err error)
+	// Close stops forwarding for the published port with this id.
+	Close(id string)
+}
+
+// PublishedPort is a port a session serves, brokered by the daemon. Phase 1
+// makes it reachable over the tunnel at TunnelPort; Public/Host drive the
+// Phase 2 public listener.
+type PublishedPort struct {
+	ID         string
+	SessionID  string
+	GuestPort  int
+	Name       string
+	TunnelPort int
+	Public     bool
+	Host       string
+	CreatedAt  time.Time
+}
+
+// pubPortPrefix is the typeid prefix for published-port IDs.
+const pubPortPrefix = "pubport"
 
 // NewManager constructs a Manager. rt may be nil if the configured runtime does
 // not support sessions, in which case lifecycle calls fail with a clear error.
@@ -218,12 +258,25 @@ func (m *Manager) List(ctx context.Context) ([]Session, error) {
 	return out, nil
 }
 
-// Start boots a stopped session's VM against its persisted fork.
+// Start boots a stopped session's VM against its persisted fork. It is safe to
+// call concurrently for the same session (e.g. several inbound connections
+// waking a published port at once): a per-session lock serialises the
+// check-and-boot so at most one VM is started.
 func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
 	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return Session{}, err
+	}
+
+	lock := m.startLock(row.ID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Re-read under the lock: a concurrent caller may have started it already.
+	row, err = m.lookup(ctx, row.ID)
 	if err != nil {
 		return Session{}, err
 	}
@@ -281,6 +334,9 @@ func (m *Manager) Delete(ctx context.Context, ref string) (bool, error) {
 			m.logger.Warn("stop session vm on delete", slog.String("session_id", row.ID), slog.String("err", serr.Error()))
 		}
 	}
+	// Close any published-port forwarders before the rows vanish (the DB rows
+	// cascade-delete with the session; the in-memory listeners do not).
+	m.closeSessionPorts(ctx, row.ID)
 	if derr := m.snapshot.Delete(context.WithoutCancel(ctx), row.ForkID); derr != nil {
 		m.logger.Warn("delete session fork", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
 	}
@@ -373,6 +429,187 @@ func (m *Manager) DialSSH(ctx context.Context, ref string) (net.Conn, error) {
 	m.markBusy(row.ID)
 	id := row.ID
 	return &busyConn{Conn: conn, release: func() { m.unmarkBusy(id) }}, nil
+}
+
+// SetBroker wires the port broker used to open/close published-port
+// forwarders. Called once at startup before serving.
+func (m *Manager) SetBroker(b PortBroker) { m.broker = b }
+
+// DialPort opens a raw byte stream to a TCP port inside a session's VM for the
+// daemon's port broker to proxy a published-port connection through. A stopped
+// session is woken first (so a published port keeps serving across idle
+// hibernation), and the session is marked busy for the connection's lifetime so
+// the reaper does not stop it mid-traffic.
+func (m *Manager) DialPort(ctx context.Context, ref string, port uint16) (net.Conn, error) {
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if State(row.State) != StateRunning {
+		if _, serr := m.Start(ctx, row.ID); serr != nil {
+			return nil, fmt.Errorf("wake session for published port: %w", serr)
+		}
+	}
+	handle := m.getHandle(row.ID)
+	if handle == nil {
+		return nil, errs.Newf(errs.CategoryFailedPrecondition,
+			"session %q is not running", row.Name)
+	}
+	conn, err := handle.DialPort(ctx, port)
+	if err != nil {
+		return nil, fmt.Errorf("dial session port: %w", err)
+	}
+	m.touch(ctx, row.ID)
+	// The connection is in flight for its lifetime; keep the session busy (and so
+	// safe from idle auto-stop) until it closes.
+	m.markBusy(row.ID)
+	id := row.ID
+	return &busyConn{Conn: conn, release: func() { m.unmarkBusy(id) }}, nil
+}
+
+// Publish exposes a port the session serves, brokered by the daemon. It records
+// the port and (when a broker is wired) opens the host-side forwarder, returning
+// the published port with its assigned tunnel port.
+func (m *Manager) Publish(ctx context.Context, ref string, guestPort int, name string) (PublishedPort, error) {
+	if guestPort < 1 || guestPort > 65535 {
+		return PublishedPort{}, errs.New(errs.CategoryInvalidArgument, "guest port must be between 1 and 65535")
+	}
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return PublishedPort{}, err
+	}
+	if _, gerr := m.q.GetPublishedPortBySessionPort(ctx, sqliteq.GetPublishedPortBySessionPortParams{
+		SessionID: row.ID, GuestPort: int64(guestPort),
+	}); gerr == nil {
+		return PublishedPort{}, errs.Newf(errs.CategoryConflict,
+			"port %d is already published for session %q", guestPort, row.Name)
+	} else if !errors.Is(gerr, sql.ErrNoRows) {
+		return PublishedPort{}, fmt.Errorf("check published port: %w", gerr)
+	}
+	if strings.TrimSpace(name) == "" {
+		name = fmt.Sprintf("port-%d", guestPort)
+	}
+
+	id, err := typeid.WithPrefix(pubPortPrefix)
+	if err != nil {
+		return PublishedPort{}, fmt.Errorf("generate published port id: %w", err)
+	}
+	pp := PublishedPort{ID: id.String(), SessionID: row.ID, GuestPort: guestPort, Name: name}
+
+	// Open the forwarder first so it assigns the tunnel port we then persist. If
+	// the row insert fails we close it again.
+	if m.broker != nil {
+		tunnelPort, berr := m.broker.Open(pp)
+		if berr != nil {
+			return PublishedPort{}, errs.Newf(errs.CategoryFailedPrecondition,
+				"open port forwarder: %v", berr)
+		}
+		pp.TunnelPort = tunnelPort
+	}
+
+	created, err := m.q.CreatePublishedPort(ctx, sqliteq.CreatePublishedPortParams{
+		ID:         pp.ID,
+		SessionID:  pp.SessionID,
+		GuestPort:  int64(pp.GuestPort),
+		Name:       pp.Name,
+		TunnelPort: int64(pp.TunnelPort),
+		Public:     0,
+		Host:       nil,
+		CreatedAt:  time.Now().Unix(),
+	})
+	if err != nil {
+		if m.broker != nil {
+			m.broker.Close(pp.ID)
+		}
+		return PublishedPort{}, fmt.Errorf("record published port: %w", err)
+	}
+	return publishedFromRow(created), nil
+}
+
+// Unpublish stops forwarding a session's published port and forgets it.
+func (m *Manager) Unpublish(ctx context.Context, ref string, guestPort int) error {
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return err
+	}
+	pp, gerr := m.q.GetPublishedPortBySessionPort(ctx, sqliteq.GetPublishedPortBySessionPortParams{
+		SessionID: row.ID, GuestPort: int64(guestPort),
+	})
+	if errors.Is(gerr, sql.ErrNoRows) {
+		return errs.Newf(errs.CategoryNotFound, "port %d is not published for session %q", guestPort, row.Name)
+	}
+	if gerr != nil {
+		return fmt.Errorf("get published port: %w", gerr)
+	}
+	if _, derr := m.q.DeletePublishedPort(ctx, pp.ID); derr != nil {
+		return fmt.Errorf("delete published port: %w", derr)
+	}
+	if m.broker != nil {
+		m.broker.Close(pp.ID)
+	}
+	return nil
+}
+
+// ListPorts returns the session's published ports.
+func (m *Manager) ListPorts(ctx context.Context, ref string) ([]PublishedPort, error) {
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := m.q.ListPublishedPortsBySession(ctx, row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list published ports: %w", err)
+	}
+	out := make([]PublishedPort, len(rows))
+	for i, r := range rows {
+		out[i] = publishedFromRow(r)
+	}
+	return out, nil
+}
+
+// ReconcilePorts re-opens the host-side forwarders for every published port at
+// daemon boot, reusing each port's stored tunnel port. Best-effort: a port that
+// cannot be reopened (e.g. its tunnel port is taken) is logged, not fatal.
+func (m *Manager) ReconcilePorts(ctx context.Context) error {
+	if m.broker == nil {
+		return nil
+	}
+	rows, err := m.q.ListPublishedPorts(ctx)
+	if err != nil {
+		return fmt.Errorf("list published ports: %w", err)
+	}
+	for _, r := range rows {
+		pp := publishedFromRow(r)
+		if _, oerr := m.broker.Open(pp); oerr != nil {
+			m.logger.Warn("reopen published port",
+				slog.String("session_id", pp.SessionID),
+				slog.Int("guest_port", pp.GuestPort),
+				slog.String("err", oerr.Error()))
+		}
+	}
+	return nil
+}
+
+// closeSessionPorts closes the broker forwarders for a session's published
+// ports (used on delete, before the cascade removes the rows).
+func (m *Manager) closeSessionPorts(ctx context.Context, sessionID string) {
+	if m.broker == nil {
+		return
+	}
+	rows, err := m.q.ListPublishedPortsBySession(ctx, sessionID)
+	if err != nil {
+		m.logger.Warn("list published ports on delete", slog.String("session_id", sessionID), slog.String("err", err.Error()))
+		return
+	}
+	for _, r := range rows {
+		m.broker.Close(r.ID)
+	}
+}
+
+// startLock returns the per-session mutex serialising Start for that id.
+func (m *Manager) startLock(id string) *sync.Mutex {
+	v, _ := m.startLocks.LoadOrStore(id, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 // ReconcileOnBoot marks every "running" session as "stopped" at daemon start:
@@ -594,6 +831,23 @@ func sessionFromRow(r sqliteq.Session) Session {
 		LastUsedAt:   timePtrFromUnix(r.LastUsedAt),
 		DiskBytes:    forkBytes(r.ForkPath),
 		EgressPolicy: r.EgressPolicy,
+	}
+}
+
+func publishedFromRow(r sqliteq.PublishedPort) PublishedPort {
+	host := ""
+	if r.Host != nil {
+		host = *r.Host
+	}
+	return PublishedPort{
+		ID:         r.ID,
+		SessionID:  r.SessionID,
+		GuestPort:  int(r.GuestPort),
+		Name:       r.Name,
+		TunnelPort: int(r.TunnelPort),
+		Public:     r.Public != 0,
+		Host:       host,
+		CreatedAt:  time.Unix(r.CreatedAt, 0),
 	}
 }
 

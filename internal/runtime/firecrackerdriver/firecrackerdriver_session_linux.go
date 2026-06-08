@@ -342,6 +342,21 @@ func (s *fcSession) DialSSH(ctx context.Context) (net.Conn, error) {
 	return conn, nil
 }
 
+// DialPort opens a raw vsock connection to the guest's generic port-forward
+// relay and tells it which loopback port to splice to. The caller proxies a
+// connection (e.g. a published preview port) over it; the VM needs no NIC.
+func (s *fcSession) DialPort(ctx context.Context, port uint16) (net.Conn, error) {
+	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.PortForwardPort)
+	if err != nil {
+		return nil, fmt.Errorf("firecracker: connect session port forward: %w", err)
+	}
+	if err := guestproto.WriteDialPort(conn, port); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("firecracker: send port-forward header: %w", err)
+	}
+	return conn, nil
+}
+
 // Load returns the guest's 1-minute load average via a stat control request.
 func (s *fcSession) Load(ctx context.Context) (float64, error) {
 	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.ControlPort)

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"strconv"
 	"text/tabwriter"
 
 	"connectrpc.com/connect"
@@ -29,6 +31,9 @@ func sessionCmd() *cli.Command {
 			sessionShellCmd(),
 			sessionSSHCmd(),
 			sessionSSHProxyCmd(),
+			sessionPublishCmd(),
+			sessionUnpublishCmd(),
+			sessionPortsCmd(),
 		},
 	}
 }
@@ -200,7 +205,157 @@ func sessionExecCmd() *cli.Command {
 	}
 }
 
+func sessionPublishCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "publish",
+		Usage:     "expose a port the session serves, reachable by paired clients over the tunnel",
+		ArgsUsage: "<ref> <guest-port>",
+		Flags: []cli.Flag{
+			socketFlag(),
+			outputFlag(),
+			&cli.StringFlag{Name: "name", Usage: "label for the published port (default: port-<guest-port>)"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ref := cmd.Args().First()
+			portArg := cmd.Args().Get(1)
+			if ref == "" || portArg == "" {
+				return errors.New("usage: fletcher session publish <ref> <guest-port>")
+			}
+			guestPort, err := strconv.Atoi(portArg)
+			if err != nil || guestPort < 1 || guestPort > 65535 {
+				return fmt.Errorf("guest port must be a number between 1 and 65535, got %q", portArg)
+			}
+			client := newSessionsClient(cmd)
+			resp, err := client.PublishPort(ctx, connect.NewRequest(&fletcherv1.PublishPortRequest{
+				Ref:       ref,
+				GuestPort: uint32(guestPort),
+				Name:      cmd.String("name"),
+			}))
+			if err != nil {
+				return err
+			}
+			return renderPublishedPort(os.Stdout, cmd.String("output"), resp.Msg.GetPort(), tunnelHostHint(cmd))
+		},
+	}
+}
+
+func sessionUnpublishCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "unpublish",
+		Usage:     "stop forwarding a session's published port",
+		ArgsUsage: "<ref> <guest-port>",
+		Flags:     []cli.Flag{socketFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ref := cmd.Args().First()
+			portArg := cmd.Args().Get(1)
+			if ref == "" || portArg == "" {
+				return errors.New("usage: fletcher session unpublish <ref> <guest-port>")
+			}
+			guestPort, err := strconv.Atoi(portArg)
+			if err != nil || guestPort < 1 || guestPort > 65535 {
+				return fmt.Errorf("guest port must be a number between 1 and 65535, got %q", portArg)
+			}
+			client := newSessionsClient(cmd)
+			if _, err := client.UnpublishPort(ctx, connect.NewRequest(&fletcherv1.UnpublishPortRequest{
+				Ref:       ref,
+				GuestPort: uint32(guestPort),
+			})); err != nil {
+				return err
+			}
+			fmt.Printf("unpublished port %d for %s\n", guestPort, ref)
+			return nil
+		},
+	}
+}
+
+func sessionPortsCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "ports",
+		Usage:     "list a session's published ports",
+		ArgsUsage: "<ref>",
+		Flags:     []cli.Flag{socketFlag(), outputFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ref := cmd.Args().First()
+			if ref == "" {
+				return errors.New("session ref (id or name) is required")
+			}
+			client := newSessionsClient(cmd)
+			resp, err := client.ListPorts(ctx, connect.NewRequest(&fletcherv1.ListPortsRequest{Ref: ref}))
+			if err != nil {
+				return err
+			}
+			if cmd.String("output") == "json" {
+				return writeProtoJSON(os.Stdout, resp.Msg)
+			}
+			return writePublishedPortsTable(os.Stdout, resp.Msg.GetPorts(), tunnelHostHint(cmd))
+		},
+	}
+}
+
+// tunnelHostHint is the host a paired client uses to reach a published port: the
+// remote daemon's host when targeting one, else empty (the local box reaches it
+// at the daemon's own tunnel IP).
+func tunnelHostHint(cmd *cli.Command) string {
+	remote, _ := resolveRemote(cmd)
+	if remote == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		return host
+	}
+	return remote
+}
+
 // --- output rendering ---
+
+func renderPublishedPort(w io.Writer, format string, p *fletcherv1.PublishedPort, tunnelHost string) error {
+	if format == "json" {
+		return writeProtoJSON(w, p)
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "id:\t%s\n", p.GetId())
+	fmt.Fprintf(tw, "name:\t%s\n", p.GetName())
+	fmt.Fprintf(tw, "guest_port:\t%d\n", p.GetGuestPort())
+	fmt.Fprintf(tw, "tunnel_port:\t%d\n", p.GetTunnelPort())
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "\n"+publishedReach(p, tunnelHost))
+	return nil
+}
+
+// publishedReach is the human hint for where to reach a published port over the
+// tunnel.
+func publishedReach(p *fletcherv1.PublishedPort, tunnelHost string) string {
+	if p.GetTunnelPort() == 0 {
+		return gray("not reachable yet: the WireGuard tunnel is not up (no public endpoint)")
+	}
+	if tunnelHost != "" {
+		return fmt.Sprintf("reachable from a paired client at %s:%d", tunnelHost, p.GetTunnelPort())
+	}
+	return fmt.Sprintf("reachable from a paired client at the daemon's tunnel IP, port %d", p.GetTunnelPort())
+}
+
+func writePublishedPortsTable(w io.Writer, ports []*fletcherv1.PublishedPort, tunnelHost string) error {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tGUEST PORT\tTUNNEL ADDRESS")
+	for _, p := range ports {
+		addr := fmt.Sprintf("%d", p.GetTunnelPort())
+		if p.GetTunnelPort() == 0 {
+			addr = "-"
+		} else if tunnelHost != "" {
+			addr = fmt.Sprintf("%s:%d", tunnelHost, p.GetTunnelPort())
+		}
+		fmt.Fprintf(tw, "%s\t%d\t%s\n", p.GetName(), p.GetGuestPort(), addr)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "\ntotal: %d\n", len(ports))
+	return nil
+}
+
+// --- session output rendering ---
 
 func renderSession(w io.Writer, format string, s *fletcherv1.Session) error {
 	if format == "json" {

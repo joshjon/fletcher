@@ -46,6 +46,17 @@ type PendingApproval struct {
 	ExpiresAt      int64
 }
 
+type PublishedPort struct {
+	ID         string
+	SessionID  string
+	GuestPort  int64
+	Name       string
+	TunnelPort int64
+	Public     int64
+	Host       *string
+	CreatedAt  int64
+}
+
 type Secret struct {
 	Name       string
 	Ciphertext []byte

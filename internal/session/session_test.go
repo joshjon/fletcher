@@ -98,6 +98,11 @@ func (h *fakeHandle) DialSSH(_ context.Context) (net.Conn, error) {
 	return c, nil
 }
 
+func (h *fakeHandle) DialPort(_ context.Context, _ uint16) (net.Conn, error) {
+	c, _ := net.Pipe()
+	return c, nil
+}
+
 func (h *fakeHandle) Load(_ context.Context) (float64, error) {
 	return h.load, nil
 }
@@ -105,6 +110,33 @@ func (h *fakeHandle) Load(_ context.Context) (float64, error) {
 func (h *fakeHandle) Stop(_ context.Context) error {
 	h.stopped++
 	return nil
+}
+
+// fakeBroker records the published-port forwarders the manager opens and closes,
+// assigning a fake tunnel port per open.
+type fakeBroker struct {
+	mu     sync.Mutex
+	opened map[string]int // published-port id -> tunnel port
+	closed []string
+	next   int
+}
+
+func newFakeBroker() *fakeBroker { return &fakeBroker{opened: map[string]int{}} }
+
+func (b *fakeBroker) Open(pp session.PublishedPort) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.next++
+	port := 40000 + b.next
+	b.opened[pp.ID] = port
+	return port, nil
+}
+
+func (b *fakeBroker) Close(id string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.closed = append(b.closed, id)
+	delete(b.opened, id)
 }
 
 func newManager(t *testing.T, rt runtime.SessionRuntime, snap snapshot.Driver) *session.Manager {
@@ -300,6 +332,87 @@ func TestReapIdleDisabledIsNoop(t *testing.T) {
 	n, err := mgr.ReapIdle(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
+}
+
+func TestPublishOpensListsAndUnpublishes(t *testing.T) {
+	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
+	broker := newFakeBroker()
+	mgr.SetBroker(broker)
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	require.NoError(t, err)
+
+	pp, err := mgr.Publish(ctx, "dev", 3000, "")
+	require.NoError(t, err)
+	require.Equal(t, "port-3000", pp.Name, "name defaults to port-<n>")
+	require.NotZero(t, pp.TunnelPort, "broker assigns a tunnel port")
+	require.Contains(t, broker.opened, pp.ID, "broker opened the forwarder")
+
+	ports, err := mgr.ListPorts(ctx, "dev")
+	require.NoError(t, err)
+	require.Len(t, ports, 1)
+	require.Equal(t, 3000, ports[0].GuestPort)
+
+	// Re-publishing the same port conflicts.
+	_, err = mgr.Publish(ctx, "dev", 3000, "")
+	require.Error(t, err)
+	require.Equal(t, errs.CategoryConflict, errs.CategoryOf(err))
+
+	require.NoError(t, mgr.Unpublish(ctx, "dev", 3000))
+	require.Contains(t, broker.closed, pp.ID, "broker closed the forwarder")
+	ports, err = mgr.ListPorts(ctx, "dev")
+	require.NoError(t, err)
+	require.Empty(t, ports)
+}
+
+func TestUnpublishMissingPortNotFound(t *testing.T) {
+	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
+	mgr.SetBroker(newFakeBroker())
+	ctx := context.Background()
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	require.NoError(t, err)
+
+	err = mgr.Unpublish(ctx, "dev", 3000)
+	require.Error(t, err)
+	require.Equal(t, errs.CategoryNotFound, errs.CategoryOf(err))
+}
+
+func TestDialPortWakesStoppedSession(t *testing.T) {
+	rt := &fakeRuntime{}
+	mgr := newManager(t, rt, newFakeSnapshot())
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	require.NoError(t, err)
+	_, err = mgr.Stop(ctx, "dev")
+	require.NoError(t, err)
+
+	conn, err := mgr.DialPort(ctx, "dev", 3000)
+	require.NoError(t, err)
+	require.NotNil(t, conn)
+	_ = conn.Close()
+
+	got, err := mgr.Get(ctx, "dev")
+	require.NoError(t, err)
+	require.Equal(t, session.StateRunning, got.State, "an inbound connection wakes the session")
+	require.Len(t, rt.started, 2, "create boot + wake boot")
+}
+
+func TestDeleteClosesPublishedPorts(t *testing.T) {
+	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
+	broker := newFakeBroker()
+	mgr.SetBroker(broker)
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	require.NoError(t, err)
+	pp, err := mgr.Publish(ctx, "dev", 8080, "web")
+	require.NoError(t, err)
+
+	_, err = mgr.Delete(ctx, "dev")
+	require.NoError(t, err)
+	require.Contains(t, broker.closed, pp.ID, "delete closes the session's port forwarders")
 }
 
 func TestSessionsRequireSessionRuntime(t *testing.T) {

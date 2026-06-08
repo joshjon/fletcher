@@ -245,6 +245,7 @@ type services struct {
 	cfg             Config
 	supervisor      *job.Supervisor
 	sessions        *session.Manager
+	portBroker      *session.Broker
 	connectSrv      *http.Server
 	gatewaySrv      *http.Server
 	mcpSrv          *http.Server
@@ -417,6 +418,24 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		return nil, fmt.Errorf("reconcile sessions: %w", err)
 	}
 
+	// Published-port broker: forwards a session's published port to the service
+	// inside its VM, dialing in via the session manager over vsock so the VM
+	// stays unroutable (the preview-proxy pattern, for an arbitrary port). It
+	// binds the WireGuard tunnel IP, so published ports are reachable by paired
+	// clients over the tunnel; it is inert until the tunnel is up. Phase 2 adds
+	// the public frontend on top.
+	brokerTunnelIP := ""
+	if netSetup.Tunnel != nil {
+		if host, _, herr := net.SplitHostPort(apiEndpoint); herr == nil {
+			brokerTunnelIP = host
+		}
+	}
+	portBroker := session.NewBroker(ctx, brokerTunnelIP, sessionMgr.DialPort, logger)
+	sessionMgr.SetBroker(portBroker)
+	if err := sessionMgr.ReconcilePorts(ctx); err != nil {
+		return nil, fmt.Errorf("reconcile published ports: %w", err)
+	}
+
 	connectDeps := connectDeps{
 		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg)),
 		sessions:         sessionMgr,
@@ -444,6 +463,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		cfg:             cfg,
 		supervisor:      supervisor,
 		sessions:        sessionMgr,
+		portBroker:      portBroker,
 		connectSrv:      connectSrv,
 		gatewaySrv:      newGatewayHTTPServer(gw),
 		mcpSrv:          newMCPHTTPServer(mcpServer),
@@ -555,6 +575,9 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	if s.tunnel != nil {
 		g.Add(tunnelActor(ctx, logger, s.tunnel))
 	}
+	if s.portBroker != nil {
+		g.Add(portBrokerActor(s.portBroker))
+	}
 	g.Add(signalActor(ctx))
 	return g.Run()
 }
@@ -586,6 +609,19 @@ func sessionReaperActor(ctx context.Context, logger *slog.Logger, mgr *session.M
 			}
 		}, func(error) {
 			cancel()
+		}
+}
+
+// portBrokerActor keeps the published-port forwarders alive until shutdown,
+// then closes every listener so the daemon does not leave them bound.
+func portBrokerActor(b *session.Broker) (func() error, func(error)) {
+	done := make(chan struct{})
+	return func() error {
+			<-done
+			return nil
+		}, func(error) {
+			b.CloseAll()
+			close(done)
 		}
 }
 

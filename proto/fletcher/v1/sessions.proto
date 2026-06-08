@@ -36,6 +36,14 @@ service SessionService {
   // message must carry a ProxyOpen; all later messages (both directions) are
   // opaque bytes. Full-duplex: requires HTTP/2.
   rpc ProxySession(stream ProxySessionRequest) returns (stream ProxySessionResponse) {}
+  // PublishPort exposes a port the session serves, brokered by the daemon so
+  // the VM stays unroutable. The returned port is reachable over the tunnel at
+  // its tunnel_port.
+  rpc PublishPort(PublishPortRequest) returns (PublishPortResponse) {}
+  // UnpublishPort stops forwarding a session's published port.
+  rpc UnpublishPort(UnpublishPortRequest) returns (UnpublishPortResponse) {}
+  // ListPorts returns a session's published ports.
+  rpc ListPorts(ListPortsRequest) returns (ListPortsResponse) {}
 }
 
 enum SessionState {
@@ -175,4 +183,53 @@ message ProxyOpen {
 message ProxySessionResponse {
   // data is opaque bytes from the session's SSH server back to the client.
   bytes data = 1;
+}
+
+// PublishedPort is a port a session serves, brokered by the daemon (the
+// preview-proxy pattern, for an arbitrary port). It is reachable over the
+// WireGuard tunnel at tunnel_port; public/host drive public exposure.
+message PublishedPort {
+  string id = 1;
+  string session_id = 2;
+  // guest_port is the TCP port the service listens on inside the VM.
+  uint32 guest_port = 3;
+  // name is a human label (defaults to "port-<guest_port>").
+  string name = 4;
+  // tunnel_port is the host-side TCP port (on the tunnel IP) the daemon
+  // forwards to guest_port; 0 when no tunnel is up to bind it.
+  uint32 tunnel_port = 5;
+  // public is whether the port is exposed on the public listener (Phase 2).
+  bool public = 6;
+  // host is the public hostname routed to this port when public (Phase 2).
+  string host = 7;
+  // Unix epoch seconds.
+  int64 created_at = 8;
+}
+
+message PublishPortRequest {
+  // ref is a session ID or name.
+  string ref = 1;
+  // guest_port is the TCP port the service listens on inside the VM.
+  uint32 guest_port = 2;
+  // name is an optional label; empty defaults to "port-<guest_port>".
+  string name = 3;
+}
+
+message PublishPortResponse {
+  PublishedPort port = 1;
+}
+
+message UnpublishPortRequest {
+  string ref = 1;
+  uint32 guest_port = 2;
+}
+
+message UnpublishPortResponse {}
+
+message ListPortsRequest {
+  string ref = 1;
+}
+
+message ListPortsResponse {
+  repeated PublishedPort ports = 1;
 }

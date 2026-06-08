@@ -60,6 +60,15 @@ const (
 	// SessionServiceProxySessionProcedure is the fully-qualified name of the SessionService's
 	// ProxySession RPC.
 	SessionServiceProxySessionProcedure = "/fletcher.v1.SessionService/ProxySession"
+	// SessionServicePublishPortProcedure is the fully-qualified name of the SessionService's
+	// PublishPort RPC.
+	SessionServicePublishPortProcedure = "/fletcher.v1.SessionService/PublishPort"
+	// SessionServiceUnpublishPortProcedure is the fully-qualified name of the SessionService's
+	// UnpublishPort RPC.
+	SessionServiceUnpublishPortProcedure = "/fletcher.v1.SessionService/UnpublishPort"
+	// SessionServiceListPortsProcedure is the fully-qualified name of the SessionService's ListPorts
+	// RPC.
+	SessionServiceListPortsProcedure = "/fletcher.v1.SessionService/ListPorts"
 )
 
 // SessionServiceClient is a client for the fletcher.v1.SessionService service.
@@ -91,6 +100,14 @@ type SessionServiceClient interface {
 	// message must carry a ProxyOpen; all later messages (both directions) are
 	// opaque bytes. Full-duplex: requires HTTP/2.
 	ProxySession(context.Context) *connect.BidiStreamForClient[v1.ProxySessionRequest, v1.ProxySessionResponse]
+	// PublishPort exposes a port the session serves, brokered by the daemon so
+	// the VM stays unroutable. The returned port is reachable over the tunnel at
+	// its tunnel_port.
+	PublishPort(context.Context, *connect.Request[v1.PublishPortRequest]) (*connect.Response[v1.PublishPortResponse], error)
+	// UnpublishPort stops forwarding a session's published port.
+	UnpublishPort(context.Context, *connect.Request[v1.UnpublishPortRequest]) (*connect.Response[v1.UnpublishPortResponse], error)
+	// ListPorts returns a session's published ports.
+	ListPorts(context.Context, *connect.Request[v1.ListPortsRequest]) (*connect.Response[v1.ListPortsResponse], error)
 }
 
 // NewSessionServiceClient constructs a client for the fletcher.v1.SessionService service. By
@@ -158,6 +175,24 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("ProxySession")),
 			connect.WithClientOptions(opts...),
 		),
+		publishPort: connect.NewClient[v1.PublishPortRequest, v1.PublishPortResponse](
+			httpClient,
+			baseURL+SessionServicePublishPortProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("PublishPort")),
+			connect.WithClientOptions(opts...),
+		),
+		unpublishPort: connect.NewClient[v1.UnpublishPortRequest, v1.UnpublishPortResponse](
+			httpClient,
+			baseURL+SessionServiceUnpublishPortProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("UnpublishPort")),
+			connect.WithClientOptions(opts...),
+		),
+		listPorts: connect.NewClient[v1.ListPortsRequest, v1.ListPortsResponse](
+			httpClient,
+			baseURL+SessionServiceListPortsProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("ListPorts")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -172,6 +207,9 @@ type sessionServiceClient struct {
 	execSession   *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
 	shellSession  *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
 	proxySession  *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
+	publishPort   *connect.Client[v1.PublishPortRequest, v1.PublishPortResponse]
+	unpublishPort *connect.Client[v1.UnpublishPortRequest, v1.UnpublishPortResponse]
+	listPorts     *connect.Client[v1.ListPortsRequest, v1.ListPortsResponse]
 }
 
 // CreateSession calls fletcher.v1.SessionService.CreateSession.
@@ -219,6 +257,21 @@ func (c *sessionServiceClient) ProxySession(ctx context.Context) *connect.BidiSt
 	return c.proxySession.CallBidiStream(ctx)
 }
 
+// PublishPort calls fletcher.v1.SessionService.PublishPort.
+func (c *sessionServiceClient) PublishPort(ctx context.Context, req *connect.Request[v1.PublishPortRequest]) (*connect.Response[v1.PublishPortResponse], error) {
+	return c.publishPort.CallUnary(ctx, req)
+}
+
+// UnpublishPort calls fletcher.v1.SessionService.UnpublishPort.
+func (c *sessionServiceClient) UnpublishPort(ctx context.Context, req *connect.Request[v1.UnpublishPortRequest]) (*connect.Response[v1.UnpublishPortResponse], error) {
+	return c.unpublishPort.CallUnary(ctx, req)
+}
+
+// ListPorts calls fletcher.v1.SessionService.ListPorts.
+func (c *sessionServiceClient) ListPorts(ctx context.Context, req *connect.Request[v1.ListPortsRequest]) (*connect.Response[v1.ListPortsResponse], error) {
+	return c.listPorts.CallUnary(ctx, req)
+}
+
 // SessionServiceHandler is an implementation of the fletcher.v1.SessionService service.
 type SessionServiceHandler interface {
 	// CreateSession provisions a session's persistent fork and boots its VM. The
@@ -248,6 +301,14 @@ type SessionServiceHandler interface {
 	// message must carry a ProxyOpen; all later messages (both directions) are
 	// opaque bytes. Full-duplex: requires HTTP/2.
 	ProxySession(context.Context, *connect.BidiStream[v1.ProxySessionRequest, v1.ProxySessionResponse]) error
+	// PublishPort exposes a port the session serves, brokered by the daemon so
+	// the VM stays unroutable. The returned port is reachable over the tunnel at
+	// its tunnel_port.
+	PublishPort(context.Context, *connect.Request[v1.PublishPortRequest]) (*connect.Response[v1.PublishPortResponse], error)
+	// UnpublishPort stops forwarding a session's published port.
+	UnpublishPort(context.Context, *connect.Request[v1.UnpublishPortRequest]) (*connect.Response[v1.UnpublishPortResponse], error)
+	// ListPorts returns a session's published ports.
+	ListPorts(context.Context, *connect.Request[v1.ListPortsRequest]) (*connect.Response[v1.ListPortsResponse], error)
 }
 
 // NewSessionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -311,6 +372,24 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("ProxySession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServicePublishPortHandler := connect.NewUnaryHandler(
+		SessionServicePublishPortProcedure,
+		svc.PublishPort,
+		connect.WithSchema(sessionServiceMethods.ByName("PublishPort")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceUnpublishPortHandler := connect.NewUnaryHandler(
+		SessionServiceUnpublishPortProcedure,
+		svc.UnpublishPort,
+		connect.WithSchema(sessionServiceMethods.ByName("UnpublishPort")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceListPortsHandler := connect.NewUnaryHandler(
+		SessionServiceListPortsProcedure,
+		svc.ListPorts,
+		connect.WithSchema(sessionServiceMethods.ByName("ListPorts")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
@@ -331,6 +410,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceShellSessionHandler.ServeHTTP(w, r)
 		case SessionServiceProxySessionProcedure:
 			sessionServiceProxySessionHandler.ServeHTTP(w, r)
+		case SessionServicePublishPortProcedure:
+			sessionServicePublishPortHandler.ServeHTTP(w, r)
+		case SessionServiceUnpublishPortProcedure:
+			sessionServiceUnpublishPortHandler.ServeHTTP(w, r)
+		case SessionServiceListPortsProcedure:
+			sessionServiceListPortsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -374,4 +459,16 @@ func (UnimplementedSessionServiceHandler) ShellSession(context.Context, *connect
 
 func (UnimplementedSessionServiceHandler) ProxySession(context.Context, *connect.BidiStream[v1.ProxySessionRequest, v1.ProxySessionResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.ProxySession is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) PublishPort(context.Context, *connect.Request[v1.PublishPortRequest]) (*connect.Response[v1.PublishPortResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.PublishPort is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) UnpublishPort(context.Context, *connect.Request[v1.UnpublishPortRequest]) (*connect.Response[v1.UnpublishPortResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.UnpublishPort is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) ListPorts(context.Context, *connect.Request[v1.ListPortsRequest]) (*connect.Response[v1.ListPortsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.ListPorts is not implemented"))
 }

@@ -670,6 +670,109 @@ the iOS design has stabilised. The **web client** (the gRPC-Web surface already
 exists). Multi-account / multi-box switching (one box, one user is the thesis;
 DESIGN.md out-of-scope).
 
+### Milestone 8 - Published ports + public web sessions - IN PROGRESS
+
+**Goal.** Let a durable session expose a port it is serving - first to the
+operator's own paired devices over the tunnel, then (opt-in) to the public
+internet under a domain the operator controls. The motivating use case: a
+developer hosts a small web app in a session for friends or family to reach in a
+browser, on a custom domain, with a real TLS cert - all served from the
+operator's own box, over their own connection, with the app sandboxed in a
+no-NIC microVM.
+
+**On-thesis check (recorded so drift is visible).**
+
+- *Developer hosts nothing.* The operator's box serves the traffic over the
+  operator's home connection, public IP, and domain (registered at the operator's
+  own registrar). Fletcher routes nothing through any service we run. The
+  off-thesis version of this idea - tunnelling through ngrok / Cloudflare Tunnel -
+  is explicitly not built; an operator may BYO such a tunnel, but it is not a
+  dependency.
+- *The daemon stays the gate (DESIGN §5).* Public traffic hits a daemon listener
+  and is **reverse-proxied** into the VM over the existing vsock forward. The VM
+  keeps **no NIC**; nobody gets a route into VM-land, only a brokered response.
+  This is the preview-URL pattern (DESIGN §5, "preview URLs are the daemon
+  reverse-proxying into a VM") widened from "authenticated tunnel peer" to
+  "anyone", and it realises the M6 "Preview ports" sketch that was designed but
+  never built.
+- *One primitive, many hats (DESIGN §4).* A published port is a property of a
+  `long_running` session whose **sink is a public URL** - §4 already lists a
+  preview URL as a valid sink. No fourth trigger, no new subsystem.
+- *Blast radius is a feature, not a worry.* A public web app that is compromised
+  is trapped in a no-NIC microVM with its egress policy (B3) still in force -
+  instant rollback, no route to the LAN. This is a *better* story than exposing a
+  port on a normal homelab box, and it leans on the structural moat (DESIGN §8).
+
+**The one real new surface.** Today the only thing the box exposes publicly is the
+WireGuard UDP port, which is silent (drops unauthenticated packets, no response).
+Phase 2 adds a public HTTP(S) listener that *responds to anyone* - genuine new
+attack surface. Mitigations baked in: the public listener serves **only published
+session ports**, never the daemon API / gateway / MCP / egress sockets; it is
+**off by default** (a global enable setting plus per-port opt-in); the LAN/metadata
+guard stays on; and every public hostname served is audit-logged.
+
+**Decisions (settled with the operator before building).**
+
+- *Sequencing:* Layer A (tunnel-reachable preview ports) ships and is verified
+  first, as Phase 1, with zero new public surface; the public listener + TLS +
+  UPnP land on top as Phase 2.
+- *Routing:* **explicit hostname -> session:port** (e.g.
+  `session publish <ref> 3000 --public --host app.example.com`), not wildcard
+  subdomains. This keeps TLS on HTTP-01 / TLS-ALPN-01 (the operator just points a
+  DNS A record at the box) and keeps a DNS-provider API token *out* of the daemon -
+  the more on-thesis posture. Wildcard subdomains (needing DNS-01 + a registrar
+  token) are a deferred follow-up if a usage signal asks for them.
+- *Verification:* the operator has a real public IP (not CGNAT) and a controlled
+  domain, so Phase 2 is verified end to end this round (forward, ACME cert,
+  browser from outside the network).
+
+**Substrate already in place (confirmed 2026-06-08).** Egress policy B3
+(`none`/`allowlist`/`open`, fully plumbed); `portmap.Map()` already maps arbitrary
+**TCP** ports (only WireGuard UDP uses it today); public-endpoint resolution; the
+idle reaper's busy-counter; and the `dialGuest(vsock, port)` primitive. Net-new:
+a generic "dial guest loopback port N" (today `DialSSH` hardcodes the SSH vsock
+port - parameterising it is a small host + guest change), the published-ports data
+model, the reverse-proxy/forward broker, `certmagic` for TLS (reserved in
+DESIGN §9, not yet imported), and **wake-on-connect** (the SSH path does *not*
+auto-wake a stopped session today - this is built fresh and also improves SSH).
+
+**Phases.**
+
+- **Phase 1 - preview ports over the tunnel (Layer A) - CODE COMPLETE (awaiting
+  hardware verification).** Generic guest port dial: a dedicated guest vsock relay
+  (`guestproto.PortForwardPort`, the SSH relay generalised - the host writes a
+  2-byte target-port header, the guest splices to that loopback port) +
+  `SessionHandle.DialPort` + `Manager.DialPort` (busy-marked for the connection
+  lifetime, wakes a stopped session first via a now per-session-serialised
+  `Start`). A `published_ports` table (migration 0012) + sqlc and `session
+  publish` / `unpublish` / `ports` verbs. A `session.Broker` that, per published
+  port, runs a raw TCP forwarder on the tunnel IP splicing to the guest port via
+  `DialPort`, re-opened on daemon boot (`ReconcilePorts`) and closed on shutdown.
+  Unit-tested (publish lifecycle, dup conflict, wake-on-connect, delete-closes-
+  ports); `make check` green. *Drive-by fix:* the darwin firecracker stub had
+  drifted (missing the egress B2 `Forward.Egress` / `Options.EgressOpenSocket`
+  fields), silently breaking `make cross-check`; restored. *Still to verify on
+  hardware (operator):* a paired client reaches a dev server in a real microVM
+  over the tunnel, and an inbound connection wakes a hibernated session without
+  the reaper stopping it mid-traffic.
+- **Phase 2 - public exposure (Layer B, opt-in).** A per-published-port `public`
+  flag + `--host`. A single public listener (443 + 80 for ACME and an HTTPS
+  redirect) bound to the real interface, UPnP-forwarded via `portmap` (TCP), gated
+  by a global `public_web` enable (off by default). `certmagic` TLS via
+  HTTP-01 / TLS-ALPN-01, on-demand per published hostname. Host/SNI routing to the
+  right published port's broker. The public listener serves only published ports;
+  the daemon's own surfaces stay off it. Every served hostname audit-logged.
+  systemd unit gains `CAP_NET_BIND_SERVICE` (or relies on a UPnP external 443 ->
+  internal high port). *Verify:* a browser outside the network reaches
+  `https://app.example.com` -> the session's web server with a valid cert.
+
+**Limitations recorded up front.** CGNAT makes public inbound impossible and
+cannot be fixed without hosting a relay (off-thesis) - documented, not hidden,
+same population that can already use the WireGuard endpoint. A dynamic public IP
+makes **DDNS** load-bearing for a stable A record; DDNS is a current backlog gap,
+so until it lands the operator re-points DNS on IP change. Phase 2 promotes DDNS
+from the backlog as a fast-follow if the dynamic-IP case bites.
+
 ## Toward v1 - hardening (in progress)
 
 With M1-M6 done, the daemon is feature-complete on the thesis (ephemeral jobs +

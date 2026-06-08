@@ -70,6 +70,7 @@ func serve() {
 	// usable via exec/shell if sshd cannot start.
 	startSSHD()
 	go serveSSHRelay()
+	go servePortRelay()
 
 	ln, err := vsock.Listen(guestproto.ControlPort, nil)
 	if err != nil {
@@ -135,6 +136,53 @@ func relayToSSHD(conn net.Conn) {
 	for range 50 {
 		c, err := net.Dial("tcp", "127.0.0.1:22") //nolint:noctx // lifetime is the spliced connection
 		if err == nil {
+			upstream = c
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if upstream == nil {
+		_ = conn.Close()
+		return
+	}
+	splice(conn, upstream)
+}
+
+// servePortRelay accepts the daemon's vsock connections on PortForwardPort,
+// reads the 2-byte target loopback port, and splices each to that port inside
+// the VM. It is the generic form of serveSSHRelay (which is fixed to sshd):
+// the daemon uses it to broker a published session port (a preview port)
+// without the VM having any network route.
+func servePortRelay() {
+	ln, err := vsock.Listen(guestproto.PortForwardPort, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: listen port relay: %v\n", err)
+		return
+	}
+	defer func() { _ = ln.Close() }()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go relayToPort(conn)
+	}
+}
+
+// relayToPort reads the target port header from conn, dials that loopback port
+// inside the VM, and splices the two. The published service may still be coming
+// up just after a wake, so it retries the dial briefly (as relayToSSHD does).
+func relayToPort(conn net.Conn) {
+	port, err := guestproto.ReadDialPort(conn)
+	if err != nil {
+		_ = conn.Close()
+		return
+	}
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	var upstream net.Conn
+	for range 50 {
+		c, derr := net.Dial("tcp", addr) //nolint:noctx // lifetime is the spliced connection
+		if derr == nil {
 			upstream = c
 			break
 		}

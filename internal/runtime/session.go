@@ -53,6 +53,12 @@ type SessionHandle interface {
 	// vsock). The caller proxies an SSH connection through it; the VM needs no
 	// network route. The caller closes the returned conn.
 	DialSSH(ctx context.Context) (net.Conn, error)
+	// DialPort opens a raw byte stream to a loopback TCP port inside the VM
+	// (relayed over vsock, like DialSSH but for an arbitrary port). The caller
+	// proxies a connection through it to reach a service the session is serving
+	// - a published/preview port - while the VM stays unroutable. The caller
+	// closes the returned conn.
+	DialPort(ctx context.Context, port uint16) (net.Conn, error)
 	// Load returns the guest's 1-minute load average, a proxy for in-guest work
 	// in flight. Used to avoid auto-stopping a session whose task is running.
 	Load(ctx context.Context) (float64, error)

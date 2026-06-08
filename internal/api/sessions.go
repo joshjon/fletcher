@@ -27,6 +27,9 @@ type SessionsBackend interface {
 	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
 	Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error)
 	DialSSH(ctx context.Context, ref string) (net.Conn, error)
+	Publish(ctx context.Context, ref string, guestPort int, name string) (session.PublishedPort, error)
+	Unpublish(ctx context.Context, ref string, guestPort int) error
+	ListPorts(ctx context.Context, ref string) ([]session.PublishedPort, error)
 }
 
 // SessionsService implements fletcherv1connect.SessionServiceHandler.
@@ -230,6 +233,49 @@ func proxyClientToConn(stream *connect.BidiStream[fletcherv1.ProxySessionRequest
 				return
 			}
 		}
+	}
+}
+
+// PublishPort exposes a port the session serves, brokered by the daemon.
+func (s *SessionsService) PublishPort(ctx context.Context, req *connect.Request[fletcherv1.PublishPortRequest]) (*connect.Response[fletcherv1.PublishPortResponse], error) {
+	pp, err := s.backend.Publish(ctx, req.Msg.GetRef(), int(req.Msg.GetGuestPort()), req.Msg.GetName())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.PublishPortResponse{Port: publishedToProto(pp)}), nil
+}
+
+// UnpublishPort stops forwarding a session's published port.
+func (s *SessionsService) UnpublishPort(ctx context.Context, req *connect.Request[fletcherv1.UnpublishPortRequest]) (*connect.Response[fletcherv1.UnpublishPortResponse], error) {
+	if err := s.backend.Unpublish(ctx, req.Msg.GetRef(), int(req.Msg.GetGuestPort())); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.UnpublishPortResponse{}), nil
+}
+
+// ListPorts returns a session's published ports.
+func (s *SessionsService) ListPorts(ctx context.Context, req *connect.Request[fletcherv1.ListPortsRequest]) (*connect.Response[fletcherv1.ListPortsResponse], error) {
+	ports, err := s.backend.ListPorts(ctx, req.Msg.GetRef())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*fletcherv1.PublishedPort, len(ports))
+	for i, pp := range ports {
+		out[i] = publishedToProto(pp)
+	}
+	return connect.NewResponse(&fletcherv1.ListPortsResponse{Ports: out}), nil
+}
+
+func publishedToProto(p session.PublishedPort) *fletcherv1.PublishedPort {
+	return &fletcherv1.PublishedPort{
+		Id:         p.ID,
+		SessionId:  p.SessionID,
+		GuestPort:  uint32(p.GuestPort), //nolint:gosec // guest port validated 1..65535
+		Name:       p.Name,
+		TunnelPort: uint32(p.TunnelPort), //nolint:gosec // tunnel port is an OS-assigned 1..65535 value
+		Public:     p.Public,
+		Host:       p.Host,
+		CreatedAt:  p.CreatedAt.Unix(),
 	}
 }
 
