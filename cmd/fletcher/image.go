@@ -122,6 +122,17 @@ does not carry FLETCHER_BTRFS_ROOT through by default):
 	}
 }
 
+// chownImagesDir makes the templates directory daemon-owned so the daemon can
+// also write templates here itself - i.e. server-side `fletcher deploy
+// <registry-ref>` / `image pull`, not just this root CLI import. Best-effort:
+// the local import still works without it, only remote deploy would later fail.
+func chownImagesDir(ctx context.Context, imagesDir string) {
+	chown := exec.CommandContext(ctx, "chown", daemonUser+":"+daemonUser, imagesDir) //nolint:gosec // fixed args + the operator's snapshot path
+	if err := chown.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not chown %s to %s (server-side deploy may fail until you fix it): %v\n", imagesDir, daemonUser, err)
+	}
+}
+
 func imagePullCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "pull",
@@ -354,6 +365,7 @@ func importImage(ctx context.Context, root, ref, name string, force bool) error 
 	if err := os.MkdirAll(imagesDir, 0o755); err != nil { //nolint:gosec // see comment: cross-user traversal of non-secret base images
 		return fmt.Errorf("create images dir: %w", err)
 	}
+	chownImagesDir(ctx, imagesDir)
 	target := filepath.Join(imagesDir, name)
 	if _, err := os.Stat(target); err == nil {
 		if !force {
@@ -403,6 +415,7 @@ func importImageExt4(ctx context.Context, root, ref, name string, force bool) er
 	if err := os.MkdirAll(imagesDir, 0o755); err != nil { //nolint:gosec // cross-user traversal of non-secret base images
 		return fmt.Errorf("create images dir: %w", err)
 	}
+	chownImagesDir(ctx, imagesDir)
 	target := filepath.Join(imagesDir, name+".ext4")
 	if _, err := os.Stat(target); err == nil {
 		if !force {
