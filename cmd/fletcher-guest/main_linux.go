@@ -15,12 +15,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/creack/pty"
@@ -246,10 +249,12 @@ func loadAvg1() float64 {
 // reading KindStdin/KindResize frames from the host. It returns when the shell
 // exits (user typed exit) or the host closes the connection (client detached).
 func runShell(conn net.Conn, spec guestproto.ShellSpec) {
+	lu := lookupLoginUser()
 	shell := loginShell()
 	cmd := exec.CommandContext(context.Background(), shell, "-l") //nolint:gosec // launching a shell is the entire purpose
 	cmd.Dir = shellDir()
-	cmd.Env = shellEnv(spec)
+	cmd.Env = shellEnv(spec, lu)
+	applyLoginUser(cmd, lu) // before pty.Start, which augments SysProcAttr
 
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
@@ -323,10 +328,52 @@ func shellDir() string {
 	return "/"
 }
 
+// loginUserName is the unprivileged account agent commands run as, so session
+// shell/exec (and jobs) match brokered SSH - all run as the image's login user,
+// sharing one home and agent config - instead of root.
+const loginUserName = "fletcher"
+
+// loginUser is the resolved login account; ok is false on an image without it
+// (then commands stay as root, the historical behaviour).
+type loginUser struct {
+	uid, gid uint32
+	home     string
+	ok       bool
+}
+
+// lookupLoginUser resolves loginUserName from the rootfs (/etc/passwd, parsed by
+// pure-Go os/user under CGO_ENABLED=0).
+func lookupLoginUser() loginUser {
+	u, err := user.Lookup(loginUserName)
+	if err != nil {
+		return loginUser{}
+	}
+	uid, uerr := strconv.Atoi(u.Uid)
+	gid, gerr := strconv.Atoi(u.Gid)
+	if uerr != nil || gerr != nil || uid < 0 || gid < 0 || uid > math.MaxUint32 || gid > math.MaxUint32 {
+		return loginUser{}
+	}
+	return loginUser{uid: uint32(uid), gid: uint32(gid), home: u.HomeDir, ok: true}
+}
+
+// applyLoginUser makes cmd run as the login user when resolved. For a PTY shell,
+// call it before pty.Start so creack/pty adds Setctty/Setsid to the same
+// SysProcAttr rather than replacing the credential.
+func applyLoginUser(cmd *exec.Cmd, lu loginUser) {
+	if !lu.ok {
+		return
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Credential = &syscall.Credential{Uid: lu.uid, Gid: lu.gid}
+}
+
 // shellEnv builds the login shell's environment: the spec's TERM plus the
-// usual PATH/HOME defaults and any extra entries the host passed.
-func shellEnv(spec guestproto.ShellSpec) []string {
-	env := withDefaults(spec.Env)
+// usual PATH/HOME defaults (for the login user) and any extra entries the host
+// passed.
+func shellEnv(spec guestproto.ShellSpec, lu loginUser) []string {
+	env := withDefaults(spec.Env, lu)
 	term := spec.Term
 	if term == "" {
 		term = "xterm-256color"
@@ -401,9 +448,11 @@ func runCommand(spec guestproto.Spec, fc *frameConn) int {
 	}
 	// The host tears down the whole VM to cancel, so an in-guest context adds
 	// nothing; Background satisfies the lint that wants a context-aware call.
+	lu := lookupLoginUser()
 	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-c", spec.Command) //nolint:gosec // running the job is the entire purpose
 	cmd.Dir = workDir
-	cmd.Env = withDefaults(spec.Env)
+	cmd.Env = withDefaults(spec.Env, lu)
+	applyLoginUser(cmd, lu)
 	cmd.Stdout = streamWriter{fc: fc, kind: guestproto.KindStdout}
 	cmd.Stderr = streamWriter{fc: fc, kind: guestproto.KindStderr}
 
@@ -463,15 +512,23 @@ func (s streamWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// withDefaults ensures the command has a usable PATH and HOME even if the spec
-// did not set them.
-func withDefaults(env []string) []string {
+// withDefaults ensures the command has a usable PATH, HOME, and USER even if the
+// spec did not set them. HOME/USER track the login user (root when unresolved)
+// so an agent finds its config in the same home it uses over SSH.
+func withDefaults(env []string, lu loginUser) []string {
+	home, name := "/root", "root"
+	if lu.ok {
+		home, name = lu.home, loginUserName
+	}
 	out := append([]string(nil), env...)
 	if !hasKey(out, "PATH") {
 		out = append(out, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 	}
 	if !hasKey(out, "HOME") {
-		out = append(out, "HOME=/root")
+		out = append(out, "HOME="+home)
+	}
+	if !hasKey(out, "USER") {
+		out = append(out, "USER="+name)
 	}
 	return out
 }
