@@ -1,6 +1,7 @@
 package egress_test
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"net"
@@ -127,4 +128,30 @@ func TestProxyLANGuardOverridesOpen(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusBadGateway, resp.StatusCode)
+}
+
+// TestProxyAuditRecordsLANBlockAsBlocked guards against the disposition being
+// logged before the dial: a LAN target under the Open policy must be audited as
+// "blocked" (the guard refused the dial), never "allowed" (policy passed).
+func TestProxyAuditRecordsLANBlockAsBlocked(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "lan")
+	}))
+	defer target.Close()
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+	p := egress.New(egress.Open{}, logger) // default guarded dialer
+	proxySrv := httptest.NewServer(p)
+	defer proxySrv.Close()
+
+	proxyURL, _ := url.Parse(proxySrv.URL)
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	resp, err := client.Get(target.URL)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	logged := logBuf.String()
+	require.Contains(t, logged, `"disposition":"blocked"`)
+	require.NotContains(t, logged, `"disposition":"allowed"`)
 }

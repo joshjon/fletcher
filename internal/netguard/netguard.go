@@ -8,10 +8,16 @@
 package netguard
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"syscall"
 )
+
+// ErrBlocked is wrapped by DialControl when a dial is refused by the guard, so
+// callers can distinguish a policy/guard denial from an ordinary dial failure
+// (errors.Is(err, netguard.ErrBlocked)) - e.g. for accurate audit logging.
+var ErrBlocked = errors.New("egress blocked: loopback, link-local, private, or metadata address")
 
 // DisallowedIP reports whether ip is an address daemon-mediated egress must
 // never reach: loopback, link-local (which includes the 169.254.169.254 cloud
@@ -40,7 +46,7 @@ func DialControl(_, address string, _ syscall.RawConn) error {
 		return fmt.Errorf("egress: cannot parse dial address %q", host)
 	}
 	if DisallowedIP(ip) {
-		return fmt.Errorf("egress to %s is blocked (loopback, link-local, private, or metadata address)", ip)
+		return fmt.Errorf("egress to %s: %w", ip, ErrBlocked)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package egress
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -72,17 +73,19 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // splice bytes both ways. TLS rides over the tunnel untouched.
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	host := hostOnly(r.Host)
-	if !p.allowed(r.Context(), host, http.MethodConnect) {
+	if !p.policy.Allow(host) {
+		p.audit(r.Context(), http.MethodConnect, host, "denied", "policy")
 		http.Error(w, "egress denied by policy", http.StatusForbidden)
 		return
 	}
 	upstream, err := p.dialer.DialContext(r.Context(), "tcp", r.Host)
 	if err != nil {
-		p.logger.WarnContext(r.Context(), "egress connect failed", slog.String("host", r.Host), slog.String("err", err.Error()))
+		p.audit(r.Context(), http.MethodConnect, host, dialDisposition(err), err.Error())
 		http.Error(w, "egress dial failed", http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = upstream.Close() }()
+	p.audit(r.Context(), http.MethodConnect, host, "allowed", "")
 
 	hj, ok := w.(http.Hijacker)
 	if !ok {
@@ -107,7 +110,8 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host := hostOnly(r.URL.Host)
-	if !p.allowed(r.Context(), host, r.Method) {
+	if !p.policy.Allow(host) {
+		p.audit(r.Context(), r.Method, host, "denied", "policy")
 		http.Error(w, "egress denied by policy", http.StatusForbidden)
 		return
 	}
@@ -117,11 +121,12 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	outReq.Header.Del("Proxy-Connection")
 	resp, err := p.transport.RoundTrip(outReq)
 	if err != nil {
-		p.logger.WarnContext(r.Context(), "egress request failed", slog.String("host", host), slog.String("err", err.Error()))
+		p.audit(r.Context(), r.Method, host, dialDisposition(err), err.Error())
 		http.Error(w, "egress request failed", http.StatusBadGateway)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+	p.audit(r.Context(), r.Method, host, "allowed", "")
 
 	for k, vv := range resp.Header {
 		for _, v := range vv {
@@ -132,20 +137,35 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, resp.Body)
 }
 
-// allowed checks the policy and emits one audit log line per attempt.
-func (p *Proxy) allowed(ctx context.Context, host, method string) bool {
-	ok := p.policy.Allow(host)
+// audit emits one log line per egress attempt with its final disposition:
+// "allowed" (policy passed and the dial succeeded), "denied" (policy rejected
+// the host), or "blocked" (the dial-time LAN/metadata guard refused it). This
+// is logged after the dial, so a guard-blocked request is never recorded as
+// allowed.
+func (p *Proxy) audit(ctx context.Context, method, host, disposition, reason string) {
 	lvl := slog.LevelInfo
-	if !ok {
+	if disposition != "allowed" {
 		lvl = slog.LevelWarn
 	}
-	p.logger.Log(ctx, lvl, "egress",
+	attrs := []any{
 		slog.String("policy", p.policy.Name()),
 		slog.String("method", method),
 		slog.String("host", host),
-		slog.Bool("allowed", ok),
-	)
-	return ok
+		slog.String("disposition", disposition),
+	}
+	if reason != "" {
+		attrs = append(attrs, slog.String("reason", reason))
+	}
+	p.logger.Log(ctx, lvl, "egress", attrs...)
+}
+
+// dialDisposition classifies a failed dial for the audit log: "blocked" when
+// the LAN/metadata guard refused it, "error" for any other dial failure.
+func dialDisposition(err error) string {
+	if errors.Is(err, netguard.ErrBlocked) {
+		return "blocked"
+	}
+	return "error"
 }
 
 // hostOnly strips any :port from a host[:port] value.
