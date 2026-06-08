@@ -788,6 +788,22 @@ makes **DDNS** load-bearing for a stable A record; DDNS is a current backlog gap
 so until it lands the operator re-points DNS on IP change. Phase 2 promotes DDNS
 from the backlog as a fast-follow if the dynamic-IP case bites.
 
+**Backlog - behind-a-proxy (Cloudflare/CDN) mode (opt-in).** The default public
+path is DNS-only with Fletcher owning the Let's Encrypt cert (direct, no third
+party in the path, no DNS token). Some operators want to front the box with
+Cloudflare (proxied) to hide the home IP and get DDoS protection - a legitimate
+choice for public hosting, like the bring-your-own-VPN stance, but it means the
+CDN terminates TLS, so Fletcher's ACME challenge can't complete and Fletcher must
+stop owning the cert. Support would be an opt-in per-port mode (e.g. `publish
+--behind-proxy` / `deploy --behind-proxy`): serve the port as **plain HTTP** on
+:80 with no ACME and no HTTPS redirect, letting the CDN do public TLS (covers
+Cloudflare "Flexible" and any fronting reverse proxy). An origin-HTTPS variant for
+Cloudflare "Full" (a self-signed / Cloudflare-Origin-CA cert, no ACME) is a
+further follow-on. Explicitly *not* doing DNS-01 for a real cert while proxied -
+that needs a stored DNS-provider token, the thing the HTTP-01/TLS-ALPN-01 choice
+deliberately avoids. Not scheduled; raised while testing a Cloudflare-proxied
+domain (2026-06-08).
+
 ### Milestone 9 - Dockerfile app deployment ("self-hosted Fly") - CODE COMPLETE (awaiting hardware verification)
 
 **Goal.** Point Fletcher at a Dockerfile (or a built image) and have it run that
