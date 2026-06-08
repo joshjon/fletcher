@@ -52,6 +52,8 @@ type Session struct {
 	// EgressPolicy gates the fork's outbound network: "none" | "allowlist" |
 	// "open". Fixed at create time.
 	EgressPolicy string
+	// Gateway is "on" or "off": whether the model-gateway env is injected.
+	Gateway string
 }
 
 // ErrNotFound is returned when a session ref matches nothing.
@@ -72,6 +74,9 @@ type Options struct {
 	// DefaultEgressPolicy is the egress policy used when create is called with an
 	// empty policy: "none" | "allowlist" | "open".
 	DefaultEgressPolicy string
+	// DefaultGateway is the model-gateway wiring used when create is called with
+	// an empty value: "on" | "off".
+	DefaultGateway string
 }
 
 // idleLoadThreshold is the guest 1-minute load average below which a session
@@ -86,9 +91,12 @@ type Manager struct {
 	q        sqliteq.Querier
 	snapshot snapshot.Driver
 	runtime  runtime.SessionRuntime
-	env      []string
-	logger   *slog.Logger
-	opts     Options
+	// baseEnv is injected into every session; gatewayEnv is added on top only
+	// when the session's gateway toggle is on (DESIGN.md §6).
+	baseEnv    []string
+	gatewayEnv []string
+	logger     *slog.Logger
+	opts       Options
 
 	mu      sync.Mutex
 	handles map[string]runtime.SessionHandle
@@ -137,17 +145,40 @@ const pubPortPrefix = "pubport"
 
 // NewManager constructs a Manager. rt may be nil if the configured runtime does
 // not support sessions, in which case lifecycle calls fail with a clear error.
-func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRuntime, env []string, logger *slog.Logger, opts Options) *Manager {
+func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRuntime, baseEnv, gatewayEnv []string, logger *slog.Logger, opts Options) *Manager {
 	return &Manager{
-		q:        q,
-		snapshot: snap,
-		runtime:  rt,
-		env:      env,
-		logger:   logger,
-		opts:     opts,
-		handles:  make(map[string]runtime.SessionHandle),
-		busy:     make(map[string]int),
+		q:          q,
+		snapshot:   snap,
+		runtime:    rt,
+		baseEnv:    baseEnv,
+		gatewayEnv: gatewayEnv,
+		logger:     logger,
+		opts:       opts,
+		handles:    make(map[string]runtime.SessionHandle),
+		busy:       make(map[string]int),
 	}
+}
+
+// envFor composes a session's environment: the base env always, plus the
+// model-gateway env when the gateway is on.
+func (m *Manager) envFor(gateway string) []string {
+	env := append([]string(nil), m.baseEnv...)
+	if gateway != "off" {
+		env = append(env, m.gatewayEnv...)
+	}
+	return env
+}
+
+// resolveGateway canonicalises a gateway value to "on"/"off"; empty uses the
+// configured default, and anything other than "off" is "on".
+func resolveGateway(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		v = def
+	}
+	if v == "off" {
+		return "off"
+	}
+	return "on"
 }
 
 // ExecResult is the captured output of a command run in a session.
@@ -168,7 +199,7 @@ func (m *Manager) requireRuntime() error {
 // Create provisions a session's persistent fork, boots its VM, and records it.
 // egressPolicy is "none"|"allowlist"|"open"; empty resolves to the manager's
 // configured default.
-func (m *Manager) Create(ctx context.Context, name, image, egressPolicy string) (Session, error) {
+func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway string) (Session, error) {
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
@@ -179,6 +210,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy string) 
 		egressPolicy = m.opts.DefaultEgressPolicy
 	}
 	egressPolicy = egress.Normalize(egressPolicy)
+	gateway = resolveGateway(gateway, m.opts.DefaultGateway)
 	if strings.TrimSpace(image) == "" {
 		image = m.opts.DefaultImage
 	}
@@ -203,7 +235,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy string) 
 	handle, err := m.runtime.StartSession(ctx, runtime.SessionSpec{
 		SessionID:    sessionID,
 		RootfsPath:   fork.Path,
-		Env:          m.env,
+		Env:          m.envFor(gateway),
 		EgressPolicy: egressPolicy,
 	})
 	if err != nil {
@@ -222,6 +254,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy string) 
 		CreatedAt:    now,
 		UpdatedAt:    now,
 		EgressPolicy: egressPolicy,
+		Gateway:      gateway,
 	})
 	if err != nil {
 		_ = handle.Stop(context.WithoutCancel(ctx))
@@ -287,7 +320,7 @@ func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 	handle, err := m.runtime.StartSession(ctx, runtime.SessionSpec{
 		SessionID:    row.ID,
 		RootfsPath:   row.ForkPath,
-		Env:          m.env,
+		Env:          m.envFor(row.Gateway),
 		EgressPolicy: row.EgressPolicy,
 	})
 	if err != nil {
@@ -394,9 +427,8 @@ func (m *Manager) Shell(ctx context.Context, ref string, spec runtime.ShellSpec,
 		return 0, errs.Newf(errs.CategoryFailedPrecondition,
 			"session %q is not running; start it with `fletcher session start`", row.Name)
 	}
-	if len(spec.Env) == 0 {
-		spec.Env = m.env
-	}
+	// Leave spec.Env unset so the handle uses the session's own environment
+	// (gateway/egress resolved for this session), consistent with Exec.
 	m.markBusy(row.ID)
 	defer m.unmarkBusy(row.ID)
 	code, err := handle.Shell(ctx, spec, stdin, stdout, resize)
@@ -831,6 +863,7 @@ func sessionFromRow(r sqliteq.Session) Session {
 		LastUsedAt:   timePtrFromUnix(r.LastUsedAt),
 		DiskBytes:    forkBytes(r.ForkPath),
 		EgressPolicy: r.EgressPolicy,
+		Gateway:      r.Gateway,
 	}
 }
 

@@ -32,6 +32,7 @@ type Supervisor struct {
 	pollInterval    time.Duration
 	drainDeadline   time.Duration
 	jobEnv          []string
+	jobGatewayEnv   []string
 	credentialsRoot string
 
 	mu     sync.Mutex
@@ -49,10 +50,15 @@ type SupervisorOptions struct {
 	// DrainDeadline caps how long Run will wait for in-flight jobs to finish
 	// once ctx is cancelled. Default 30s.
 	DrainDeadline time.Duration
-	// JobEnv is appended to every job's runtime.Spec.Env. The daemon uses
-	// this to inject OPENAI_BASE_URL pointing at the local model gateway
-	// (so agents inside forks never see real API keys).
+	// JobEnv is appended to every job's runtime.Spec.Env (MCP + egress proxy).
 	JobEnv []string
+	// JobGatewayEnv is the model-gateway env (base-URLs + placeholder keys),
+	// added on top of JobEnv only when the job's gateway toggle is on, so agents
+	// inside forks never see real API keys. A gateway-off job uses its own auth.
+	JobGatewayEnv []string
+	// DefaultGateway is the gateway wiring used when a job is created without an
+	// explicit value: "on" | "off".
+	DefaultGateway string
 	// CredentialsRoot is the host directory under which each credential's
 	// HostRelPath (see AllowedCredentials) is resolved. Empty disables
 	// trusted-credential mode: jobs that request credentials fail at start.
@@ -78,6 +84,7 @@ func NewSupervisor(q sqliteq.Querier, rt runtime.Driver, sn snapshot.Driver, log
 		pollInterval:    opts.PollInterval,
 		drainDeadline:   opts.DrainDeadline,
 		jobEnv:          append([]string(nil), opts.JobEnv...),
+		jobGatewayEnv:   append([]string(nil), opts.JobGatewayEnv...),
 		credentialsRoot: opts.CredentialsRoot,
 		active:          make(map[string]context.CancelFunc),
 		wakeup:          make(chan struct{}, 1),
@@ -306,12 +313,16 @@ func (s *Supervisor) runOne(jobCtx context.Context, row sqliteq.Job) {
 	// opaque: it is logged and stored in the job's error message. stdout and
 	// stderr share one buffer (interleaved, as a terminal would show them).
 	out := &cappedBuffer{max: 16 << 10}
+	env := append([]string(nil), s.jobEnv...)
+	if row.Gateway != "off" {
+		env = append(env, s.jobGatewayEnv...)
+	}
 	result, err := s.runtime.Run(jobCtx, runtime.Spec{
 		JobID:        row.ID,
 		Image:        row.Image,
 		Command:      row.Command,
 		WorkDir:      snap.Path,
-		Env:          s.jobEnv,
+		Env:          env,
 		Mounts:       mounts,
 		EgressPolicy: row.EgressPolicy,
 	}, out, out)

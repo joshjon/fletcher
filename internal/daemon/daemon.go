@@ -176,6 +176,10 @@ type Config struct {
 	// VMMemoryMB is the guest memory (MB) for each job/session microVM.
 	// Settings-managed (vm_memory_mb); 512 is too small for an interactive agent.
 	VMMemoryMB int
+	// DefaultGateway is the model-gateway wiring used when a job/session is
+	// created without an explicit --gateway: "on" injects the gateway env, "off"
+	// omits it. Settings-managed (default_gateway); empty resolves to "on".
+	DefaultGateway string
 }
 
 // Defaults for the session settings, applied when not explicitly set.
@@ -189,6 +193,7 @@ const (
 	// (Claude Code, Opus, large context) needs well above the old 512 MB - that
 	// OOM-killed the TUI; 2 GB gives comfortable headroom.
 	defaultVMMemoryMB = 2048
+	defaultGatewayOn  = "on"
 )
 
 // shutdownTimeout caps how long the daemon waits for in-flight work before
@@ -375,11 +380,28 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, fletchermcp.NewEgressHTTPClient(30*time.Second), approvalSvc)
 	logger.Info("mcp server ready", slog.String("base_url", mcpURL))
 
-	// Env every agent inherits: it points all agents at the daemon gateway/MCP
-	// so keys never enter a fork (DESIGN.md §6). Shared by ephemeral jobs and
-	// durable sessions - one execution engine, one environment (§4).
+	// Env every agent inherits, split so a fork can opt out of the model gateway
+	// (DESIGN.md §6). baseAgentEnv (MCP + egress proxy) is always injected;
+	// gatewayAgentEnv (the model-gateway base-URLs + placeholder keys) is added
+	// only when the fork's gateway toggle is on. A gateway-off fork uses its own
+	// auth (e.g. a subscription login) and reaches providers via egress. Shared
+	// by ephemeral jobs and durable sessions (one environment, §4).
 	proxyURL := "http://" + proxyListenAddr(cfg)
-	agentEnv := []string{
+	baseAgentEnv := []string{
+		"FLETCHER_MCP_URL=" + mcpURL,
+		// Fork egress: agents' HTTP(S) clients (npm, pip, git, curl, WebFetch,
+		// and Claude Code's startup connectivity check) route through the daemon
+		// forward-proxy, which enforces the egress policy + LAN guard. Loopback
+		// stays direct (NO_PROXY) so the gateway/MCP calls are not proxied. Both
+		// cases set because tools vary on which they read.
+		"HTTP_PROXY=" + proxyURL,
+		"HTTPS_PROXY=" + proxyURL,
+		"NO_PROXY=127.0.0.1,localhost,::1",
+		"http_proxy=" + proxyURL,
+		"https_proxy=" + proxyURL,
+		"no_proxy=127.0.0.1,localhost,::1",
+	}
+	gatewayAgentEnv := []string{
 		// OpenAI-compatible path (Codex, Aider, OpenHands, pi). The
 		// gateway's /v1/chat/completions handler translates to Anthropic.
 		"OPENAI_BASE_URL=" + gatewayURL + "/v1",
@@ -388,25 +410,15 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		// handler proxies the raw Messages request to api.anthropic.com.
 		"ANTHROPIC_BASE_URL=" + gatewayURL,
 		"ANTHROPIC_API_KEY=fletcher-gateway", // placeholder; real key lives in secrets store
-		"FLETCHER_MCP_URL=" + mcpURL,
 		// Model catalog (Phase 14) - pi-extension and other agents fetch
 		// this on startup to discover providers without per-job config.
 		"FLETCHER_CATALOG_URL=" + gatewayURL + "/v1/catalog.json",
-		// Fork egress: agents' HTTP(S) clients (npm, pip, git, curl, WebFetch,
-		// and Claude Code's startup connectivity check) route through the daemon
-		// forward-proxy, which enforces the egress policy + LAN guard. Loopback
-		// stays direct (NO_PROXY) so the gateway/MCP calls above are not proxied.
-		// Both cases set because tools vary on which they read.
-		"HTTP_PROXY=" + proxyURL,
-		"HTTPS_PROXY=" + proxyURL,
-		"NO_PROXY=127.0.0.1,localhost,::1",
-		"http_proxy=" + proxyURL,
-		"https_proxy=" + proxyURL,
-		"no_proxy=127.0.0.1,localhost,::1",
 	}
 
 	supervisor := job.NewSupervisor(queries, rtDriver, snapDriver, logger, job.SupervisorOptions{
-		JobEnv:          agentEnv,
+		JobEnv:          baseAgentEnv,
+		JobGatewayEnv:   gatewayAgentEnv,
+		DefaultGateway:  defaultGateway(cfg),
 		CredentialsRoot: cfg.CredentialsDir,
 	})
 
@@ -414,12 +426,13 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	// runtime (firecracker) implements runtime.SessionRuntime; other runtimes
 	// leave it nil and session lifecycle calls return a clear error.
 	sessionRuntime, _ := rtDriver.(runtime.SessionRuntime)
-	sessionMgr := session.NewManager(queries, snapDriver, sessionRuntime, agentEnv, logger, session.Options{
+	sessionMgr := session.NewManager(queries, snapDriver, sessionRuntime, baseAgentEnv, gatewayAgentEnv, logger, session.Options{
 		IdleTimeout:         cfg.SessionIdleTimeout,
 		MaxCount:            cfg.SessionMaxCount,
 		MaxDiskBytes:        int64(cfg.SessionMaxDiskGB) << 30,
 		DefaultImage:        cfg.DefaultImage,
 		DefaultEgressPolicy: egressDefaultPolicy(cfg),
+		DefaultGateway:      defaultGateway(cfg),
 	})
 	if err := sessionMgr.ReconcileOnBoot(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile sessions: %w", err)
@@ -444,7 +457,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	}
 
 	connectDeps := connectDeps{
-		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg)),
+		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg), defaultGateway(cfg)),
 		sessions:         sessionMgr,
 		secrets:          secretsStore,
 		approvals:        approvalSvc,
@@ -987,6 +1000,7 @@ func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logg
 	cfg.DefaultImage = defaultDefaultImage
 	cfg.DefaultEgressPolicy = defaultEgressPolicy
 	cfg.VMMemoryMB = defaultVMMemoryMB
+	cfg.DefaultGateway = defaultGatewayOn
 
 	vals, err := store.Values(ctx)
 	if err != nil {
@@ -1050,6 +1064,8 @@ func applySetting(cfg *Config, k, v string) bool {
 		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
 			cfg.VMMemoryMB = n
 		}
+	case settings.KeyDefaultGateway:
+		cfg.DefaultGateway = v
 	default:
 		return false // unknown key persisted by an older/newer version; ignore
 	}
@@ -1169,6 +1185,15 @@ func proxyListenAddr(cfg Config) string {
 // settings value falls back to "allowlist").
 func egressDefaultPolicy(cfg Config) string {
 	return egress.Normalize(cfg.DefaultEgressPolicy)
+}
+
+// defaultGateway resolves the daemon's default model-gateway wiring: "off" only
+// when explicitly set, otherwise "on".
+func defaultGateway(cfg Config) string {
+	if cfg.DefaultGateway == "off" {
+		return "off"
+	}
+	return "on"
 }
 
 // defaultEgressAllowlist is the curated host set the egress proxy permits under

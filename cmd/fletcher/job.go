@@ -55,6 +55,7 @@ func jobCreateCmd() *cli.Command {
 				Usage: "bind-mount a named credential dir into the fork (repeatable; allowed: claude, codex, gemini)",
 			},
 			&cli.StringFlag{Name: "egress", Usage: "fork network egress: none | allowlist | open (default: the daemon's default_egress_policy setting)"},
+			&cli.StringFlag{Name: "gateway", Usage: "model gateway: on | off (use the agent's own auth) (default: the daemon's default_gateway setting)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			trigger, err := triggerFromString(cmd.String("trigger"))
@@ -70,6 +71,7 @@ func jobCreateCmd() *cli.Command {
 				Credentials:  cmd.StringSlice("credential"),
 				Schedule:     cmd.String("schedule"),
 				EgressPolicy: cmd.String("egress"),
+				Gateway:      cmd.String("gateway"),
 			}))
 			if err != nil {
 				return err

@@ -44,6 +44,7 @@ func (s *JobsService) CreateJob(ctx context.Context, req *connect.Request[fletch
 		Credentials:  m.GetCredentials(),
 		Schedule:     m.GetSchedule(),
 		EgressPolicy: m.GetEgressPolicy(),
+		Gateway:      m.GetGateway(),
 	})
 	if err != nil {
 		return nil, err
@@ -168,6 +169,7 @@ func jobToProto(j job.Job) *fletcherv1.Job {
 		Schedule:     j.Schedule,
 		ParentId:     j.ParentID,
 		EgressPolicy: j.EgressPolicy,
+		Gateway:      j.Gateway,
 	}
 	if j.NextRunAt != nil {
 		t := j.NextRunAt.Unix()

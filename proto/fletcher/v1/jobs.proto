@@ -64,6 +64,9 @@ message Job {
   // egress_policy gates the fork's outbound network via the daemon proxy:
   // "none" | "allowlist" | "open". DESIGN.md §5.
   string egress_policy = 17;
+  // gateway is "on" or "off": whether the daemon's model-gateway env is
+  // injected. "off" lets the agent use its own auth. DESIGN.md §6.
+  string gateway = 18;
 }
 
 message CreateJobRequest {
@@ -79,6 +82,8 @@ message CreateJobRequest {
   // egress_policy is "none" | "allowlist" | "open"; empty uses the daemon's
   // default_egress_policy setting.
   string egress_policy = 7;
+  // gateway is "on" | "off"; empty uses the daemon's default_gateway setting.
+  string gateway = 8;
 }
 
 message CreateJobResponse {

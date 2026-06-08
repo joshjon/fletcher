@@ -85,7 +85,11 @@ type Session struct {
 	// egress_policy gates the fork's outbound network via the daemon proxy:
 	// "none" (no egress), "allowlist" (curated hosts), or "open" (any public
 	// host; the LAN guard still applies). DESIGN.md §5.
-	EgressPolicy  string `protobuf:"bytes,9,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
+	EgressPolicy string `protobuf:"bytes,9,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
+	// gateway is "on" or "off": whether the daemon's model-gateway env
+	// (ANTHROPIC_/OPENAI_ base-URL + key) is injected. "off" lets an agent use
+	// its own auth (e.g. a subscription OAuth login) instead. DESIGN.md §6.
+	Gateway       string `protobuf:"bytes,10,opt,name=gateway,proto3" json:"gateway,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -183,10 +187,19 @@ func (x *Session) GetEgressPolicy() string {
 	return ""
 }
 
+func (x *Session) GetGateway() string {
+	if x != nil {
+		return x.Gateway
+	}
+	return ""
+}
+
 type CreateSessionRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Image string                 `protobuf:"bytes,2,opt,name=image,proto3" json:"image,omitempty"`
+	// gateway is "on" | "off"; empty uses the daemon's default_gateway setting.
+	Gateway string `protobuf:"bytes,4,opt,name=gateway,proto3" json:"gateway,omitempty"`
 	// egress_policy is "none" | "allowlist" | "open"; empty uses the daemon's
 	// default_egress_policy setting.
 	EgressPolicy  string `protobuf:"bytes,3,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
@@ -234,6 +247,13 @@ func (x *CreateSessionRequest) GetName() string {
 func (x *CreateSessionRequest) GetImage() string {
 	if x != nil {
 		return x.Image
+	}
+	return ""
+}
+
+func (x *CreateSessionRequest) GetGateway() string {
+	if x != nil {
+		return x.Gateway
 	}
 	return ""
 }
@@ -1713,7 +1733,7 @@ var File_fletcher_v1_sessions_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\n" +
-	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\xae\x02\n" +
+	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\xc8\x02\n" +
 	"\aSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -1727,11 +1747,14 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"lastUsedAt\x88\x01\x01\x12\x1d\n" +
 	"\n" +
 	"disk_bytes\x18\b \x01(\x03R\tdiskBytes\x12#\n" +
-	"\regress_policy\x18\t \x01(\tR\fegressPolicyB\x0f\n" +
-	"\r_last_used_at\"e\n" +
+	"\regress_policy\x18\t \x01(\tR\fegressPolicy\x12\x18\n" +
+	"\agateway\x18\n" +
+	" \x01(\tR\agatewayB\x0f\n" +
+	"\r_last_used_at\"\x7f\n" +
 	"\x14CreateSessionRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05image\x18\x02 \x01(\tR\x05image\x12#\n" +
+	"\x05image\x18\x02 \x01(\tR\x05image\x12\x18\n" +
+	"\agateway\x18\x04 \x01(\tR\agateway\x12#\n" +
 	"\regress_policy\x18\x03 \x01(\tR\fegressPolicy\"G\n" +
 	"\x15CreateSessionResponse\x12.\n" +
 	"\asession\x18\x01 \x01(\v2\x14.fletcher.v1.SessionR\asession\"%\n" +

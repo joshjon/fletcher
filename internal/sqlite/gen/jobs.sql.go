@@ -54,12 +54,12 @@ func (q *Queries) CountJobsByStatus(ctx context.Context, status string) (int64, 
 const createJob = `-- name: CreateJob :one
 INSERT INTO jobs (
     id, status, trigger_kind, name, command, image, credentials, created_at, updated_at,
-    schedule, next_run_at, parent_id, egress_policy
+    schedule, next_run_at, parent_id, egress_policy, gateway
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?,
-    ?, ?, ?, ?
+    ?, ?, ?, ?, ?
 )
-RETURNING id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id, egress_policy
+RETURNING id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id, egress_policy, gateway
 `
 
 type CreateJobParams struct {
@@ -76,6 +76,7 @@ type CreateJobParams struct {
 	NextRunAt    *int64
 	ParentID     *string
 	EgressPolicy string
+	Gateway      string
 }
 
 func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
@@ -93,6 +94,7 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		arg.NextRunAt,
 		arg.ParentID,
 		arg.EgressPolicy,
+		arg.Gateway,
 	)
 	var i Job
 	err := row.Scan(
@@ -113,12 +115,13 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		&i.NextRunAt,
 		&i.ParentID,
 		&i.EgressPolicy,
+		&i.Gateway,
 	)
 	return i, err
 }
 
 const getJob = `-- name: GetJob :one
-SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id, egress_policy FROM jobs WHERE id = ?
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id, egress_policy, gateway FROM jobs WHERE id = ?
 `
 
 func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
@@ -142,12 +145,13 @@ func (q *Queries) GetJob(ctx context.Context, id string) (Job, error) {
 		&i.NextRunAt,
 		&i.ParentID,
 		&i.EgressPolicy,
+		&i.Gateway,
 	)
 	return i, err
 }
 
 const listDueCronJobs = `-- name: ListDueCronJobs :many
-SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id, egress_policy FROM jobs
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id, egress_policy, gateway FROM jobs
 WHERE status = 'scheduled' AND trigger_kind = 'cron'
   AND next_run_at IS NOT NULL AND next_run_at <= ?
 ORDER BY next_run_at ASC
@@ -180,6 +184,7 @@ func (q *Queries) ListDueCronJobs(ctx context.Context, nextRunAt *int64) ([]Job,
 			&i.NextRunAt,
 			&i.ParentID,
 			&i.EgressPolicy,
+			&i.Gateway,
 		); err != nil {
 			return nil, err
 		}
@@ -195,7 +200,7 @@ func (q *Queries) ListDueCronJobs(ctx context.Context, nextRunAt *int64) ([]Job,
 }
 
 const listJobs = `-- name: ListJobs :many
-SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id, egress_policy FROM jobs
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id, egress_policy, gateway FROM jobs
 ORDER BY created_at DESC
 LIMIT ? OFFSET ?
 `
@@ -232,6 +237,7 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, erro
 			&i.NextRunAt,
 			&i.ParentID,
 			&i.EgressPolicy,
+			&i.Gateway,
 		); err != nil {
 			return nil, err
 		}
@@ -247,7 +253,7 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, erro
 }
 
 const listJobsByStatus = `-- name: ListJobsByStatus :many
-SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id, egress_policy FROM jobs
+SELECT id, status, trigger_kind, name, command, image, created_at, updated_at, started_at, completed_at, error_message, exit_code, credentials, schedule, next_run_at, parent_id, egress_policy, gateway FROM jobs
 WHERE status = ?
 ORDER BY created_at DESC
 LIMIT ? OFFSET ?
@@ -286,6 +292,7 @@ func (q *Queries) ListJobsByStatus(ctx context.Context, arg ListJobsByStatusPara
 			&i.NextRunAt,
 			&i.ParentID,
 			&i.EgressPolicy,
+			&i.Gateway,
 		); err != nil {
 			return nil, err
 		}

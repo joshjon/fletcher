@@ -220,6 +220,25 @@ threat-model concession. A daemon-side OAuth proxy per vendor would restore
 strict isolation for subscription users; it is deferred past v0.1.0 because
 each vendor's OAuth flow is an internal protocol subject to silent change.
 
+**No per-vendor auth in core (decided 2026-06-08).** Fletcher does *not* model
+any agent's auth flow. A session/job is environment + payload + egress +
+lifecycle; auth is an agent concern, configured with **generic primitives** so
+the same mechanism serves Claude, Codex, Gemini, and non-AI workloads alike:
+
+- a per-fork **gateway toggle** (`--gateway on|off`, default from the
+  `default_gateway` setting) - "on" injects the model-gateway env (§6, API-key
+  mode); "off" omits it so the agent uses *its own* auth (e.g. a subscription
+  OAuth login) and reaches the provider through the egress proxy;
+- the **egress policy** (§5) - which already allowlists the provider hosts;
+- (planned) **generic bind-mounts** so a host credential dir can be reused
+  across forks; on Firecracker this needs virtio-fs (the runc path bind-mounts
+  directly), so it is a follow-up. Until then, subscription auth = `--gateway
+  off` + logging in *inside* a durable session (the OAuth token persists in the
+  fork across stop/start).
+
+So subscription support is a *composition* of generic primitives, not a
+`--auth-claude` flag - Fletcher never learns a vendor's protocol.
+
 **Crash-resume semantics (state plainly).** Resume is "from the agent's last
 persisted turn," *not* a frame-perfect mid-instruction restore. If the box dies
 between an agent disk-write and the next snapshot, restored state is seconds behind

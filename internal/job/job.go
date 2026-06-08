@@ -79,6 +79,8 @@ type Job struct {
 	// EgressPolicy gates the fork's outbound network: "none" | "allowlist" |
 	// "open".
 	EgressPolicy string
+	// Gateway is "on" or "off": whether the model-gateway env is injected.
+	Gateway string
 }
 
 // CreateParams are the caller-supplied fields for a new job.
@@ -93,6 +95,8 @@ type CreateParams struct {
 	// EgressPolicy is "none"|"allowlist"|"open"; empty resolves to the service's
 	// configured default.
 	EgressPolicy string
+	// Gateway is "on"|"off"; empty resolves to the service's configured default.
+	Gateway string
 }
 
 // Coordinator is what Service needs from the running supervisor: a way to
@@ -105,10 +109,11 @@ type Coordinator interface {
 
 // Service is the high-level façade over the jobs storage layer.
 type Service struct {
-	q             sqliteq.Querier
-	sup           Coordinator
-	defaultImage  string
-	defaultEgress string
+	q              sqliteq.Querier
+	sup            Coordinator
+	defaultImage   string
+	defaultEgress  string
+	defaultGateway string
 }
 
 // NewService wires a Service to a sqlc-generated querier (anything that
@@ -116,8 +121,20 @@ type Service struct {
 // The supervisor argument may be nil for tests that only exercise CRUD.
 // defaultImage is used when a job is created with no image (empty makes the
 // image required).
-func NewService(q sqliteq.Querier, sup Coordinator, defaultImage, defaultEgress string) *Service {
-	return &Service{q: q, sup: sup, defaultImage: defaultImage, defaultEgress: defaultEgress}
+func NewService(q sqliteq.Querier, sup Coordinator, defaultImage, defaultEgress, defaultGateway string) *Service {
+	return &Service{q: q, sup: sup, defaultImage: defaultImage, defaultEgress: defaultEgress, defaultGateway: defaultGateway}
+}
+
+// resolveGateway canonicalises a gateway value to "on"/"off"; empty uses def,
+// and anything other than "off" is "on".
+func resolveGateway(v, def string) string {
+	if strings.TrimSpace(v) == "" {
+		v = def
+	}
+	if v == "off" {
+		return "off"
+	}
+	return "on"
 }
 
 // Create validates inputs, generates a typeid, and inserts a new queued job.
@@ -131,6 +148,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 		p.EgressPolicy = s.defaultEgress
 	}
 	p.EgressPolicy = egress.Normalize(p.EgressPolicy)
+	p.Gateway = resolveGateway(p.Gateway, s.defaultGateway)
 	if err := p.validate(); err != nil {
 		return Job{}, err
 	}
@@ -182,6 +200,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 		Schedule:     p.Schedule,
 		NextRunAt:    nextRun,
 		EgressPolicy: p.EgressPolicy,
+		Gateway:      p.Gateway,
 	})
 	if err != nil {
 		return Job{}, fmt.Errorf("create job: %w", err)
@@ -353,6 +372,7 @@ func jobFromRow(r sqliteq.Job) (Job, error) {
 		NextRunAt:    timePtrFromUnix(r.NextRunAt),
 		ParentID:     r.ParentID,
 		EgressPolicy: r.EgressPolicy,
+		Gateway:      r.Gateway,
 	}, nil
 }
 

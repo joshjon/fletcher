@@ -902,6 +902,21 @@ intentionally not in this list.
   safety argue for pin-detect-nudge-update-on-command. A local-only image (no
   registry digest) is skipped, not flagged.
 
+- **Per-fork auth: gateway toggle - DONE (2026-06-08); generic mounts PLANNED.**
+  Subscription auth (Claude Max, ChatGPT Plus, Gemini Advanced) is supported as a
+  *composition of generic primitives*, not a per-vendor `--auth` flag - Fletcher
+  never models a vendor's OAuth (DESIGN.md §5 "No per-vendor auth in core").
+  `session`/`job create --gateway on|off` (default from the `default_gateway`
+  setting) controls whether the model-gateway env (`ANTHROPIC_`/`OPENAI_`
+  base-URL + placeholder key) is injected; "off" lets an agent use its own auth
+  and reach the provider through the egress proxy. Verified on hardware: a
+  gateway-off session has no model-gateway env and routes claude to `/login`;
+  gateway-on is unchanged (API-key-via-gateway). *Planned:* generic
+  `--mount host:guest[:ro]` so a host credential dir is reused across forks -
+  needs virtio-fs on Firecracker (the runc path bind-mounts directly), so
+  deferred. Until then, subscription = `--gateway off` + logging in *inside* a
+  durable session (the OAuth token persists in the fork across stop/start).
+
 **Deferred for now (revisit on demand, not v1-blocking).** Audit-log storage (the
 operator does not want it yet; the `audit.Noop` seam stays). Gateway breadth
 (streaming in the OpenAI-compatible translation path; a second provider). APNs

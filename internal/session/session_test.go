@@ -147,7 +147,7 @@ func newManager(t *testing.T, rt runtime.SessionRuntime, snap snapshot.Driver) *
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return session.NewManager(sqliteq.New(db), snap, rt, nil, logger, session.Options{})
+	return session.NewManager(sqliteq.New(db), snap, rt, nil, nil, logger, session.Options{})
 }
 
 func newManagerWithOpts(t *testing.T, rt runtime.SessionRuntime, snap snapshot.Driver, opts session.Options) *session.Manager {
@@ -158,7 +158,7 @@ func newManagerWithOpts(t *testing.T, rt runtime.SessionRuntime, snap snapshot.D
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return session.NewManager(sqliteq.New(db), snap, rt, nil, logger, opts)
+	return session.NewManager(sqliteq.New(db), snap, rt, nil, nil, logger, opts)
 }
 
 func TestCreateBootsAndRecords(t *testing.T) {
@@ -167,7 +167,7 @@ func TestCreateBootsAndRecords(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	s, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	s, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, s.ID)
 	require.Equal(t, "dev", s.Name)
@@ -184,9 +184,9 @@ func TestCreateDuplicateNameConflicts(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
-	_, err = mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err = mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryConflict, errs.CategoryOf(err))
 }
@@ -197,7 +197,7 @@ func TestStopThenStartReusesFork(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	created, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	created, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 	forkPath := rt.started[0]
 
@@ -220,7 +220,7 @@ func TestExecRequiresRunning(t *testing.T) {
 	mgr := newManager(t, rt, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 
 	res, err := mgr.Exec(ctx, "dev", "echo hi")
@@ -242,7 +242,7 @@ func TestDeleteDestroysFork(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 
 	deleted, err := mgr.Delete(ctx, "dev")
@@ -263,7 +263,7 @@ func TestReconcileOnBootResetsRunning(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	created, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	created, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 	require.Equal(t, session.StateRunning, created.State)
 
@@ -280,9 +280,9 @@ func TestCreateRefusedAtCountCap(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{MaxCount: 1})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "a", "ubuntu", "")
+	_, err := mgr.Create(ctx, "a", "ubuntu", "", "")
 	require.NoError(t, err)
-	_, err = mgr.Create(ctx, "b", "ubuntu", "")
+	_, err = mgr.Create(ctx, "b", "ubuntu", "", "")
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }
@@ -292,7 +292,7 @@ func TestReapIdleStopsIdleSession(t *testing.T) {
 	mgr := newManagerWithOpts(t, rt, newFakeSnapshot(), session.Options{IdleTimeout: time.Millisecond})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond) // let it age past the idle timeout
 
@@ -310,7 +310,7 @@ func TestReapIdleKeepsBusySession(t *testing.T) {
 	mgr := newManagerWithOpts(t, rt, newFakeSnapshot(), session.Options{IdleTimeout: time.Millisecond})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond)
 
@@ -326,7 +326,7 @@ func TestReapIdleKeepsBusySession(t *testing.T) {
 func TestReapIdleDisabledIsNoop(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{}) // IdleTimeout 0
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 
 	n, err := mgr.ReapIdle(ctx)
@@ -340,7 +340,7 @@ func TestPublishOpensListsAndUnpublishes(t *testing.T) {
 	mgr.SetBroker(broker)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 
 	pp, err := mgr.Publish(ctx, "dev", 3000, "")
@@ -370,7 +370,7 @@ func TestUnpublishMissingPortNotFound(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
 	mgr.SetBroker(newFakeBroker())
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 
 	err = mgr.Unpublish(ctx, "dev", 3000)
@@ -383,7 +383,7 @@ func TestDialPortWakesStoppedSession(t *testing.T) {
 	mgr := newManager(t, rt, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 	_, err = mgr.Stop(ctx, "dev")
 	require.NoError(t, err)
@@ -405,7 +405,7 @@ func TestDeleteClosesPublishedPorts(t *testing.T) {
 	mgr.SetBroker(broker)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 	pp, err := mgr.Publish(ctx, "dev", 8080, "web")
 	require.NoError(t, err)
@@ -418,7 +418,7 @@ func TestDeleteClosesPublishedPorts(t *testing.T) {
 func TestSessionsRequireSessionRuntime(t *testing.T) {
 	// A nil runtime models a non-session-capable runtime (e.g. mock/runc).
 	mgr := newManager(t, nil, newFakeSnapshot())
-	_, err := mgr.Create(context.Background(), "dev", "ubuntu", "")
+	_, err := mgr.Create(context.Background(), "dev", "ubuntu", "", "")
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }

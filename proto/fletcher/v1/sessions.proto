@@ -67,11 +67,17 @@ message Session {
   // "none" (no egress), "allowlist" (curated hosts), or "open" (any public
   // host; the LAN guard still applies). DESIGN.md §5.
   string egress_policy = 9;
+  // gateway is "on" or "off": whether the daemon's model-gateway env
+  // (ANTHROPIC_/OPENAI_ base-URL + key) is injected. "off" lets an agent use
+  // its own auth (e.g. a subscription OAuth login) instead. DESIGN.md §6.
+  string gateway = 10;
 }
 
 message CreateSessionRequest {
   string name = 1;
   string image = 2;
+  // gateway is "on" | "off"; empty uses the daemon's default_gateway setting.
+  string gateway = 4;
   // egress_policy is "none" | "allowlist" | "open"; empty uses the daemon's
   // default_egress_policy setting.
   string egress_policy = 3;

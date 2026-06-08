@@ -22,6 +22,7 @@ type Job struct {
 	NextRunAt    *int64
 	ParentID     *string
 	EgressPolicy string
+	Gateway      string
 }
 
 type Peer struct {
@@ -75,6 +76,7 @@ type Session struct {
 	UpdatedAt    int64
 	LastUsedAt   *int64
 	EgressPolicy string
+	Gateway      string
 }
 
 type Setting struct {

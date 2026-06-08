@@ -1,10 +1,10 @@
 -- name: CreateJob :one
 INSERT INTO jobs (
     id, status, trigger_kind, name, command, image, credentials, created_at, updated_at,
-    schedule, next_run_at, parent_id, egress_policy
+    schedule, next_run_at, parent_id, egress_policy, gateway
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?,
-    ?, ?, ?, ?
+    ?, ?, ?, ?, ?
 )
 RETURNING *;
 
