@@ -788,7 +788,7 @@ makes **DDNS** load-bearing for a stable A record; DDNS is a current backlog gap
 so until it lands the operator re-points DNS on IP change. Phase 2 promotes DDNS
 from the backlog as a fast-follow if the dynamic-IP case bites.
 
-### Milestone 9 - Dockerfile app deployment ("self-hosted Fly") - IN PROGRESS
+### Milestone 9 - Dockerfile app deployment ("self-hosted Fly") - CODE COMPLETE (awaiting hardware verification)
 
 **Goal.** Point Fletcher at a Dockerfile (or a built image) and have it run that
 app as a long-running VM and expose it on the public internet under your domain -
@@ -882,13 +882,36 @@ verification).** The load-bearing unknown (an arbitrary image's app running unde
   guest cmdline; persisted as `sessions.run_app` (migration 0014) so a restart or
   wake re-runs the app (not bare); surfaced as `session create --app`.
 - Unit-tested (app mode boots and persists across stop/start); `make check` green.
-- *Deferred to later slices:* the `deploy` wrapper (build->import->run->publish),
-  crash/reboot restart policy, `logs`/`status` surface, precise image-`USER`
-  mapping (runs as root now), and the subvolume/runc import path (ext4 only).
-- *Verify on hardware (operator):* import a real app image (e.g. a static-site or
-  nginx image), `session create --image <app> --app`, confirm the app serves
-  inside the VM, then `session publish ... --public` to reach it - and confirm it
-  survives a stop/start.
+
+**Slice 2 - keep the app running - CODE COMPLETE.** `fletcher-init` supervises the
+app (restarts on exit, 1s crash-loop backoff) and applies the image `USER` when
+set/resolvable (name or uid[:gid], else root). The daemon's `StartDeployedOnBoot`
+boots every `run_app` session after a restart (in the background), so a deploy
+comes back on its own rather than only on the next inbound request.
+
+**Slice 3 - `fletcher deploy` - CODE COMPLETE.** `fletcher deploy <dir|ref>
+[--host app.example.com] [--port N]`: builds a directory's Dockerfile (or takes
+an image ref), imports it, creates a `--app` session, and publishes the port
+(public when `--host` is given, else tunnel-only). Port defaults to the image's
+lowest `EXPOSE`. Runs the build/import locally (needs root + docker, like `image
+import`) and the session/publish steps over the local socket; prints the DNS
+guidance from slice's M8 renderer.
+
+**Slice 4 - observability - CODE COMPLETE.** `fletcher session logs <ref>` shows
+the app log (`/var/log/fletcher-app.log`). Run state + app mode already show in
+`session get`.
+
+**Deferred (not blocking M9's core; revisit on demand):** redeploy/update a new
+image version without losing data (ties to the backlogged first-class volumes);
+building inside an ephemeral sandboxed VM so the host needs no Docker (v2);
+`logs --follow` streaming; a richer app-liveness status. App mode is
+firecracker-only by design (it needs the guest init), which is the default
+runtime.
+
+- *Verify on hardware (operator):* `sudo fletcher deploy <app-image> --host
+  <your-domain>` (or a `./dir` with a Dockerfile), then hit the URL; `session
+  logs` shows output; `session stop`/`start` and a daemon restart bring the app
+  back on its own.
 
 ## Toward v1 - hardening (in progress)
 

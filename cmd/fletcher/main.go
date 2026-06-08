@@ -79,6 +79,7 @@ func newApp() *cli.Command {
 			daemonHost(daemonCmd()),
 			daemonHost(doctorCmd()),
 			daemonHost(imageCmd()),
+			daemonHost(deployCmd()),
 			forkRunCmd(), // hidden internal re-exec
 		},
 	}
