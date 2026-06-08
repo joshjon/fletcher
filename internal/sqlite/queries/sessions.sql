@@ -1,8 +1,8 @@
 -- name: CreateSession :one
 INSERT INTO sessions (
-    id, name, image, state, fork_id, fork_path, created_at, updated_at, egress_policy, gateway
+    id, name, image, state, fork_id, fork_path, created_at, updated_at, egress_policy, gateway, run_app
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
 RETURNING *;
 

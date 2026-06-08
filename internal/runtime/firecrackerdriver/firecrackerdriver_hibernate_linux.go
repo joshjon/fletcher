@@ -73,7 +73,7 @@ func (d *Driver) restoreSession(ctx context.Context, spec fcruntime.SessionSpec,
 	vmCtx, vmCancel := context.WithCancel(context.WithoutCancel(ctx))
 
 	console := &capWriter{max: 32 << 10}
-	cfg := d.machineConfig(apiSock, vsockUDS, spec.RootfsPath, true)
+	cfg := d.machineConfig(apiSock, vsockUDS, spec.RootfsPath, true, spec.RunApp)
 	// On restore the snapshot already carries the vsock device (Firecracker
 	// recreates its UDS listener at the stored path). The SDK's snapshot handler
 	// list still runs AddVsocks afterwards, which the VMM rejects post-boot, so

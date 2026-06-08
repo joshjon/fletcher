@@ -17,6 +17,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/urfave/cli/v3"
 
+	"github.com/joshjon/fletcher/internal/appspec"
 	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
 	"github.com/joshjon/fletcher/internal/image"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestagent"
@@ -387,6 +388,14 @@ func importImageExt4(ctx context.Context, root, ref, name string, force bool) er
 	if err := guestagent.WriteTo(initDest); err != nil {
 		return fmt.Errorf("inject guest agent: %w", err)
 	}
+	// Capture the image's run config so a session created with --app can run the
+	// image's own app on boot (M9). Best-effort: a failure just means app mode is
+	// unavailable for this template, not that the import fails.
+	if spec, cerr := dockerImageConfig(ctx, ref); cerr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not read image run config (app mode unavailable): %v\n", cerr)
+	} else if werr := appspec.Write(spec, filepath.Join(staging, appspec.Path)); werr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not write app spec: %v\n", werr)
+	}
 	if err := buildExt4Image(ctx, staging, target); err != nil {
 		_ = os.Remove(target)
 		return err
@@ -420,6 +429,33 @@ func writeTemplateMeta(ctx context.Context, imagesDir, name, ref, format string)
 	if err := image.WriteMeta(imagesDir, name, meta); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not record image metadata: %v\n", err)
 	}
+}
+
+// dockerImageConfig reads the image's run config (entrypoint / cmd / env /
+// workdir / user) via `docker image inspect`, for the M9 app-launch spec written
+// into the rootfs.
+func dockerImageConfig(ctx context.Context, ref string) (appspec.Spec, error) {
+	out, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{json .Config}}", ref).Output() //nolint:gosec // operator-supplied ref, local admin command
+	if err != nil {
+		return appspec.Spec{}, fmt.Errorf("docker image inspect %s: %w", ref, err)
+	}
+	var cfg struct {
+		Entrypoint []string `json:"Entrypoint"`
+		Cmd        []string `json:"Cmd"`
+		Env        []string `json:"Env"`
+		WorkingDir string   `json:"WorkingDir"`
+		User       string   `json:"User"`
+	}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		return appspec.Spec{}, fmt.Errorf("parse image config: %w", err)
+	}
+	return appspec.Spec{
+		Entrypoint: cfg.Entrypoint,
+		Cmd:        cfg.Cmd,
+		Env:        cfg.Env,
+		WorkingDir: cfg.WorkingDir,
+		User:       cfg.User,
+	}, nil
 }
 
 // dockerImageDigest returns the registry digest ("sha256:...") of a locally

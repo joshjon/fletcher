@@ -788,7 +788,7 @@ makes **DDNS** load-bearing for a stable A record; DDNS is a current backlog gap
 so until it lands the operator re-points DNS on IP change. Phase 2 promotes DDNS
 from the backlog as a fast-follow if the dynamic-IP case bites.
 
-### Milestone 9 - Dockerfile app deployment ("self-hosted Fly") - PROPOSED
+### Milestone 9 - Dockerfile app deployment ("self-hosted Fly") - IN PROGRESS
 
 **Goal.** Point Fletcher at a Dockerfile (or a built image) and have it run that
 app as a long-running VM and expose it on the public internet under your domain -
@@ -867,12 +867,28 @@ deployed app with no traffic hibernates and wakes on the first request.
 (same requirement the base-image build already has). The app must tolerate being
 PID-1-launched by `fletcher-init` (the real work in the OCI-config item).
 
-**Suggested first slice (verifiable on its own).** Honor the image entrypoint:
-capture the OCI config at import and add `fletcher-init`'s entrypoint mode, so
-`session create --image <app>` boots and *runs the app* (manually published with
-the existing M8 verbs). That proves the load-bearing unknown (an arbitrary
-image's app running PID-1 under `fletcher-init`) before building the `deploy`
-wrapper, restart policy, and logs/status on top.
+**Slice 1 - honor the image entrypoint - CODE COMPLETE (awaiting hardware
+verification).** The load-bearing unknown (an arbitrary image's app running under
+`fletcher-init`) is built:
+- `internal/appspec`: a small launch spec (entrypoint/cmd/env/workdir/user) shared
+  by the CLI and the guest init.
+- `image import` captures the image's run config via `docker image inspect` and
+  writes it into the rootfs at `/etc/fletcher/app.json` (ext4 path; best-effort).
+- `fletcher-init` gains app mode: on `fletcher.app=1` it runs the captured app in
+  the background (image env + workdir, as root for now), logging to
+  `/var/log/fletcher-app.log`, while the control server keeps the session
+  shell-able.
+- `SessionSpec.RunApp` -> the firecracker driver adds `fletcher.app=1` to the
+  guest cmdline; persisted as `sessions.run_app` (migration 0014) so a restart or
+  wake re-runs the app (not bare); surfaced as `session create --app`.
+- Unit-tested (app mode boots and persists across stop/start); `make check` green.
+- *Deferred to later slices:* the `deploy` wrapper (build->import->run->publish),
+  crash/reboot restart policy, `logs`/`status` surface, precise image-`USER`
+  mapping (runs as root now), and the subvolume/runc import path (ext4 only).
+- *Verify on hardware (operator):* import a real app image (e.g. a static-site or
+  nginx image), `session create --image <app> --app`, confirm the app serves
+  inside the VM, then `session publish ... --public` to reach it - and confirm it
+  survives a stop/start.
 
 ## Toward v1 - hardening (in progress)
 

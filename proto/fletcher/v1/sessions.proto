@@ -71,6 +71,9 @@ message Session {
   // (ANTHROPIC_/OPENAI_ base-URL + key) is injected. "off" lets an agent use
   // its own auth (e.g. a subscription OAuth login) instead. DESIGN.md §6.
   string gateway = 10;
+  // run_app is whether the session runs the image's own app (its captured
+  // entrypoint) on boot, rather than coming up as a bare environment. M9.
+  bool run_app = 11;
 }
 
 message CreateSessionRequest {
@@ -81,6 +84,8 @@ message CreateSessionRequest {
   // egress_policy is "none" | "allowlist" | "open"; empty uses the daemon's
   // default_egress_policy setting.
   string egress_policy = 3;
+  // run_app makes the session run the image's own app (its entrypoint) on boot.
+  bool run_app = 5;
 }
 
 message CreateSessionResponse {

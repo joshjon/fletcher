@@ -89,7 +89,10 @@ type Session struct {
 	// gateway is "on" or "off": whether the daemon's model-gateway env
 	// (ANTHROPIC_/OPENAI_ base-URL + key) is injected. "off" lets an agent use
 	// its own auth (e.g. a subscription OAuth login) instead. DESIGN.md §6.
-	Gateway       string `protobuf:"bytes,10,opt,name=gateway,proto3" json:"gateway,omitempty"`
+	Gateway string `protobuf:"bytes,10,opt,name=gateway,proto3" json:"gateway,omitempty"`
+	// run_app is whether the session runs the image's own app (its captured
+	// entrypoint) on boot, rather than coming up as a bare environment. M9.
+	RunApp        bool `protobuf:"varint,11,opt,name=run_app,json=runApp,proto3" json:"run_app,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -194,6 +197,13 @@ func (x *Session) GetGateway() string {
 	return ""
 }
 
+func (x *Session) GetRunApp() bool {
+	if x != nil {
+		return x.RunApp
+	}
+	return false
+}
+
 type CreateSessionRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -202,7 +212,9 @@ type CreateSessionRequest struct {
 	Gateway string `protobuf:"bytes,4,opt,name=gateway,proto3" json:"gateway,omitempty"`
 	// egress_policy is "none" | "allowlist" | "open"; empty uses the daemon's
 	// default_egress_policy setting.
-	EgressPolicy  string `protobuf:"bytes,3,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
+	EgressPolicy string `protobuf:"bytes,3,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
+	// run_app makes the session run the image's own app (its entrypoint) on boot.
+	RunApp        bool `protobuf:"varint,5,opt,name=run_app,json=runApp,proto3" json:"run_app,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -263,6 +275,13 @@ func (x *CreateSessionRequest) GetEgressPolicy() string {
 		return x.EgressPolicy
 	}
 	return ""
+}
+
+func (x *CreateSessionRequest) GetRunApp() bool {
+	if x != nil {
+		return x.RunApp
+	}
+	return false
 }
 
 type CreateSessionResponse struct {
@@ -1773,7 +1792,7 @@ var File_fletcher_v1_sessions_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\n" +
-	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\xc8\x02\n" +
+	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\xe1\x02\n" +
 	"\aSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -1789,13 +1808,15 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"disk_bytes\x18\b \x01(\x03R\tdiskBytes\x12#\n" +
 	"\regress_policy\x18\t \x01(\tR\fegressPolicy\x12\x18\n" +
 	"\agateway\x18\n" +
-	" \x01(\tR\agatewayB\x0f\n" +
-	"\r_last_used_at\"\x7f\n" +
+	" \x01(\tR\agateway\x12\x17\n" +
+	"\arun_app\x18\v \x01(\bR\x06runAppB\x0f\n" +
+	"\r_last_used_at\"\x98\x01\n" +
 	"\x14CreateSessionRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x12\x18\n" +
 	"\agateway\x18\x04 \x01(\tR\agateway\x12#\n" +
-	"\regress_policy\x18\x03 \x01(\tR\fegressPolicy\"G\n" +
+	"\regress_policy\x18\x03 \x01(\tR\fegressPolicy\x12\x17\n" +
+	"\arun_app\x18\x05 \x01(\bR\x06runApp\"G\n" +
 	"\x15CreateSessionResponse\x12.\n" +
 	"\asession\x18\x01 \x01(\v2\x14.fletcher.v1.SessionR\asession\"%\n" +
 	"\x11GetSessionRequest\x12\x10\n" +

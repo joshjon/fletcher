@@ -54,6 +54,8 @@ type Session struct {
 	EgressPolicy string
 	// Gateway is "on" or "off": whether the model-gateway env is injected.
 	Gateway string
+	// RunApp is whether the session runs the image's own app on boot (M9).
+	RunApp bool
 }
 
 // ErrNotFound is returned when a session ref matches nothing.
@@ -202,7 +204,7 @@ func (m *Manager) requireRuntime() error {
 // Create provisions a session's persistent fork, boots its VM, and records it.
 // egressPolicy is "none"|"allowlist"|"open"; empty resolves to the manager's
 // configured default.
-func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway string) (Session, error) {
+func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool) (Session, error) {
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
@@ -240,6 +242,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		RootfsPath:   fork.Path,
 		Env:          m.envFor(gateway),
 		EgressPolicy: egressPolicy,
+		RunApp:       runApp,
 	})
 	if err != nil {
 		_ = m.snapshot.Delete(context.WithoutCancel(ctx), fork.ID)
@@ -258,6 +261,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		UpdatedAt:    now,
 		EgressPolicy: egressPolicy,
 		Gateway:      gateway,
+		RunApp:       boolToInt(runApp),
 	})
 	if err != nil {
 		_ = handle.Stop(context.WithoutCancel(ctx))
@@ -325,6 +329,7 @@ func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 		RootfsPath:   row.ForkPath,
 		Env:          m.envFor(row.Gateway),
 		EgressPolicy: row.EgressPolicy,
+		RunApp:       row.RunApp != 0,
 	})
 	if err != nil {
 		return Session{}, fmt.Errorf("start session vm: %w", err)
@@ -944,6 +949,7 @@ func sessionFromRow(r sqliteq.Session) Session {
 		LastUsedAt:   timePtrFromUnix(r.LastUsedAt),
 		DiskBytes:    forkBytes(r.ForkPath),
 		EgressPolicy: r.EgressPolicy,
+		RunApp:       r.RunApp != 0,
 		Gateway:      r.Gateway,
 	}
 }

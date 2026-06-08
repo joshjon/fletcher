@@ -54,6 +54,7 @@ func (f *fakeSnapshot) Delete(_ context.Context, id string) error {
 type fakeRuntime struct {
 	mu        sync.Mutex
 	started   []string // rootfs paths, in order
+	runApps   []bool   // spec.RunApp per StartSession, in order
 	handles   []*fakeHandle
 	discarded int
 	nextLoad  float64 // load stamped on handles the next StartSession hands out
@@ -63,6 +64,7 @@ func (r *fakeRuntime) StartSession(_ context.Context, spec runtime.SessionSpec) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.started = append(r.started, spec.RootfsPath)
+	r.runApps = append(r.runApps, spec.RunApp)
 	h := &fakeHandle{load: r.nextLoad}
 	r.handles = append(r.handles, h)
 	return h, nil
@@ -167,7 +169,7 @@ func TestCreateBootsAndRecords(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	s, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	s, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 	require.NotEmpty(t, s.ID)
 	require.Equal(t, "dev", s.Name)
@@ -184,9 +186,9 @@ func TestCreateDuplicateNameConflicts(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
-	_, err = mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err = mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryConflict, errs.CategoryOf(err))
 }
@@ -197,7 +199,7 @@ func TestStopThenStartReusesFork(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	created, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	created, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 	forkPath := rt.started[0]
 
@@ -220,7 +222,7 @@ func TestExecRequiresRunning(t *testing.T) {
 	mgr := newManager(t, rt, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 
 	res, err := mgr.Exec(ctx, "dev", "echo hi")
@@ -242,7 +244,7 @@ func TestDeleteDestroysFork(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 
 	deleted, err := mgr.Delete(ctx, "dev")
@@ -263,7 +265,7 @@ func TestReconcileOnBootResetsRunning(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	created, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	created, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 	require.Equal(t, session.StateRunning, created.State)
 
@@ -280,9 +282,9 @@ func TestCreateRefusedAtCountCap(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{MaxCount: 1})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "a", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "a", "ubuntu", "", "", false)
 	require.NoError(t, err)
-	_, err = mgr.Create(ctx, "b", "ubuntu", "", "")
+	_, err = mgr.Create(ctx, "b", "ubuntu", "", "", false)
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }
@@ -292,7 +294,7 @@ func TestReapIdleStopsIdleSession(t *testing.T) {
 	mgr := newManagerWithOpts(t, rt, newFakeSnapshot(), session.Options{IdleTimeout: time.Millisecond})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond) // let it age past the idle timeout
 
@@ -310,7 +312,7 @@ func TestReapIdleKeepsBusySession(t *testing.T) {
 	mgr := newManagerWithOpts(t, rt, newFakeSnapshot(), session.Options{IdleTimeout: time.Millisecond})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond)
 
@@ -326,7 +328,7 @@ func TestReapIdleKeepsBusySession(t *testing.T) {
 func TestReapIdleDisabledIsNoop(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{}) // IdleTimeout 0
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 
 	n, err := mgr.ReapIdle(ctx)
@@ -340,7 +342,7 @@ func TestPublishOpensListsAndUnpublishes(t *testing.T) {
 	mgr.SetBroker(broker)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 
 	pp, err := mgr.Publish(ctx, "dev", 3000, "", false, "")
@@ -370,7 +372,7 @@ func TestUnpublishMissingPortNotFound(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
 	mgr.SetBroker(newFakeBroker())
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 
 	err = mgr.Unpublish(ctx, "dev", 3000)
@@ -383,7 +385,7 @@ func TestDialPortWakesStoppedSession(t *testing.T) {
 	mgr := newManager(t, rt, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 	_, err = mgr.Stop(ctx, "dev")
 	require.NoError(t, err)
@@ -405,7 +407,7 @@ func TestDeleteClosesPublishedPorts(t *testing.T) {
 	mgr.SetBroker(broker)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 	pp, err := mgr.Publish(ctx, "dev", 8080, "web", false, "")
 	require.NoError(t, err)
@@ -419,7 +421,7 @@ func TestPublishPublicRequiresEnable(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot()) // PublicWeb defaults off
 	mgr.SetBroker(newFakeBroker())
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 
 	_, err = mgr.Publish(ctx, "dev", 8080, "", true, "app.example.com")
@@ -431,7 +433,7 @@ func TestPublishPublicValidatesHostAndResolves(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{PublicWeb: true})
 	mgr.SetBroker(newFakeBroker())
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 
 	// A malformed host is rejected before anything is recorded.
@@ -457,7 +459,7 @@ func TestPublishHostWithoutPublicRejected(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{PublicWeb: true})
 	mgr.SetBroker(newFakeBroker())
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false)
 	require.NoError(t, err)
 
 	_, err = mgr.Publish(ctx, "dev", 8080, "", false, "app.example.com")
@@ -465,10 +467,33 @@ func TestPublishHostWithoutPublicRejected(t *testing.T) {
 	require.Equal(t, errs.CategoryInvalidArgument, errs.CategoryOf(err))
 }
 
+func TestCreateAppRunsAndPersists(t *testing.T) {
+	rt := &fakeRuntime{}
+	mgr := newManager(t, rt, newFakeSnapshot())
+	ctx := context.Background()
+
+	s, err := mgr.Create(ctx, "web", "nginx", "", "", true)
+	require.NoError(t, err)
+	require.True(t, s.RunApp)
+	require.Equal(t, []bool{true}, rt.runApps, "create should boot the VM in app mode")
+
+	// App mode is persisted, so a stop/start re-runs the app rather than coming
+	// up bare (the footgun this fixes).
+	_, err = mgr.Stop(ctx, "web")
+	require.NoError(t, err)
+	_, err = mgr.Start(ctx, "web")
+	require.NoError(t, err)
+	require.Equal(t, []bool{true, true}, rt.runApps, "restart must re-run the app")
+
+	got, err := mgr.Get(ctx, "web")
+	require.NoError(t, err)
+	require.True(t, got.RunApp)
+}
+
 func TestSessionsRequireSessionRuntime(t *testing.T) {
 	// A nil runtime models a non-session-capable runtime (e.g. mock/runc).
 	mgr := newManager(t, nil, newFakeSnapshot())
-	_, err := mgr.Create(context.Background(), "dev", "ubuntu", "", "")
+	_, err := mgr.Create(context.Background(), "dev", "ubuntu", "", "", false)
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }

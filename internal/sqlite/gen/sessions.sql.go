@@ -22,11 +22,11 @@ func (q *Queries) CountSessions(ctx context.Context) (int64, error) {
 
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (
-    id, name, image, state, fork_id, fork_path, created_at, updated_at, egress_policy, gateway
+    id, name, image, state, fork_id, fork_path, created_at, updated_at, egress_policy, gateway, run_app
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway
+RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app
 `
 
 type CreateSessionParams struct {
@@ -40,6 +40,7 @@ type CreateSessionParams struct {
 	UpdatedAt    int64
 	EgressPolicy string
 	Gateway      string
+	RunApp       int64
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
@@ -54,6 +55,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.UpdatedAt,
 		arg.EgressPolicy,
 		arg.Gateway,
+		arg.RunApp,
 	)
 	var i Session
 	err := row.Scan(
@@ -68,6 +70,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.LastUsedAt,
 		&i.EgressPolicy,
 		&i.Gateway,
+		&i.RunApp,
 	)
 	return i, err
 }
@@ -85,7 +88,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) (int64, error) {
 }
 
 const getSessionByRef = `-- name: GetSessionByRef :one
-SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway FROM sessions
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app FROM sessions
 WHERE id = ?1 OR name = ?1
 LIMIT 1
 `
@@ -105,12 +108,13 @@ func (q *Queries) GetSessionByRef(ctx context.Context, ref string) (Session, err
 		&i.LastUsedAt,
 		&i.EgressPolicy,
 		&i.Gateway,
+		&i.RunApp,
 	)
 	return i, err
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway FROM sessions
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app FROM sessions
 ORDER BY created_at DESC
 `
 
@@ -135,6 +139,7 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 			&i.LastUsedAt,
 			&i.EgressPolicy,
 			&i.Gateway,
+			&i.RunApp,
 		); err != nil {
 			return nil, err
 		}

@@ -51,6 +51,7 @@ func sessionCreateCmd() *cli.Command {
 			&cli.StringFlag{Name: "image", Usage: "image / environment spec (default: the daemon's default_image setting)"},
 			&cli.StringFlag{Name: "egress", Usage: "fork network egress: none | allowlist | open (default: the daemon's default_egress_policy setting)"},
 			&cli.StringFlag{Name: "gateway", Usage: "model gateway: on (inject ANTHROPIC_/OPENAI_ env) | off (use the agent's own auth, e.g. a subscription login) (default: the daemon's default_gateway setting)"},
+			&cli.BoolFlag{Name: "app", Usage: "run the image's own app (its entrypoint) on boot, instead of a bare environment"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			client := newSessionsClient(cmd)
@@ -59,6 +60,7 @@ func sessionCreateCmd() *cli.Command {
 				Image:        cmd.String("image"),
 				EgressPolicy: cmd.String("egress"),
 				Gateway:      cmd.String("gateway"),
+				RunApp:       cmd.Bool("app"),
 			}))
 			if err != nil {
 				return err
@@ -441,6 +443,9 @@ func writeSessionDetails(w io.Writer, s *fletcherv1.Session) error {
 	fmt.Fprintf(tw, "image:\t%s\n", s.GetImage())
 	fmt.Fprintf(tw, "egress:\t%s\n", s.GetEgressPolicy())
 	fmt.Fprintf(tw, "gateway:\t%s\n", s.GetGateway())
+	if s.GetRunApp() {
+		fmt.Fprintf(tw, "app:\t%s\n", green("runs the image's entrypoint on boot"))
+	}
 	fmt.Fprintf(tw, "disk:\t%s\n", humanBytes(s.GetDiskBytes()))
 	fmt.Fprintf(tw, "created_at:\t%s\n", formatUnix(s.GetCreatedAt()))
 	fmt.Fprintf(tw, "updated_at:\t%s\n", formatUnix(s.GetUpdatedAt()))

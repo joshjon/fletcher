@@ -20,6 +20,10 @@ type SessionSpec struct {
 	// "open" (empty is treated as "allowlist"). The driver uses it to pick the
 	// egress proxy socket the fork's HTTP_PROXY reaches, or to deny egress.
 	EgressPolicy string
+	// RunApp makes the guest run the image's own app (its captured entrypoint) on
+	// boot, instead of waiting for exec/shell. Set for a session created --app
+	// (Milestone 9). The driver signals it via the guest kernel cmdline.
+	RunApp bool
 }
 
 // ShellSpec parameterises an interactive PTY in a session VM.

@@ -30,6 +30,7 @@ import (
 	"github.com/mdlayher/vsock"
 	"golang.org/x/sys/unix"
 
+	"github.com/joshjon/fletcher/internal/appspec"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestproto"
 )
 
@@ -58,11 +59,71 @@ func main() {
 // sessionMode reports whether the kernel was booted for a durable session
 // (the daemon adds fletcher.session=1 to the cmdline for session VMs).
 func sessionMode() bool {
+	return cmdlineHas("fletcher.session=1")
+}
+
+// appMode reports whether the daemon asked the guest to run the image's own app
+// on boot (it adds fletcher.app=1 to the cmdline for a session created --app).
+func appMode() bool {
+	return cmdlineHas("fletcher.app=1")
+}
+
+func cmdlineHas(flag string) bool {
 	data, err := os.ReadFile("/proc/cmdline")
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), "fletcher.session=1")
+	return strings.Contains(string(data), flag)
+}
+
+// appLogPath is where the image app's stdout/stderr are captured inside the VM,
+// so a session can be shelled into to read them.
+const appLogPath = "/var/log/fletcher-app.log"
+
+// startApp launches the image's own app (captured at import into appspec.Path)
+// in the background, with the image's env and working dir, logging to a file.
+// The control server keeps running alongside it so the session is still
+// shell-able. Crash-restart and precise USER mapping are follow-up M9 items.
+func startApp() {
+	spec, err := appspec.Read(appspec.Path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: app mode on but no app spec (%v); nothing to run\n", err)
+		return
+	}
+	argv := spec.Argv()
+	if len(argv) == 0 {
+		fmt.Fprintln(os.Stderr, "fletcher-guest: app spec has no command")
+		return
+	}
+	_ = os.MkdirAll("/var/log", 0o755) //nolint:gosec // standard log dir perms inside the VM
+	logf, err := os.OpenFile(appLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: open app log: %v\n", err)
+		return
+	}
+	workDir := spec.WorkingDir
+	if workDir == "" {
+		workDir = "/"
+	}
+	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...) //nolint:gosec // running the image's own app is the entire purpose of app mode
+	cmd.Dir = workDir
+	// Run as root (PID 1's uid), which is what most app images expect; honoring a
+	// non-root image USER precisely is a follow-up. loginUser{} keeps the root
+	// HOME/USER env defaults.
+	cmd.Env = withDefaults(spec.Env, loginUser{})
+	cmd.Stdout = logf
+	cmd.Stderr = logf
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: start app %v: %v\n", argv, err)
+		_ = logf.Close()
+		return
+	}
+	fmt.Fprintf(os.Stderr, "fletcher-guest: started app pid %d: %v\n", cmd.Process.Pid, argv)
+	// Reap when it exits; crash-restart is a later M9 item.
+	go func() {
+		_ = cmd.Wait()
+		_ = logf.Close()
+	}()
 }
 
 // serve is the session control loop: listen on vsock and serve each
@@ -74,6 +135,9 @@ func serve() {
 	startSSHD()
 	go serveSSHRelay()
 	go servePortRelay()
+	if appMode() {
+		startApp()
+	}
 
 	ln, err := vsock.Listen(guestproto.ControlPort, nil)
 	if err != nil {

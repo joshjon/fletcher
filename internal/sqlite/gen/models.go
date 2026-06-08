@@ -77,6 +77,7 @@ type Session struct {
 	LastUsedAt   *int64
 	EgressPolicy string
 	Gateway      string
+	RunApp       int64
 }
 
 type Setting struct {
