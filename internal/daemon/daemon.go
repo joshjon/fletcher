@@ -173,6 +173,9 @@ type Config struct {
 	// created without an explicit --egress: "none" | "allowlist" | "open".
 	// Settings-managed (default_egress_policy); empty resolves to "allowlist".
 	DefaultEgressPolicy string
+	// VMMemoryMB is the guest memory (MB) for each job/session microVM.
+	// Settings-managed (vm_memory_mb); 512 is too small for an interactive agent.
+	VMMemoryMB int
 }
 
 // Defaults for the session settings, applied when not explicitly set.
@@ -182,6 +185,10 @@ const (
 	defaultSessionMaxDiskGB   = 50
 	defaultDefaultImage       = "fletcher-base"
 	defaultEgressPolicy       = egress.PolicyAllowlist
+	// defaultVMMemoryMB is the per-microVM guest memory. An interactive agent
+	// (Claude Code, Opus, large context) needs well above the old 512 MB - that
+	// OOM-killed the TUI; 2 GB gives comfortable headroom.
+	defaultVMMemoryMB = 2048
 )
 
 // shutdownTimeout caps how long the daemon waits for in-flight work before
@@ -979,61 +986,74 @@ func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logg
 	cfg.SessionMaxDiskGB = defaultSessionMaxDiskGB
 	cfg.DefaultImage = defaultDefaultImage
 	cfg.DefaultEgressPolicy = defaultEgressPolicy
+	cfg.VMMemoryMB = defaultVMMemoryMB
 
 	vals, err := store.Values(ctx)
 	if err != nil {
 		return fmt.Errorf("load settings: %w", err)
 	}
 	for k, v := range vals {
-		switch k {
-		case settings.KeyRuntime:
-			cfg.RuntimeKind = v
-		case settings.KeySnapshot:
-			cfg.SnapshotKind = v
-		case settings.KeyBtrfsRoot:
-			cfg.BtrfsRoot = v
-		case settings.KeyPublicEndpoint:
-			cfg.PublicEndpoint = v
-		case settings.KeyWireGuardPort:
-			if n, perr := strconv.Atoi(v); perr == nil {
-				cfg.WireGuardListenPort = n
-			}
-		case settings.KeyLogLevel:
-			cfg.LogLevel = v
-		case settings.KeyCredentialsDir:
-			cfg.CredentialsDir = v
-		case settings.KeyNoUPnP:
-			if b, perr := strconv.ParseBool(v); perr == nil {
-				cfg.DisableUPnP = b
-			}
-		case settings.KeyGatewayListen:
-			cfg.GatewayListenAddr = v
-		case settings.KeyMCPListen:
-			cfg.MCPListenAddr = v
-		case settings.KeySessionIdleTimeout:
-			if v == "0" {
-				cfg.SessionIdleTimeout = 0
-			} else if d, perr := time.ParseDuration(v); perr == nil {
-				cfg.SessionIdleTimeout = d
-			}
-		case settings.KeySessionMaxCount:
-			if n, perr := strconv.Atoi(v); perr == nil {
-				cfg.SessionMaxCount = n
-			}
-		case settings.KeySessionMaxDiskGB:
-			if n, perr := strconv.Atoi(v); perr == nil {
-				cfg.SessionMaxDiskGB = n
-			}
-		case settings.KeyDefaultImage:
-			cfg.DefaultImage = v
-		case settings.KeyDefaultEgressPolicy:
-			cfg.DefaultEgressPolicy = v
-		default:
-			continue // unknown key persisted by an older/newer version; ignore
+		if applySetting(cfg, k, v) {
+			logger.Info("applied setting", slog.String("key", k), slog.String("value", v))
 		}
-		logger.Info("applied setting", slog.String("key", k), slog.String("value", v))
 	}
 	return nil
+}
+
+// applySetting overlays one stored setting onto cfg, returning false for an
+// unknown key (persisted by an older/newer version) so the caller skips it.
+func applySetting(cfg *Config, k, v string) bool {
+	switch k {
+	case settings.KeyRuntime:
+		cfg.RuntimeKind = v
+	case settings.KeySnapshot:
+		cfg.SnapshotKind = v
+	case settings.KeyBtrfsRoot:
+		cfg.BtrfsRoot = v
+	case settings.KeyPublicEndpoint:
+		cfg.PublicEndpoint = v
+	case settings.KeyWireGuardPort:
+		if n, perr := strconv.Atoi(v); perr == nil {
+			cfg.WireGuardListenPort = n
+		}
+	case settings.KeyLogLevel:
+		cfg.LogLevel = v
+	case settings.KeyCredentialsDir:
+		cfg.CredentialsDir = v
+	case settings.KeyNoUPnP:
+		if b, perr := strconv.ParseBool(v); perr == nil {
+			cfg.DisableUPnP = b
+		}
+	case settings.KeyGatewayListen:
+		cfg.GatewayListenAddr = v
+	case settings.KeyMCPListen:
+		cfg.MCPListenAddr = v
+	case settings.KeySessionIdleTimeout:
+		if v == "0" {
+			cfg.SessionIdleTimeout = 0
+		} else if d, perr := time.ParseDuration(v); perr == nil {
+			cfg.SessionIdleTimeout = d
+		}
+	case settings.KeySessionMaxCount:
+		if n, perr := strconv.Atoi(v); perr == nil {
+			cfg.SessionMaxCount = n
+		}
+	case settings.KeySessionMaxDiskGB:
+		if n, perr := strconv.Atoi(v); perr == nil {
+			cfg.SessionMaxDiskGB = n
+		}
+	case settings.KeyDefaultImage:
+		cfg.DefaultImage = v
+	case settings.KeyDefaultEgressPolicy:
+		cfg.DefaultEgressPolicy = v
+	case settings.KeyVMMemoryMB:
+		if n, perr := strconv.Atoi(v); perr == nil && n > 0 {
+			cfg.VMMemoryMB = n
+		}
+	default:
+		return false // unknown key persisted by an older/newer version; ignore
+	}
+	return true
 }
 
 // remoteAPIPort is the TCP port the daemon exposes its Connect API on, bound to
@@ -1218,6 +1238,8 @@ func buildRuntimeDriver(cfg Config, logger *slog.Logger) (runtime.Driver, error)
 				{ListenAddr: proxyListenAddr(cfg), HostSocket: proxySocketPath(cfg), Egress: true},
 			},
 			EgressOpenSocket: proxyOpenSocketPath(cfg),
+			MemSizeMib:       int64(cfg.VMMemoryMB),
+			VcpuCount:        2,
 			Logger:           logger,
 		})
 	default:

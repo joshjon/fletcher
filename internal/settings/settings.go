@@ -39,6 +39,8 @@ const (
 	KeyDefaultImage = "default_image"
 
 	KeyDefaultEgressPolicy = "default_egress_policy"
+
+	KeyVMMemoryMB = "vm_memory_mb"
 )
 
 // definition describes a settable key: its help text and an optional validator.
@@ -64,6 +66,7 @@ var registry = []definition{
 	{KeySessionMaxDiskGB, "maximum total session disk in GB; 0 disables the cap", nonNegInt},
 	{KeyDefaultImage, "base image used by `job`/`session create` when --image is omitted; empty makes --image required", nil},
 	{KeyDefaultEgressPolicy, "default fork egress policy when --egress is omitted: none | allowlist | open", oneOf("none", "allowlist", "open")},
+	{KeyVMMemoryMB, "per-VM guest memory in MB for job/session microVMs (default 2048); an interactive agent needs well over 512", nonNegInt},
 }
 
 // View is one setting's full picture for `fletcher settings list`.
