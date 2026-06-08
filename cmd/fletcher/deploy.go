@@ -76,6 +76,9 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 				return fmt.Errorf("create session %q (delete an existing one with `fletcher session delete %s`, or pass --name): %w", name, name, err)
 			}
 
+			// The session now exists because this deploy created it. If publishing
+			// fails (e.g. a host conflict), roll it back so a failed deploy leaves
+			// nothing behind rather than an unreachable orphan.
 			resp, err := client.PublishPort(ctx, connect.NewRequest(&fletcherv1.PublishPortRequest{
 				Ref:       name,
 				GuestPort: uint32(port),
@@ -83,6 +86,9 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 				Host:      cmd.String("host"),
 			}))
 			if err != nil {
+				if _, derr := client.DeleteSession(ctx, connect.NewRequest(&fletcherv1.DeleteSessionRequest{Ref: name})); derr != nil {
+					fmt.Fprintf(os.Stderr, "warning: deploy failed and could not clean up session %q (delete it with `fletcher session delete %s`): %v\n", name, name, derr)
+				}
 				return fmt.Errorf("publish app port %d: %w", port, err)
 			}
 
