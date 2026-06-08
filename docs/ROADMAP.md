@@ -738,8 +738,8 @@ auto-wake a stopped session today - this is built fresh and also improves SSH).
 
 **Phases.**
 
-- **Phase 1 - preview ports over the tunnel (Layer A) - CODE COMPLETE (awaiting
-  hardware verification).** Generic guest port dial: a dedicated guest vsock relay
+- **Phase 1 - preview ports over the tunnel (Layer A) - DONE (verified on
+  hardware 2026-06-08).** Generic guest port dial: a dedicated guest vsock relay
   (`guestproto.PortForwardPort`, the SSH relay generalised - the host writes a
   2-byte target-port header, the guest splices to that loopback port) +
   `SessionHandle.DialPort` + `Manager.DialPort` (busy-marked for the connection
@@ -751,12 +751,10 @@ auto-wake a stopped session today - this is built fresh and also improves SSH).
   Unit-tested (publish lifecycle, dup conflict, wake-on-connect, delete-closes-
   ports); `make check` green. *Drive-by fix:* the darwin firecracker stub had
   drifted (missing the egress B2 `Forward.Egress` / `Options.EgressOpenSocket`
-  fields), silently breaking `make cross-check`; restored. *Still to verify on
-  hardware (operator):* a paired client reaches a dev server in a real microVM
-  over the tunnel, and an inbound connection wakes a hibernated session without
-  the reaper stopping it mid-traffic.
-- **Phase 2 - public exposure (Layer B, opt-in) - CODE COMPLETE (awaiting
-  hardware verification).** `session publish --public --host app.example.com`
+  fields), silently breaking `make cross-check`; restored. *Verified on hardware:*
+  a paired client reached a dev server in a real microVM at the tunnel address.
+- **Phase 2 - public exposure (Layer B, opt-in) - DONE (verified on hardware
+  2026-06-08).** `session publish --public --host app.example.com`
   serves a port on the internet over HTTPS. A single public listener (443 + 80 for
   ACME HTTP-01 + an HTTPS redirect) bound to all interfaces, UPnP-forwarded via
   `portmap` (TCP), gated by a global `public_web` setting (off by default; a
@@ -774,10 +772,14 @@ auto-wake a stopped session today - this is built fresh and also improves SSH).
   missing the daemon still runs, just without public serving). A public port is
   also tunnel-reachable (defense in depth); the tunnel forwarder is best-effort
   for public ports so they serve even when the tunnel is down. `make check` green.
-  *Still to verify on hardware (operator):* a browser outside the network reaches
-  `https://app.example.com` -> the session's web server with a valid (production)
-  cert. Suggested first run with `acme_staging true` to avoid burning LE rate
-  limits, then flip to production.
+  *Verified on hardware:* a browser outside the network reached a session's web
+  server at `https://<operator-domain>` with a Let's Encrypt cert (staging first,
+  then production). Two follow-ups surfaced while verifying: (1) the in-VM server
+  was a hand-backgrounded process that does not survive a session restart (a
+  daemon restart cold-boots the session), so it had to be relaunched - the M9
+  entrypoint/auto-start work fixes this for real deploys; (2) switching
+  `acme_staging` to false needs a daemon restart, and certmagic may keep serving
+  the cached staging cert until it is cleared from the cert store.
 
 **Limitations recorded up front.** CGNAT makes public inbound impossible and
 cannot be fixed without hosting a relay (off-thesis) - documented, not hidden,
@@ -804,6 +806,37 @@ Dockerfile-based: `fletcher image import <docker-ref>` does `docker build` ->
 flatten to an ext4/btrfs rootfs -> CoW-clone per VM (DESIGN §11). And M8 Phase 2
 is the public-exposure half. So M9 sits on top of both.
 
+**Positioning vs exe.dev (the reference for this flow).** exe.dev is a hosted
+service whose VMs pull an image from a registry at boot (`new --image
+<registry-ref>`, public / private / a registry you run on one of their VMs).
+Fletcher's structural wins: it runs on metal the operator owns (nothing hosted,
+metered, or visible to us), and because it *builds and flattens locally* it needs
+**no registry at all** for the common case - the code never leaves the LAN to be
+deployed back to it. exe.dev is currently smoother on pure convenience: it runs
+the image's app automatically and there is no box to operate. M9 closes that
+convenience gap (run the app automatically, one command) while keeping the
+ownership win. Honest framing: better where it counts (ownership/privacy),
+behind on turnkey ergonomics until M9 lands.
+
+**Build vs registry (decided).**
+
+- **Local build is the primary path** and the on-thesis differentiator: `docker
+  build` on the box -> import -> run. No registry hop; nothing leaves the network.
+  A builder is *not* new responsibility - Fletcher already builds (the base image
+  is `docker build`; `image import` is `docker create`/`export`). `deploy` just
+  exposes that pipeline; we shell to `docker build`, we do not write a builder.
+- **Registry pull is the secondary path** for images already built in CI
+  (ghcr/Hub/ECR). Works today via the host's `docker login`; add an optional
+  `--registry-auth=user:token` convenience (the exe.dev pattern) that does the
+  login for the operator.
+- **Do not host a registry, and do not recommend the registry-on-a-VM trick.**
+  exe.dev needs it (registry-fetch-at-boot); Fletcher does not (local flatten).
+  An operator *can* run `registry:2` in a session if they want, but it is never a
+  required step.
+- **Future (M9 v2):** run the build *inside an ephemeral Fletcher VM*
+  (buildkit/buildah, daemonless) so the host needs no Docker and the build itself
+  is sandboxed. v1 assumes Docker on the box (status quo for image work).
+
 **Net-new work.**
 
 - **Honor the OCI run config.** Today a session runs a command the operator gives
@@ -812,17 +845,34 @@ is the public-exposure half. So M9 sits on top of both.
   `ENV`, `WORKDIR`, `USER`, `EXPOSE`) into the existing `.meta.json` sidecar, and
   `fletcher-init` needs an "entrypoint mode" that launches it with that config
   mirrored (signals/env/user). `EXPOSE` gives the default port to publish.
+- **Keep the app running** (surfaced verifying M8: a hand-started server did not
+  survive a daemon restart). A deployed app must restart on crash and come back
+  after a daemon/box reboot - the supervisor reconciles deploys on boot and
+  re-launches the entrypoint, distinct from the session reaper that hibernates
+  idle interactive sessions.
 - **A one-shot deploy ergonomic.** `fletcher deploy ./myapp --host app.example.com`
-  = build -> import -> boot a `long_running` session running the entrypoint ->
-  `publish --public`. The `flyctl deploy` equivalent.
+  = build (or pull) -> import -> boot a `long_running` session running the
+  entrypoint -> `publish --public`. The `flyctl deploy` equivalent.
+- **Logs + status.** A deploy needs `fletcher` to show the app's logs and
+  run state (exe.dev's users just SSH in; we have `session shell`/`exec`, but a
+  deploy wants a direct `logs`/`status` surface).
+- **Redeploy / update.** Ship a new image version without losing the app's data;
+  ties into the backlogged "persistent volumes decoupled from session lifecycle"
+  (recreate on the new image, reattach the volume).
 
 **Falls out for free.** M8 wake-on-connect gives effective scale-to-zero: a
 deployed app with no traffic hibernates and wakes on the first request.
 
 **Caveats to verify before building.** The build step needs Docker on the box
 (same requirement the base-image build already has). The app must tolerate being
-PID-1-launched by `fletcher-init` (the real work in item 1). A crash-restart
-policy for a long-running deploy is wanted (the supervisor/reaper interplay).
+PID-1-launched by `fletcher-init` (the real work in the OCI-config item).
+
+**Suggested first slice (verifiable on its own).** Honor the image entrypoint:
+capture the OCI config at import and add `fletcher-init`'s entrypoint mode, so
+`session create --image <app>` boots and *runs the app* (manually published with
+the existing M8 verbs). That proves the load-bearing unknown (an arbitrary
+image's app running PID-1 under `fletcher-init`) before building the `deploy`
+wrapper, restart policy, and logs/status on top.
 
 ## Toward v1 - hardening (in progress)
 
