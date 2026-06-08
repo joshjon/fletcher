@@ -77,6 +77,9 @@ type Options struct {
 	// DefaultGateway is the model-gateway wiring used when create is called with
 	// an empty value: "on" | "off".
 	DefaultGateway string
+	// PublicWeb gates `Publish` with public=true: when false, publishing a port
+	// publicly is refused (the public HTTPS listener is off).
+	PublicWeb bool
 }
 
 // idleLoadThreshold is the guest 1-minute load average below which a session
@@ -500,11 +503,24 @@ func (m *Manager) DialPort(ctx context.Context, ref string, port uint16) (net.Co
 }
 
 // Publish exposes a port the session serves, brokered by the daemon. It records
-// the port and (when a broker is wired) opens the host-side forwarder, returning
-// the published port with its assigned tunnel port.
-func (m *Manager) Publish(ctx context.Context, ref string, guestPort int, name string) (PublishedPort, error) {
+// the port and (when a broker is wired) opens the host-side tunnel forwarder.
+// When public is set, the port is also served on the public HTTPS listener under
+// host - which requires the public_web setting to be enabled and a valid host.
+func (m *Manager) Publish(ctx context.Context, ref string, guestPort int, name string, public bool, host string) (PublishedPort, error) {
 	if guestPort < 1 || guestPort > 65535 {
 		return PublishedPort{}, errs.New(errs.CategoryInvalidArgument, "guest port must be between 1 and 65535")
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	if public {
+		if !m.opts.PublicWeb {
+			return PublishedPort{}, errs.New(errs.CategoryFailedPrecondition,
+				"public web serving is disabled; enable it with `fletcher settings set public_web true`")
+		}
+		if err := validatePublicHost(host); err != nil {
+			return PublishedPort{}, errs.Newf(errs.CategoryInvalidArgument, "invalid --host: %s", err)
+		}
+	} else if host != "" {
+		return PublishedPort{}, errs.New(errs.CategoryInvalidArgument, "--host is only valid with --public")
 	}
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
@@ -526,36 +542,101 @@ func (m *Manager) Publish(ctx context.Context, ref string, guestPort int, name s
 	if err != nil {
 		return PublishedPort{}, fmt.Errorf("generate published port id: %w", err)
 	}
-	pp := PublishedPort{ID: id.String(), SessionID: row.ID, GuestPort: guestPort, Name: name}
+	pp := PublishedPort{ID: id.String(), SessionID: row.ID, GuestPort: guestPort, Name: name, Public: public, Host: host}
 
-	// Open the forwarder first so it assigns the tunnel port we then persist. If
-	// the row insert fails we close it again.
+	// Open the tunnel forwarder first so it assigns the tunnel port we then
+	// persist. For a private port the tunnel is the only path, so a broker
+	// failure is fatal; a public port still serves over HTTPS without it, so it
+	// is best-effort there.
 	if m.broker != nil {
 		tunnelPort, berr := m.broker.Open(pp)
-		if berr != nil {
+		switch {
+		case berr != nil && !public:
 			return PublishedPort{}, errs.Newf(errs.CategoryFailedPrecondition,
 				"open port forwarder: %v", berr)
+		case berr != nil:
+			m.logger.Warn("published port: tunnel forwarder unavailable, public access only",
+				slog.String("session_id", row.ID), slog.Int("guest_port", guestPort), slog.String("err", berr.Error()))
+		default:
+			pp.TunnelPort = tunnelPort
 		}
-		pp.TunnelPort = tunnelPort
 	}
 
+	var hostArg *string
+	if host != "" {
+		hostArg = &host
+	}
 	created, err := m.q.CreatePublishedPort(ctx, sqliteq.CreatePublishedPortParams{
 		ID:         pp.ID,
 		SessionID:  pp.SessionID,
 		GuestPort:  int64(pp.GuestPort),
 		Name:       pp.Name,
 		TunnelPort: int64(pp.TunnelPort),
-		Public:     0,
-		Host:       nil,
+		Public:     boolToInt(public),
+		Host:       hostArg,
 		CreatedAt:  time.Now().Unix(),
 	})
 	if err != nil {
 		if m.broker != nil {
 			m.broker.Close(pp.ID)
 		}
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") && host != "" {
+			return PublishedPort{}, errs.Newf(errs.CategoryConflict, "host %q is already in use by another published port", host)
+		}
 		return PublishedPort{}, fmt.Errorf("record published port: %w", err)
 	}
 	return publishedFromRow(created), nil
+}
+
+// LookupPublicPort resolves a public hostname to its published port (session +
+// guest port) for the public listener's routing and certmagic's on-demand TLS
+// decision. Returns ErrNotFound when no public port claims the host.
+func (m *Manager) LookupPublicPort(ctx context.Context, host string) (PublishedPort, error) {
+	h := strings.ToLower(strings.TrimSpace(host))
+	row, err := m.q.GetPublishedPublicPortByHost(ctx, &h)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PublishedPort{}, ErrNotFound
+	}
+	if err != nil {
+		return PublishedPort{}, fmt.Errorf("lookup public port: %w", err)
+	}
+	return publishedFromRow(row), nil
+}
+
+// validatePublicHost checks host is a plausible bare DNS name (no scheme, port,
+// or path) for a public published port.
+func validatePublicHost(host string) error {
+	if host == "" {
+		return errors.New("a hostname is required for a public port (e.g. app.example.com)")
+	}
+	if len(host) > 253 {
+		return errors.New("hostname is too long")
+	}
+	if strings.ContainsAny(host, "/:@ ") || strings.Contains(host, "..") {
+		return errors.New("must be a bare hostname like app.example.com (no scheme, port, or path)")
+	}
+	if !strings.Contains(host, ".") {
+		return errors.New("must be a fully-qualified domain name (e.g. app.example.com)")
+	}
+	for _, r := range host {
+		if !isHostChar(r) {
+			return errors.New("may contain only lowercase letters, digits, dots, and hyphens")
+		}
+	}
+	return nil
+}
+
+// isHostChar reports whether r is allowed in a published hostname.
+func isHostChar(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '-'
+}
+
+// boolToInt maps a bool to the 0/1 SQLite stores for it.
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // Unpublish stops forwarding a session's published port and forgets it.

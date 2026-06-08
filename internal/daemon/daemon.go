@@ -180,6 +180,16 @@ type Config struct {
 	// created without an explicit --gateway: "on" injects the gateway env, "off"
 	// omits it. Settings-managed (default_gateway); empty resolves to "on".
 	DefaultGateway string
+	// PublicWeb enables the public HTTPS listener that serves `session publish
+	// --public` ports on the internet (binds 443/80). Settings-managed
+	// (public_web); default false - the new public attack surface is opt-in.
+	PublicWeb bool
+	// ACMEStaging uses Let's Encrypt's staging CA for public certs (untrusted,
+	// no rate limits - for testing). Settings-managed (acme_staging).
+	ACMEStaging bool
+	// ACMEEmail is the optional contact email for the ACME account.
+	// Settings-managed (acme_email).
+	ACMEEmail string
 }
 
 // Defaults for the session settings, applied when not explicitly set.
@@ -258,6 +268,7 @@ type services struct {
 	supervisor      *job.Supervisor
 	sessions        *session.Manager
 	portBroker      *session.Broker
+	publicWeb       *publicWebServers
 	connectSrv      *http.Server
 	gatewaySrv      *http.Server
 	mcpSrv          *http.Server
@@ -433,6 +444,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		DefaultImage:        cfg.DefaultImage,
 		DefaultEgressPolicy: egressDefaultPolicy(cfg),
 		DefaultGateway:      defaultGateway(cfg),
+		PublicWeb:           cfg.PublicWeb,
 	})
 	if err := sessionMgr.ReconcileOnBoot(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile sessions: %w", err)
@@ -455,6 +467,13 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	if err := sessionMgr.ReconcilePorts(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile published ports: %w", err)
 	}
+
+	// Public web (Milestone 8 Phase 2): serve `session publish --public` ports on
+	// the internet over HTTPS, certmagic terminating TLS and reverse-proxying into
+	// the VM over vsock. Opt-in (the new public attack surface), and best-effort:
+	// if 443/80 cannot be bound (no CAP_NET_BIND_SERVICE) the daemon still runs,
+	// just without public serving.
+	publicWeb := buildPublicWeb(ctx, cfg, sessionMgr, logger)
 
 	connectDeps := connectDeps{
 		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg), defaultGateway(cfg)),
@@ -484,6 +503,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		supervisor:      supervisor,
 		sessions:        sessionMgr,
 		portBroker:      portBroker,
+		publicWeb:       publicWeb,
 		connectSrv:      connectSrv,
 		gatewaySrv:      newGatewayHTTPServer(gw),
 		mcpSrv:          newMCPHTTPServer(mcpServer),
@@ -598,6 +618,12 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	if s.portBroker != nil {
 		g.Add(portBrokerActor(s.portBroker))
 	}
+	if s.publicWeb != nil {
+		//nolint:contextcheck // shutdown must outlive the cancelled parent ctx
+		g.Add(tlsServeActor(logger, "public-https", s.publicWeb.httpsSrv, s.publicWeb.httpsLn, "https://"+publicHTTPSAddr))
+		//nolint:contextcheck // same
+		g.Add(httpServeActor(logger, "public-http", s.publicWeb.httpSrv, s.publicWeb.httpLn, "http://"+publicHTTPAddr))
+	}
 	g.Add(signalActor(ctx))
 	return g.Run()
 }
@@ -643,6 +669,84 @@ func portBrokerActor(b *session.Broker) (func() error, func(error)) {
 			b.CloseAll()
 			close(done)
 		}
+}
+
+// Public web listen addresses. Bound on all interfaces so the box is the public
+// edge (UPnP forwards the same ports); binding 80/443 needs CAP_NET_BIND_SERVICE.
+const (
+	publicHTTPSAddr = ":443"
+	publicHTTPAddr  = ":80"
+	publicHTTPSPort = 443
+	publicHTTPPort  = 80
+)
+
+// publicWebServers holds the public HTTPS (TLS) and HTTP (ACME + redirect)
+// servers and their listeners.
+type publicWebServers struct {
+	httpsSrv *http.Server
+	httpSrv  *http.Server
+	httpsLn  net.Listener
+	httpLn   net.Listener
+}
+
+// buildPublicWeb constructs the public web servers when public_web is enabled.
+// Returns nil when disabled, or when 443/80 cannot be bound (logged, non-fatal:
+// the daemon still serves everything else) - the usual cause is a missing
+// CAP_NET_BIND_SERVICE.
+func buildPublicWeb(ctx context.Context, cfg Config, mgr *session.Manager, logger *slog.Logger) *publicWebServers {
+	if !cfg.PublicWeb {
+		return nil
+	}
+	httpsLn, _, herr := listenTCP(ctx, publicHTTPSAddr, "public-https")
+	if herr != nil {
+		logger.Error("public web disabled: cannot bind 443 (grant CAP_NET_BIND_SERVICE?)", slog.String("err", herr.Error()))
+		return nil
+	}
+	httpLn, _, herr := listenTCP(ctx, publicHTTPAddr, "public-http")
+	if herr != nil {
+		logger.Error("public web disabled: cannot bind 80 (grant CAP_NET_BIND_SERVICE?)", slog.String("err", herr.Error()))
+		_ = httpsLn.Close()
+		return nil
+	}
+	pub := session.NewPublicServer(session.PublicConfig{
+		Backend: mgr,
+		Logger:  logger,
+		CertDir: filepath.Join(filepath.Dir(cfg.DatabasePath), "certmagic"),
+		Email:   cfg.ACMEEmail,
+		Staging: cfg.ACMEStaging,
+	})
+	// Forward the public ports on the router so the box is reachable from the
+	// internet; best-effort (the operator may have forwarded them manually).
+	tryUPnPTCP(ctx, logger, publicHTTPSPort, "fletcher public https")
+	tryUPnPTCP(ctx, logger, publicHTTPPort, "fletcher public http")
+	logger.Info("public web serving enabled",
+		slog.String("https", publicHTTPSAddr),
+		slog.String("http", publicHTTPAddr),
+		slog.Bool("acme_staging", cfg.ACMEStaging))
+	return &publicWebServers{
+		httpsSrv: &http.Server{Handler: pub.HTTPSHandler(), TLSConfig: pub.TLSConfig(), ReadHeaderTimeout: 10 * time.Second},
+		httpSrv:  &http.Server{Handler: pub.HTTPHandler(), ReadHeaderTimeout: 10 * time.Second},
+		httpsLn:  httpsLn,
+		httpLn:   httpLn,
+	}
+}
+
+// tlsServeActor serves an HTTPS server (TLS via the server's TLSConfig, e.g.
+// certmagic's on-demand certs) until shutdown.
+func tlsServeActor(logger *slog.Logger, role string, srv *http.Server, ln net.Listener, baseURL string) (func() error, func(error)) {
+	execute := func() error {
+		logger.Info(role+" listening", slog.String("base_url", baseURL))
+		if err := srv.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("%s serve: %w", role, err)
+		}
+		return nil
+	}
+	interrupt := func(_ error) {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}
+	return execute, interrupt
 }
 
 // tunnelActor keeps the WireGuard interface alive until the run group
@@ -945,6 +1049,9 @@ func settingsDefaults(cfg Config) map[string]string {
 		settings.KeySessionMaxCount:    strconv.Itoa(cfg.SessionMaxCount),
 		settings.KeySessionMaxDiskGB:   strconv.Itoa(cfg.SessionMaxDiskGB),
 		settings.KeyDefaultImage:       cfg.DefaultImage,
+		settings.KeyPublicWeb:          strconv.FormatBool(cfg.PublicWeb),
+		settings.KeyACMEStaging:        strconv.FormatBool(cfg.ACMEStaging),
+		settings.KeyACMEEmail:          cfg.ACMEEmail,
 	}
 }
 
@@ -1066,6 +1173,26 @@ func applySetting(cfg *Config, k, v string) bool {
 		}
 	case settings.KeyDefaultGateway:
 		cfg.DefaultGateway = v
+	default:
+		return applyPublicWebSetting(cfg, k, v)
+	}
+	return true
+}
+
+// applyPublicWebSetting applies the Milestone 8 public-web keys, returning false
+// for any other (unknown) key. Split from applySetting to keep each readable.
+func applyPublicWebSetting(cfg *Config, k, v string) bool {
+	switch k {
+	case settings.KeyPublicWeb:
+		if b, perr := strconv.ParseBool(v); perr == nil {
+			cfg.PublicWeb = b
+		}
+	case settings.KeyACMEStaging:
+		if b, perr := strconv.ParseBool(v); perr == nil {
+			cfg.ACMEStaging = b
+		}
+	case settings.KeyACMEEmail:
+		cfg.ACMEEmail = v
 	default:
 		return false // unknown key persisted by an older/newer version; ignore
 	}

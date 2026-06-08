@@ -36,6 +36,7 @@ type Querier interface {
 	GetPeerByAPITokenHash(ctx context.Context, apiTokenHash *string) (Peer, error)
 	GetPeerByName(ctx context.Context, name string) (Peer, error)
 	GetPublishedPortBySessionPort(ctx context.Context, arg GetPublishedPortBySessionPortParams) (PublishedPort, error)
+	GetPublishedPublicPortByHost(ctx context.Context, host *string) (PublishedPort, error)
 	GetSecret(ctx context.Context, name string) ([]byte, error)
 	GetSessionByRef(ctx context.Context, ref string) (Session, error)
 	ListApprovals(ctx context.Context, arg ListApprovalsParams) ([]PendingApproval, error)

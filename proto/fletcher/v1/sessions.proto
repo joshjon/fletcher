@@ -219,6 +219,11 @@ message PublishPortRequest {
   uint32 guest_port = 2;
   // name is an optional label; empty defaults to "port-<guest_port>".
   string name = 3;
+  // public also serves the port on the public HTTPS listener (requires the
+  // public_web setting enabled). When false the port is tunnel-only.
+  bool public = 4;
+  // host is the public hostname to route to this port (required when public).
+  string host = 5;
 }
 
 message PublishPortResponse {

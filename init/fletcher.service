@@ -57,11 +57,13 @@ SystemCallArchitectures=native
 #   CAP_NET_ADMIN - WireGuard tunnel + UPnP port-forward.
 #   CAP_SYS_ADMIN - btrfs subvolume create/snapshot (the fork mechanism) and
 #                   the namespace setup runc needs to launch job containers.
+#   CAP_NET_BIND_SERVICE - bind 80/443 for the public web listener
+#                   (`session publish --public`); only used when public_web is on.
 # CAP_SYS_ADMIN is broad; it is the pragmatic grant for running real
 # isolation on a single owned box and is a candidate for tightening
 # (rootless-runc + user namespaces, unprivileged btrfs) in a later pass.
-AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_NET_BIND_SERVICE
 
 # /dev/net/tun must be reachable for the daemon to create the WG
 # interface; /dev/kvm for the Firecracker runtime to boot microVMs. Listing

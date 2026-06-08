@@ -343,7 +343,7 @@ func TestPublishOpensListsAndUnpublishes(t *testing.T) {
 	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
 
-	pp, err := mgr.Publish(ctx, "dev", 3000, "")
+	pp, err := mgr.Publish(ctx, "dev", 3000, "", false, "")
 	require.NoError(t, err)
 	require.Equal(t, "port-3000", pp.Name, "name defaults to port-<n>")
 	require.NotZero(t, pp.TunnelPort, "broker assigns a tunnel port")
@@ -355,7 +355,7 @@ func TestPublishOpensListsAndUnpublishes(t *testing.T) {
 	require.Equal(t, 3000, ports[0].GuestPort)
 
 	// Re-publishing the same port conflicts.
-	_, err = mgr.Publish(ctx, "dev", 3000, "")
+	_, err = mgr.Publish(ctx, "dev", 3000, "", false, "")
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryConflict, errs.CategoryOf(err))
 
@@ -407,12 +407,62 @@ func TestDeleteClosesPublishedPorts(t *testing.T) {
 
 	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
 	require.NoError(t, err)
-	pp, err := mgr.Publish(ctx, "dev", 8080, "web")
+	pp, err := mgr.Publish(ctx, "dev", 8080, "web", false, "")
 	require.NoError(t, err)
 
 	_, err = mgr.Delete(ctx, "dev")
 	require.NoError(t, err)
 	require.Contains(t, broker.closed, pp.ID, "delete closes the session's port forwarders")
+}
+
+func TestPublishPublicRequiresEnable(t *testing.T) {
+	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot()) // PublicWeb defaults off
+	mgr.SetBroker(newFakeBroker())
+	ctx := context.Background()
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	require.NoError(t, err)
+
+	_, err = mgr.Publish(ctx, "dev", 8080, "", true, "app.example.com")
+	require.Error(t, err)
+	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
+}
+
+func TestPublishPublicValidatesHostAndResolves(t *testing.T) {
+	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{PublicWeb: true})
+	mgr.SetBroker(newFakeBroker())
+	ctx := context.Background()
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	require.NoError(t, err)
+
+	// A malformed host is rejected before anything is recorded.
+	_, err = mgr.Publish(ctx, "dev", 8080, "", true, "not a host")
+	require.Error(t, err)
+	require.Equal(t, errs.CategoryInvalidArgument, errs.CategoryOf(err))
+
+	// A valid host is accepted, lowercased, and persisted as public.
+	pp, err := mgr.Publish(ctx, "dev", 8080, "", true, "App.Example.com")
+	require.NoError(t, err)
+	require.True(t, pp.Public)
+	require.Equal(t, "app.example.com", pp.Host)
+
+	// The public listener resolves the host to this port; unknown hosts 404.
+	got, err := mgr.LookupPublicPort(ctx, "app.example.com")
+	require.NoError(t, err)
+	require.Equal(t, pp.ID, got.ID)
+	_, err = mgr.LookupPublicPort(ctx, "nope.example.com")
+	require.ErrorIs(t, err, session.ErrNotFound)
+}
+
+func TestPublishHostWithoutPublicRejected(t *testing.T) {
+	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{PublicWeb: true})
+	mgr.SetBroker(newFakeBroker())
+	ctx := context.Background()
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "")
+	require.NoError(t, err)
+
+	_, err = mgr.Publish(ctx, "dev", 8080, "", false, "app.example.com")
+	require.Error(t, err)
+	require.Equal(t, errs.CategoryInvalidArgument, errs.CategoryOf(err))
 }
 
 func TestSessionsRequireSessionRuntime(t *testing.T) {

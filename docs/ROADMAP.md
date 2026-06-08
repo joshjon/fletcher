@@ -755,16 +755,29 @@ auto-wake a stopped session today - this is built fresh and also improves SSH).
   hardware (operator):* a paired client reaches a dev server in a real microVM
   over the tunnel, and an inbound connection wakes a hibernated session without
   the reaper stopping it mid-traffic.
-- **Phase 2 - public exposure (Layer B, opt-in).** A per-published-port `public`
-  flag + `--host`. A single public listener (443 + 80 for ACME and an HTTPS
-  redirect) bound to the real interface, UPnP-forwarded via `portmap` (TCP), gated
-  by a global `public_web` enable (off by default). `certmagic` TLS via
-  HTTP-01 / TLS-ALPN-01, on-demand per published hostname. Host/SNI routing to the
-  right published port's broker. The public listener serves only published ports;
-  the daemon's own surfaces stay off it. Every served hostname audit-logged.
-  systemd unit gains `CAP_NET_BIND_SERVICE` (or relies on a UPnP external 443 ->
-  internal high port). *Verify:* a browser outside the network reaches
-  `https://app.example.com` -> the session's web server with a valid cert.
+- **Phase 2 - public exposure (Layer B, opt-in) - CODE COMPLETE (awaiting
+  hardware verification).** `session publish --public --host app.example.com`
+  serves a port on the internet over HTTPS. A single public listener (443 + 80 for
+  ACME HTTP-01 + an HTTPS redirect) bound to all interfaces, UPnP-forwarded via
+  `portmap` (TCP), gated by a global `public_web` setting (off by default; a
+  `--public` publish while off is refused with a clear message). `certmagic`
+  (`internal/session/public.go`) terminates TLS with **on-demand** issuance whose
+  decision function only allows a hostname that maps to a published public port -
+  so the internet-facing listener can never be coaxed into minting certs for
+  arbitrary names. HTTP-01 + TLS-ALPN-01 (no DNS-provider token). Routing is by
+  `Host` header -> the published port's `(session, guest_port)`, reverse-proxied
+  into the VM over the existing vsock `DialPort` path (so wake-on-connect +
+  busy-marking come free); an unknown host gets a 404. The listener serves only
+  published public ports - the daemon API/gateway/MCP are never on it - and every
+  request is audit-logged. `acme_staging` / `acme_email` settings; systemd unit
+  gains `CAP_NET_BIND_SERVICE` (binding 443/80 is best-effort - if the cap is
+  missing the daemon still runs, just without public serving). A public port is
+  also tunnel-reachable (defense in depth); the tunnel forwarder is best-effort
+  for public ports so they serve even when the tunnel is down. `make check` green.
+  *Still to verify on hardware (operator):* a browser outside the network reaches
+  `https://app.example.com` -> the session's web server with a valid (production)
+  cert. Suggested first run with `acme_staging true` to avoid burning LE rate
+  limits, then flip to production.
 
 **Limitations recorded up front.** CGNAT makes public inbound impossible and
 cannot be fixed without hosting a relay (off-thesis) - documented, not hidden,
@@ -772,6 +785,44 @@ same population that can already use the WireGuard endpoint. A dynamic public IP
 makes **DDNS** load-bearing for a stable A record; DDNS is a current backlog gap,
 so until it lands the operator re-points DNS on IP change. Phase 2 promotes DDNS
 from the backlog as a fast-follow if the dynamic-IP case bites.
+
+### Milestone 9 - Dockerfile app deployment ("self-hosted Fly") - PROPOSED
+
+**Goal.** Point Fletcher at a Dockerfile (or a built image) and have it run that
+app as a long-running VM and expose it on the public internet under your domain -
+the workflow you'd get from Fly/Render, but on metal you own, with nothing
+hosted or metered. Raised by the operator (2026-06-08): "I deploy personal web
+servers from a Dockerfile; I want Fletcher to accept one and expose it."
+
+**On-thesis.** Your box serves your app over your connection and domain; we host
+nothing. It is the §4 job model wearing the deploy hat: **environment** (the
+built image) + **payload** (the image's own entrypoint, a long-running server) +
+**trigger** (`long_running`) + **sink** (a public URL). No new subsystem.
+
+**Already built (consumed, not re-done).** The image pipeline is already
+Dockerfile-based: `fletcher image import <docker-ref>` does `docker build` ->
+flatten to an ext4/btrfs rootfs -> CoW-clone per VM (DESIGN §11). And M8 Phase 2
+is the public-exposure half. So M9 sits on top of both.
+
+**Net-new work.**
+
+- **Honor the OCI run config.** Today a session runs a command the operator gives
+  it; `fletcher-init` (PID 1 in the VM) does not run the image's own
+  `ENTRYPOINT`/`CMD`. Import must capture the OCI config (`ENTRYPOINT`, `CMD`,
+  `ENV`, `WORKDIR`, `USER`, `EXPOSE`) into the existing `.meta.json` sidecar, and
+  `fletcher-init` needs an "entrypoint mode" that launches it with that config
+  mirrored (signals/env/user). `EXPOSE` gives the default port to publish.
+- **A one-shot deploy ergonomic.** `fletcher deploy ./myapp --host app.example.com`
+  = build -> import -> boot a `long_running` session running the entrypoint ->
+  `publish --public`. The `flyctl deploy` equivalent.
+
+**Falls out for free.** M8 wake-on-connect gives effective scale-to-zero: a
+deployed app with no traffic hibernates and wakes on the first request.
+
+**Caveats to verify before building.** The build step needs Docker on the box
+(same requirement the base-image build already has). The app must tolerate being
+PID-1-launched by `fletcher-init` (the real work in item 1). A crash-restart
+policy for a long-running deploy is wanted (the supervisor/reaper interplay).
 
 ## Toward v1 - hardening (in progress)
 

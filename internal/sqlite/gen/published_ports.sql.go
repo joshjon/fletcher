@@ -102,6 +102,28 @@ func (q *Queries) GetPublishedPortBySessionPort(ctx context.Context, arg GetPubl
 	return i, err
 }
 
+const getPublishedPublicPortByHost = `-- name: GetPublishedPublicPortByHost :one
+SELECT id, session_id, guest_port, name, tunnel_port, public, host, created_at FROM published_ports
+WHERE public = 1 AND host = ?
+LIMIT 1
+`
+
+func (q *Queries) GetPublishedPublicPortByHost(ctx context.Context, host *string) (PublishedPort, error) {
+	row := q.db.QueryRowContext(ctx, getPublishedPublicPortByHost, host)
+	var i PublishedPort
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.GuestPort,
+		&i.Name,
+		&i.TunnelPort,
+		&i.Public,
+		&i.Host,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listPublishedPorts = `-- name: ListPublishedPorts :many
 SELECT id, session_id, guest_port, name, tunnel_port, public, host, created_at FROM published_ports
 ORDER BY created_at

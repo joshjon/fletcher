@@ -1453,7 +1453,12 @@ type PublishPortRequest struct {
 	// guest_port is the TCP port the service listens on inside the VM.
 	GuestPort uint32 `protobuf:"varint,2,opt,name=guest_port,json=guestPort,proto3" json:"guest_port,omitempty"`
 	// name is an optional label; empty defaults to "port-<guest_port>".
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	// public also serves the port on the public HTTPS listener (requires the
+	// public_web setting enabled). When false the port is tunnel-only.
+	Public bool `protobuf:"varint,4,opt,name=public,proto3" json:"public,omitempty"`
+	// host is the public hostname to route to this port (required when public).
+	Host          string `protobuf:"bytes,5,opt,name=host,proto3" json:"host,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1505,6 +1510,20 @@ func (x *PublishPortRequest) GetGuestPort() uint32 {
 func (x *PublishPortRequest) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *PublishPortRequest) GetPublic() bool {
+	if x != nil {
+		return x.Public
+	}
+	return false
+}
+
+func (x *PublishPortRequest) GetHost() string {
+	if x != nil {
+		return x.Host
 	}
 	return ""
 }
@@ -1822,12 +1841,14 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\x06public\x18\x06 \x01(\bR\x06public\x12\x12\n" +
 	"\x04host\x18\a \x01(\tR\x04host\x12\x1d\n" +
 	"\n" +
-	"created_at\x18\b \x01(\x03R\tcreatedAt\"Y\n" +
+	"created_at\x18\b \x01(\x03R\tcreatedAt\"\x85\x01\n" +
 	"\x12PublishPortRequest\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x1d\n" +
 	"\n" +
 	"guest_port\x18\x02 \x01(\rR\tguestPort\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\"E\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x16\n" +
+	"\x06public\x18\x04 \x01(\bR\x06public\x12\x12\n" +
+	"\x04host\x18\x05 \x01(\tR\x04host\"E\n" +
 	"\x13PublishPortResponse\x12.\n" +
 	"\x04port\x18\x01 \x01(\v2\x1a.fletcher.v1.PublishedPortR\x04port\"G\n" +
 	"\x14UnpublishPortRequest\x12\x10\n" +

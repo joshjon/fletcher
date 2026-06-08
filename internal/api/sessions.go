@@ -27,7 +27,7 @@ type SessionsBackend interface {
 	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
 	Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error)
 	DialSSH(ctx context.Context, ref string) (net.Conn, error)
-	Publish(ctx context.Context, ref string, guestPort int, name string) (session.PublishedPort, error)
+	Publish(ctx context.Context, ref string, guestPort int, name string, public bool, host string) (session.PublishedPort, error)
 	Unpublish(ctx context.Context, ref string, guestPort int) error
 	ListPorts(ctx context.Context, ref string) ([]session.PublishedPort, error)
 }
@@ -238,7 +238,7 @@ func proxyClientToConn(stream *connect.BidiStream[fletcherv1.ProxySessionRequest
 
 // PublishPort exposes a port the session serves, brokered by the daemon.
 func (s *SessionsService) PublishPort(ctx context.Context, req *connect.Request[fletcherv1.PublishPortRequest]) (*connect.Response[fletcherv1.PublishPortResponse], error) {
-	pp, err := s.backend.Publish(ctx, req.Msg.GetRef(), int(req.Msg.GetGuestPort()), req.Msg.GetName())
+	pp, err := s.backend.Publish(ctx, req.Msg.GetRef(), int(req.Msg.GetGuestPort()), req.Msg.GetName(), req.Msg.GetPublic(), req.Msg.GetHost())
 	if err != nil {
 		return nil, err
 	}

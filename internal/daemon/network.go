@@ -157,6 +157,28 @@ func tryUPnP(ctx context.Context, logger *slog.Logger, listenPort int) *portmap.
 	return &res
 }
 
+// tryUPnPTCP installs a TCP port-forward (same external/internal port) for the
+// public web listeners. Best-effort: failures are logged, not fatal - the
+// operator may have forwarded the port manually.
+func tryUPnPTCP(ctx context.Context, logger *slog.Logger, port int, desc string) {
+	upCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	res, err := portmap.Map(upCtx, portmap.Request{
+		InternalPort:  uint16(port), //nolint:gosec // port is a fixed 80/443
+		ExternalPort:  uint16(port), //nolint:gosec // same
+		Protocol:      portmap.ProtocolTCP,
+		LeaseDuration: upnpLeaseDuration,
+		Description:   desc,
+	})
+	if err != nil {
+		logger.Warn("upnp tcp port-forward unavailable; forward it manually if the box is not the network edge",
+			slog.Int("port", port), slog.String("err", err.Error()))
+		return
+	}
+	logger.Info("upnp tcp port-forward installed",
+		slog.String("method", res.Method), slog.Int("external_port", int(res.ExternalPort)))
+}
+
 // publicEndpointFromUPnP returns host:port form for the UPnP result, or
 // "" if the router reported a private IP (which means it doesn't
 // actually have a public address - common with double-NAT, CGNAT, or

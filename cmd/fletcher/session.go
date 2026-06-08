@@ -210,12 +210,14 @@ func sessionExecCmd() *cli.Command {
 func sessionPublishCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "publish",
-		Usage:     "expose a port the session serves, reachable by paired clients over the tunnel",
+		Usage:     "expose a port the session serves over the tunnel, or publicly with --public",
 		ArgsUsage: "<ref> <guest-port>",
 		Flags: []cli.Flag{
 			socketFlag(),
 			outputFlag(),
 			&cli.StringFlag{Name: "name", Usage: "label for the published port (default: port-<guest-port>)"},
+			&cli.BoolFlag{Name: "public", Usage: "also serve on the public internet over HTTPS (requires `fletcher settings set public_web true`)"},
+			&cli.StringFlag{Name: "host", Usage: "public hostname to route to this port, e.g. app.example.com (required with --public)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ref := cmd.Args().First()
@@ -232,6 +234,8 @@ func sessionPublishCmd() *cli.Command {
 				Ref:       ref,
 				GuestPort: uint32(guestPort),
 				Name:      cmd.String("name"),
+				Public:    cmd.Bool("public"),
+				Host:      cmd.String("host"),
 			}))
 			if err != nil {
 				return err
@@ -319,10 +323,16 @@ func renderPublishedPort(w io.Writer, format string, p *fletcherv1.PublishedPort
 	fmt.Fprintf(tw, "name:\t%s\n", p.GetName())
 	fmt.Fprintf(tw, "guest_port:\t%d\n", p.GetGuestPort())
 	fmt.Fprintf(tw, "tunnel_port:\t%d\n", p.GetTunnelPort())
+	if p.GetPublic() {
+		fmt.Fprintf(tw, "public:\t%s\n", green("https://"+p.GetHost()))
+	}
 	if err := tw.Flush(); err != nil {
 		return err
 	}
 	fmt.Fprintln(w, "\n"+publishedReach(p, tunnelHost))
+	if p.GetPublic() {
+		fmt.Fprintf(w, "publicly at https://%s (TLS cert is issued on the first request - allow a few seconds)\n", p.GetHost())
+	}
 	return nil
 }
 
@@ -340,7 +350,7 @@ func publishedReach(p *fletcherv1.PublishedPort, tunnelHost string) string {
 
 func writePublishedPortsTable(w io.Writer, ports []*fletcherv1.PublishedPort, tunnelHost string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tGUEST PORT\tTUNNEL ADDRESS")
+	fmt.Fprintln(tw, "NAME\tGUEST PORT\tTUNNEL ADDRESS\tPUBLIC URL")
 	for _, p := range ports {
 		addr := fmt.Sprintf("%d", p.GetTunnelPort())
 		if p.GetTunnelPort() == 0 {
@@ -348,7 +358,11 @@ func writePublishedPortsTable(w io.Writer, ports []*fletcherv1.PublishedPort, tu
 		} else if tunnelHost != "" {
 			addr = fmt.Sprintf("%s:%d", tunnelHost, p.GetTunnelPort())
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\n", p.GetName(), p.GetGuestPort(), addr)
+		public := "-"
+		if p.GetPublic() {
+			public = "https://" + p.GetHost()
+		}
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", p.GetName(), p.GetGuestPort(), addr, public)
 	}
 	if err := tw.Flush(); err != nil {
 		return err

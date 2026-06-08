@@ -11,6 +11,11 @@ SELECT * FROM published_ports
 WHERE session_id = ? AND guest_port = ?
 LIMIT 1;
 
+-- name: GetPublishedPublicPortByHost :one
+SELECT * FROM published_ports
+WHERE public = 1 AND host = ?
+LIMIT 1;
+
 -- name: ListPublishedPortsBySession :many
 SELECT * FROM published_ports
 WHERE session_id = ?
