@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// ImageService manages rootfs templates on the daemon's host, so a remote client
+// (e.g. a laptop) can import an image without local docker or access to the
+// daemon's snapshot filesystem. The daemon pulls and flattens the image itself.
+service ImageService {
+  // Import pulls a Docker image from a registry and flattens it into a template
+  // the daemon's runtime can boot. Reachable remotely, gated by the per-peer
+  // token. Building from a local Dockerfile stays a host-side operation (it
+  // needs the working directory); this covers the "deploy a registry image"
+  // path that works from anywhere.
+  rpc Import(ImportRequest) returns (ImportResponse) {}
+}
+
+message ImportRequest {
+  // ref is the Docker image reference to pull (e.g. ghcr.io/you/app:v1).
+  string ref = 1;
+  // name is the template name (jobs/sessions reference it via --image); empty
+  // defaults to the ref's repository name.
+  string name = 2;
+  // registry_username / registry_password authenticate to a private registry;
+  // empty uses the host's default docker credentials, if any.
+  string registry_username = 3;
+  string registry_password = 4;
+  // force replaces an existing template of the same name.
+  bool force = 5;
+}
+
+message ImportResponse {
+  string name = 1;
+  // digest is the pulled image's digest ("sha256:...").
+  string digest = 2;
+  // exposed_port is the image's lowest EXPOSE (0 if it declares none), a default
+  // for what to publish.
+  uint32 exposed_port = 3;
+}

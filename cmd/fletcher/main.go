@@ -73,13 +73,13 @@ func newApp() *cli.Command {
 			client(settingsCmd()),
 			client(approvalCmd()),
 			client(peerCmd()),
+			client(deployCmd()),
 			client(versionCmd()),
 			// Daemon commands: run on the Linux host that hosts the daemon.
 			daemonHost(serveCmd()),
 			daemonHost(daemonCmd()),
 			daemonHost(doctorCmd()),
 			daemonHost(imageCmd()),
-			daemonHost(deployCmd()),
 			forkRunCmd(), // hidden internal re-exec
 		},
 	}

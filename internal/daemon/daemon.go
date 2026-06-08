@@ -482,6 +482,8 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg), defaultGateway(cfg)),
 		sessions:         sessionMgr,
 		publicIP:         publicEndpointHost(netSetup.EffectivePublicEndpoint),
+		imagesDir:        filepath.Join(snapshotRootDir(cfg), "images"),
+		snapshotKind:     driverKind(cfg.SnapshotKind),
 		secrets:          secretsStore,
 		approvals:        approvalSvc,
 		peers:            peerSvc,
@@ -549,6 +551,10 @@ type connectDeps struct {
 	// publicIP is the daemon's discovered public IP (host of the effective public
 	// endpoint), passed to the sessions service for --public DNS guidance.
 	publicIP string
+	// imagesDir and snapshotKind let the image service import registry images
+	// server-side into the daemon's snapshot root.
+	imagesDir    string
+	snapshotKind string
 	// settingsDefaults maps each setting key to the daemon's resolved default,
 	// so `fletcher settings list` shows the effective value, not just "(default)".
 	settingsDefaults map[string]string
@@ -853,6 +859,11 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		api.NewModelsService(deps.models), interceptors,
 	)
 	mux.Handle(modelsPath, modelsHandler)
+
+	imagesPath, imagesHandler := fletcherv1connect.NewImageServiceHandler(
+		api.NewImagesService(deps.imagesDir, deps.snapshotKind), interceptors,
+	)
+	mux.Handle(imagesPath, imagesHandler)
 
 	// Serve cleartext HTTP/2 (h2c) alongside HTTP/1.1 so Connect bidi streams -
 	// the interactive shell (SessionService.ShellSession) - work over the unix
@@ -1424,6 +1435,15 @@ func driverKind(v string) string {
 		return defaultDriverKind
 	}
 	return v
+}
+
+// snapshotRootDir is the daemon's snapshot root: the configured btrfs_root, or
+// a "snapshots" dir next to the database when unset.
+func snapshotRootDir(cfg Config) string {
+	if cfg.BtrfsRoot != "" {
+		return cfg.BtrfsRoot
+	}
+	return filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
 }
 
 // baseImageAvailable reports whether at least one base-image rootfs template is

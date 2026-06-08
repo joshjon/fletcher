@@ -40,6 +40,7 @@ func imageCmd() *cli.Command {
 		Usage: "manage base-image rootfs templates for the runc/btrfs runtime",
 		Commands: []*cli.Command{
 			imageImportCmd(),
+			imagePullCmd(),
 			imageUpdateCmd(),
 			imageListCmd(),
 			imageRemoveCmd(),
@@ -117,6 +118,47 @@ does not carry FLETCHER_BTRFS_ROOT through by default):
 			default:
 				return fmt.Errorf("unknown --format %q (want subvolume or ext4)", cmd.String("format"))
 			}
+		},
+	}
+}
+
+func imagePullCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "pull",
+		Usage:     "pull a registry image into a template via the daemon (works from a remote client)",
+		ArgsUsage: "<image-ref>",
+		Description: `Pulls and flattens a registry image into a rootfs template on the
+daemon's host, server-side - so it works from a remote client with no
+local docker or filesystem access to the box. For a private registry,
+pass --registry-auth user:token. Building from a local Dockerfile is a
+host-side operation; use 'image import' for that.`,
+		Flags: []cli.Flag{
+			socketFlag(),
+			&cli.StringFlag{Name: "name", Usage: "template name (default: the ref's repository name)"},
+			&cli.StringFlag{Name: "registry-auth", Usage: "private registry credentials as user:token"},
+			&cli.BoolFlag{Name: "force", Usage: "replace an existing template of the same name"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ref := cmd.Args().First()
+			if ref == "" {
+				return errors.New("a docker image reference is required, e.g. ghcr.io/you/app:v1")
+			}
+			user, pass := parseRegistryAuth(cmd.String("registry-auth"))
+			resp, err := newImageClient(cmd).Import(ctx, connect.NewRequest(&fletcherv1.ImportRequest{
+				Ref:              ref,
+				Name:             cmd.String("name"),
+				RegistryUsername: user,
+				RegistryPassword: pass,
+				Force:            cmd.Bool("force"),
+			}))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("imported %s as %q (digest %s)\n", ref, resp.Msg.GetName(), resp.Msg.GetDigest())
+			if p := resp.Msg.GetExposedPort(); p != 0 {
+				fmt.Printf("image exposes port %d\n", p)
+			}
+			return nil
 		},
 	}
 }

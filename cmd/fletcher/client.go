@@ -100,6 +100,11 @@ func newModelsClient(cmd *cli.Command) fletcherv1connect.ModelServiceClient {
 	return fletcherv1connect.NewModelServiceClient(hc, base, opts...)
 }
 
+func newImageClient(cmd *cli.Command) fletcherv1connect.ImageServiceClient {
+	hc, base, opts := clientTarget(cmd)
+	return fletcherv1connect.NewImageServiceClient(hc, base, opts...)
+}
+
 // newSessionsClient builds the SessionService client over cleartext HTTP/2
 // (h2c). The interactive shell is a bidi stream, which needs HTTP/2; the
 // daemon serves the session API over h2c, so prior-knowledge HTTP/2 here lets

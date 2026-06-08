@@ -18,7 +18,7 @@ import (
 )
 
 // defaultDeployBtrfsRoot matches the snapshot root the systemd install uses, so
-// `deploy` works with no --btrfs-root on a standard install.
+// a local (Dockerfile) deploy works with no --btrfs-root on a standard install.
 const defaultDeployBtrfsRoot = "/var/lib/fletcher/snapshots"
 
 func deployCmd() *cli.Command {
@@ -26,18 +26,19 @@ func deployCmd() *cli.Command {
 		Name:      "deploy",
 		Usage:     "build (or pull) a Docker image and run it as a published app session",
 		ArgsUsage: "<dir-or-image-ref>",
-		Description: `One command from a Dockerfile (or a built image) to a running app:
+		Description: `One command from a Docker image to a running app:
 
-  1. if the argument is a directory with a Dockerfile, 'docker build' it;
-     otherwise treat it as a Docker image reference (pulled if needed)
-  2. flatten it into a rootfs template ('image import')
-  3. create a session that runs the image's own app on boot ('--app')
-  4. publish the app's port - over the tunnel, or publicly with --host
+  1. a registry ref (e.g. ghcr.io/you/app:v1) is pulled and flattened by the
+     DAEMON, so this works from a remote client - no local docker needed;
+     a local directory with a Dockerfile is built and imported on the host
+  2. a session is created that runs the image's own app on boot (--app)
+  3. the app's port is published - publicly over HTTPS with --host, else tunnel-only
 
-Runs the build/import locally, so it needs root and docker (like 'image
-import'); the session/publish steps go to the local daemon. Example:
+Examples:
 
-  sudo fletcher deploy ./myapp --host app.example.com
+  fletcher deploy ghcr.io/you/app:v1 --host app.example.com           # from anywhere
+  fletcher deploy ghcr.io/you/app:v1 --registry-auth user:TOKEN ...   # private registry
+  sudo fletcher deploy ./myapp --host app.example.com                 # local Dockerfile (host-only)
 
 The port defaults to the image's EXPOSE; set --port if the image declares none.`,
 		Flags: []cli.Flag{
@@ -46,6 +47,7 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 			&cli.StringFlag{Name: "name", Usage: "session + template name (default: derived from the image/dir)"},
 			&cli.StringFlag{Name: "host", Usage: "public hostname to serve at over HTTPS, e.g. app.example.com (omit for tunnel-only)"},
 			&cli.IntFlag{Name: "port", Usage: "container port to publish (default: the image's EXPOSE)"},
+			&cli.StringFlag{Name: "registry-auth", Usage: "private registry credentials as user:token (for a registry ref)"},
 			&cli.StringFlag{Name: "egress", Usage: "fork network egress: none | allowlist | open (default: the daemon's setting)"},
 			&cli.StringFlag{Name: "gateway", Usage: "model gateway: on | off (default: the daemon's setting)"},
 		},
@@ -54,31 +56,13 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 			if src == "" {
 				return errors.New("usage: fletcher deploy <dir-or-image-ref> [--host ...]")
 			}
-			name := cmd.String("name")
-			if name == "" {
-				name = deployName(src)
-			}
-			root := cmd.String("btrfs-root")
-			if root == "" {
-				root = defaultDeployBtrfsRoot
-			}
 
-			ref, err := deploySource(ctx, src, name)
+			name, port, err := deployImage(ctx, cmd, src)
 			if err != nil {
 				return err
 			}
-
-			port := cmd.Int("port")
-			if port == 0 {
-				port = dockerExposedPort(ctx, ref)
-			}
 			if port < 1 || port > 65535 {
 				return errors.New("could not determine the app's port from the image; pass --port")
-			}
-
-			fmt.Printf("importing %s as template %q...\n", ref, name)
-			if err := importImageExt4(ctx, root, ref, name, true); err != nil {
-				return err
 			}
 
 			client := newSessionsClient(cmd)
@@ -108,31 +92,92 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 	}
 }
 
-// deploySource resolves the deploy argument to a Docker image reference: a
-// directory with a Dockerfile is built; anything else is treated as an image ref
-// (which `image import` pulls if it is not present locally).
-func deploySource(ctx context.Context, src, name string) (string, error) {
-	fi, statErr := os.Stat(src)
-	isDir := statErr == nil && fi.IsDir()
-	if !isDir {
-		return src, nil // not a local directory -> treat as a Docker image reference
+// deployImage turns the deploy source into an imported template, returning the
+// template name and the app's port. A registry ref is imported by the daemon
+// (remote-capable); a local directory with a Dockerfile is built and imported on
+// the host (needs root + docker).
+func deployImage(ctx context.Context, cmd *cli.Command, src string) (name string, port int, err error) {
+	if isDeployDir(src) {
+		return deployFromDir(ctx, cmd, src)
 	}
-	if _, err := os.Stat(filepath.Join(src, "Dockerfile")); err != nil {
-		return "", fmt.Errorf("%s is a directory but has no Dockerfile", src)
+	return deployFromRef(ctx, cmd, src)
+}
+
+// deployFromRef imports a registry ref via the daemon (works from a remote
+// client - the daemon pulls and flattens, no local docker).
+func deployFromRef(ctx context.Context, cmd *cli.Command, ref string) (string, int, error) {
+	user, pass := parseRegistryAuth(cmd.String("registry-auth"))
+	fmt.Printf("importing %s (pulled by the daemon)...\n", ref)
+	resp, err := newImageClient(cmd).Import(ctx, connect.NewRequest(&fletcherv1.ImportRequest{
+		Ref:              ref,
+		Name:             cmd.String("name"),
+		RegistryUsername: user,
+		RegistryPassword: pass,
+		Force:            true,
+	}))
+	if err != nil {
+		return "", 0, err
+	}
+	port := cmd.Int("port")
+	if port == 0 {
+		port = int(resp.Msg.GetExposedPort())
+	}
+	return resp.Msg.GetName(), port, nil
+}
+
+// deployFromDir builds a directory's Dockerfile and imports it locally (host-only
+// - the build needs the working directory, and the local import needs root).
+func deployFromDir(ctx context.Context, cmd *cli.Command, dir string) (string, int, error) {
+	if _, err := os.Stat(filepath.Join(dir, "Dockerfile")); err != nil {
+		return "", 0, fmt.Errorf("%s is a directory but has no Dockerfile", dir)
+	}
+	name := cmd.String("name")
+	if name == "" {
+		name = deployName(dir)
 	}
 	ref := "fletcher-deploy/" + name + ":latest"
-	fmt.Printf("building %s from %s...\n", ref, src)
-	build := exec.CommandContext(ctx, "docker", "build", "-t", ref, src) //nolint:gosec // operator-supplied build context, local admin command
+	fmt.Printf("building %s from %s...\n", ref, dir)
+	build := exec.CommandContext(ctx, "docker", "build", "-t", ref, dir) //nolint:gosec // operator-supplied build context, local admin command
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
-		return "", fmt.Errorf("docker build %s: %w", src, err)
+		return "", 0, fmt.Errorf("docker build %s: %w", dir, err)
 	}
-	return ref, nil
+	root := cmd.String("btrfs-root")
+	if root == "" {
+		root = defaultDeployBtrfsRoot
+	}
+	fmt.Printf("importing %s as template %q...\n", ref, name)
+	if err := importImageExt4(ctx, root, ref, name, true); err != nil {
+		return "", 0, err
+	}
+	port := cmd.Int("port")
+	if port == 0 {
+		port = dockerExposedPort(ctx, ref)
+	}
+	return name, port, nil
 }
 
-// dockerExposedPort returns the lowest TCP port the image EXPOSEs, or 0 if it
-// declares none (so the caller asks for --port).
+// isDeployDir reports whether src is a local directory (so it is a build
+// context, not a registry image reference).
+func isDeployDir(src string) bool {
+	fi, err := os.Stat(src)
+	return err == nil && fi.IsDir()
+}
+
+// parseRegistryAuth splits "user:token" registry credentials.
+func parseRegistryAuth(s string) (user, pass string) {
+	if s == "" {
+		return "", ""
+	}
+	u, p, ok := strings.Cut(s, ":")
+	if !ok {
+		return s, ""
+	}
+	return u, p
+}
+
+// dockerExposedPort returns the lowest TCP port the local image EXPOSEs, or 0.
 func dockerExposedPort(ctx context.Context, ref string) int {
 	out, err := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", "{{json .Config.ExposedPorts}}", ref).Output() //nolint:gosec // operator-supplied ref, local admin command
 	if err != nil {
@@ -156,14 +201,10 @@ func dockerExposedPort(ctx context.Context, ref string) int {
 	return best
 }
 
-// deployName derives a session/template name from the deploy source: the
-// directory's base name, or the image ref's repository.
-func deployName(src string) string {
-	if fi, err := os.Stat(src); err == nil && fi.IsDir() {
-		abs, aerr := filepath.Abs(src)
-		if aerr == nil {
-			return defaultImageName(filepath.Base(abs))
-		}
+// deployName derives a session/template name from a build directory's base name.
+func deployName(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		return defaultImageName(filepath.Base(abs))
 	}
-	return defaultImageName(src)
+	return defaultImageName(dir)
 }

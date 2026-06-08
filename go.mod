@@ -10,6 +10,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/firecracker-microvm/firecracker-go-sdk v1.0.0
 	github.com/golang-migrate/migrate/v4 v4.19.1
+	github.com/google/go-containerregistry v0.21.6
 	github.com/huin/goupnp v1.3.0
 	github.com/mark3labs/mcp-go v0.54.1
 	github.com/mdlayher/vsock v1.3.0
@@ -190,7 +191,6 @@ require (
 	github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e // indirect
 	github.com/google/cel-go v0.28.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/go-containerregistry v0.21.6 // indirect
 	github.com/google/go-github/v60 v60.0.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect

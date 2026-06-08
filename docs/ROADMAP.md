@@ -901,12 +901,30 @@ guidance from slice's M8 renderer.
 the app log (`/var/log/fletcher-app.log`). Run state + app mode already show in
 `session get`.
 
+**Slice 5 - remote deploy from a registry (daemon-side import) - CODE COMPLETE.**
+The original `deploy` was host-only because import was a CLI+sudo local op - wrong
+for a remote-first product (most users drive Fletcher from a laptop). Fixed: a new
+`ImageService.Import` RPC has the **daemon** pull and flatten a registry image
+**in-process** (pure-Go `go-containerregistry`, no Docker on the host) into its own
+snapshot root. So `fletcher deploy ghcr.io/you/app:v1 --host ...` and `fletcher
+image pull <ref>` now work **from a remote client** with no local Docker or
+filesystem access to the box. Private registries: `--registry-auth user:token`
+(basic auth on the pull); a self-hosted registry-in-a-VM (the exe.dev pattern)
+works the same way, with zero registry-specific code. Building a local `./dir`
+Dockerfile stays host-side (it needs the working directory) and still uses the
+root CLI import. The daemon extracts as its unprivileged user, so rootfs files are
+daemon-owned - fine for app images that run as root; an image needing setuid
+binaries / non-root file ownership should use the root CLI `image import`.
+Unit-tested (name + EXPOSE derivation); `make check` green.
+
 **Deferred (not blocking M9's core; revisit on demand):** redeploy/update a new
 image version without losing data (ties to the backlogged first-class volumes);
-building inside an ephemeral sandboxed VM so the host needs no Docker (v2);
-`logs --follow` streaming; a richer app-liveness status. App mode is
-firecracker-only by design (it needs the guest init), which is the default
-runtime.
+building inside an ephemeral sandboxed VM so the host needs no Docker even for
+Dockerfile builds (extends slice 5's no-Docker pull to the build); `logs --follow`
+streaming; a richer app-liveness status; persisting registry credentials
+(age-encrypted) so `image update` can re-pull a private image without re-supplying
+auth. App mode is firecracker-only by design (it needs the guest init), which is
+the default runtime.
 
 - *Verify on hardware (operator):* `sudo fletcher deploy <app-image> --host
   <your-domain>` (or a `./dir` with a Dockerfile), then hit the URL; `session
