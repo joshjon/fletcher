@@ -9,13 +9,13 @@ session that boots the image's own start command, and publishes its port.
 # (port taken from the image's EXPOSE):
 fletcher deploy nginx:alpine --host app.example.com
 
-# Tunnel-only (no domain needed) - reachable from your paired devices:
+# Tunnel-only (no domain needed), reachable from your paired devices:
 fletcher deploy nginx:alpine --name web
 
 # A private registry image (basic auth on the pull):
 fletcher deploy ghcr.io/you/app:v1 --registry-auth you:TOKEN --host app.example.com
 
-# A local project with a Dockerfile (builds on this box; needs root + docker):
+# A local project with a Dockerfile (builds on this box, needs root + docker):
 sudo fletcher deploy ./myapp --host app.example.com
 ```
 
@@ -23,9 +23,9 @@ sudo fletcher deploy ./myapp --host app.example.com
 
 For a **registry image, the daemon does the pull and flatten itself**, so
 `deploy` (and `fletcher image pull <ref>`) work from a laptop over the tunnel
-with **no local Docker** - your code never leaves your network to be deployed
-onto it. Building from a local Dockerfile is the one host-side case: it needs the
-working directory, so it runs on the box.
+with **no local Docker**. Your code never leaves your network to be deployed onto
+it. Building from a local Dockerfile is the one host-side case, because it needs
+the working directory, so it runs on the box.
 
 ## A deployment is durable
 
@@ -40,8 +40,8 @@ fletcher session delete <name>   # stop and remove
 
 ## Notes
 
-- `--public` / `--host` need `public_web` enabled - see [Public web over
+- `--public` / `--host` need `public_web` enabled. See [Public web over
   HTTPS](/advanced/public-web).
 - The app runs as the image's user (root unless the image sets one).
-- Want a private registry of your own? Run one in a session and `deploy` from it
-  - to Fletcher it's just a registry it pulls, no special setup.
+- Want a private registry of your own? Run one in a session and `deploy` from it.
+  To Fletcher it's just a registry it pulls, no special setup.

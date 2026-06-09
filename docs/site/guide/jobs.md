@@ -31,7 +31,7 @@ fletcher job create --name vm-check --image fletcher-base \
   --command "echo KERNEL=\$(uname -r); cat /proc/1/comm; exit 3"
 ```
 
-The `exit 3` fails the job so its output surfaces - you'll see the guest kernel
+The `exit 3` fails the job so its output surfaces. You'll see the guest kernel
 version and `fletcher-init` as PID 1.
 :::
 
@@ -46,8 +46,8 @@ fletcher job create --trigger cron --schedule "*/30 * * * *" \
 
 A cron job is a **definition**. It shows up with status `scheduled` and a
 `next_run_at`. Each time the schedule fires, Fletcher creates a normal **run** of
-it - a child job you'll see in `job list`, linked back to its parent - so every
-run has its own status, output, and exit code.
+it. That run is a child job you'll see in `job list`, linked back to its parent,
+with its own status, output, and exit code.
 
 The schedule is a standard 5-field expression (`min hour day-of-month month
 day-of-week`) or a macro (`@hourly`, `@daily`, `@weekly`, ...).
@@ -61,8 +61,8 @@ Behaviour worth knowing:
 
 ## The agent-authored-then-automated pattern
 
-You rarely want an agent in the loop on every cron run - that's slow and
-non-deterministic. The pattern Fletcher encourages: have an agent write the
-script once (an interactive [session](/guide/sessions) or a one-off job), then
-schedule the plain program to run it on a cron. Use an agent-in-the-loop run
-only when each run genuinely needs judgement.
+You rarely want an agent in the loop on every cron run, because that is slow and
+non-deterministic. Instead, have an agent write the script once (an interactive
+[session](/guide/sessions) or a one-off job), then schedule the plain program to
+run it on a cron. Use an agent-in-the-loop run only when each run genuinely needs
+judgement.

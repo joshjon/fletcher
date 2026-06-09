@@ -17,9 +17,8 @@ The installer:
 - creates the unprivileged `fletcher` system user,
 - pre-creates the state directories.
 
-The same command works for first install and upgrade - the script detects
-whether the service is already running and restarts it on upgrade
-automatically.
+The same command works for first install and upgrade. The script detects whether
+the service is already running and restarts it on upgrade automatically.
 
 Confirm it landed:
 
@@ -30,13 +29,13 @@ fletcher version
 ::: warning Pre-release
 Until the first release is tagged, the installer's default download path can't
 resolve a release from GitHub and will error. To try Fletcher today, [build from
-source](/advanced/building) - the same `make install` path sets up the service
+source](/advanced/building). The same `make install` path sets up the service
 from your local build.
 :::
 
 ::: tip Installing the client on macOS
 The daemon is Linux-only, but the `fletcher` CLI runs anywhere. The same install
-command on macOS detects the platform and installs the **client only** - no
-daemon. Use it to drive a remote daemon from your laptop; see
+command on macOS detects the platform and installs the **client only**, with no
+daemon. Use it to drive a remote daemon from your laptop. See
 [Remote control](/guide/remote).
 :::

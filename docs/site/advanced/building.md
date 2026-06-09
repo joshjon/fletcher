@@ -21,9 +21,9 @@ make check          # lint + tests + generated-file drift check
 
 ## Install on a Linux server
 
-This mirrors what the install script does, using your local build - it creates
-the user, installs the binary and unit, and reloads + restarts the service if
-it's running:
+This mirrors what the install script does, using your local build. It creates the
+user, installs the binary and unit, and reloads + restarts the service if it's
+running:
 
 ```sh
 make install
@@ -45,6 +45,6 @@ To build the agent base image locally (rather than pulling the published one):
 make image      # builds fletcher-base:dev
 ```
 
-Then import it - see [Runtimes & base
+Then import it, as in [Runtimes & base
 images](/advanced/runtimes#building-the-image-yourself). The locally-built image
 includes an SSH server, which the published image does not yet.

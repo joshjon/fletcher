@@ -10,8 +10,8 @@ fletcher daemon logs            # recent logs; -f to follow
 fletcher daemon stop
 ```
 
-systemd is still the supervisor underneath - boot persistence, crash-restart, the
-unit sandbox - these are just friendlier verbs.
+systemd is still the supervisor underneath, handling boot persistence,
+crash-restart, and the unit sandbox. These are just friendlier verbs.
 
 ## When to restart
 

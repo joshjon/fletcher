@@ -1,17 +1,17 @@
 # Networking & first run
 
 Fletcher has two networking modes. **You pick one.** This is also where you
-start the daemon for the first time: it sets up networking when it starts, so
-choose your mode first, then start it.
+start the daemon for the first time. It sets up networking on start, so choose
+your mode first, then start it.
 
 | | [Mode A: built-in WireGuard](#mode-a-built-in-wireguard) | [Mode B: bring your own VPN](#mode-b-bring-your-own-vpn) |
 |---|---|---|
 | **Best for** | Most homelabs | CGNAT, or you already run a VPN |
 | **Public IP needed** | Yes (a real one, not CGNAT) | No |
-| **Setup** | Zero - the daemon does it | Point Fletcher at your existing VPN |
+| **Setup** | Zero, the daemon does it | Point Fletcher at your existing VPN |
 | **Third party in the loop** | None | Your VPN's coordination, if any |
 
-If you have a normal home connection with a real public IP, use **Mode A** - it's
+If you have a normal home connection with a real public IP, use **Mode A**. It is
 the whole setup on most routers. If you're behind CGNAT or already run something
 like Tailscale, use **Mode B**.
 
@@ -19,8 +19,8 @@ like Tailscale, use **Mode B**.
 
 The daemon embeds WireGuard directly. When it starts, it brings up its own WG
 interface, asks your router to forward the WireGuard port via UPnP, and makes
-itself reachable from your phone or laptop anywhere on the internet. No
-`wg-quick`, no `/etc/wireguard/` config files.
+itself reachable from your phone or laptop anywhere on the internet. There is no
+`wg-quick` and no `/etc/wireguard/` config files.
 
 **This works for you if:**
 
@@ -42,17 +42,17 @@ INFO  public endpoint derived from upnp  endpoint=<ip>:51820
 INFO  wireguard tunnel up  interface=fletcher0  address=10.99.0.1/24
 ```
 
-If you see all three, setup is done - skip to [Pair a device](/guide/pairing).
+If you see all three, setup is done. Skip to [Pair a device](/guide/pairing).
 
 ### If UPnP fails
 
-The log tells you. The two common causes:
+The log tells you. There are two common causes.
 
 1. **UPnP is disabled on your router.** Look for "UPnP" or "IGD" in the router
    admin UI, enable it, then `fletcher daemon restart`.
-2. **You're behind CGNAT** - your ISP shares one public IP across many
-   customers, so your router has no public IP to forward. You have two options:
-   ask your ISP to take you off CGNAT (many will, often for free), or switch to
+2. **You're behind CGNAT.** Your ISP shares one public IP across many customers,
+   so your router has no public IP to forward. Either ask your ISP to take you
+   off CGNAT (many will, often for free), or switch to
    [Mode B](#mode-b-bring-your-own-vpn).
 
 Prefer to forward the port yourself instead of relying on UPnP? See
@@ -78,8 +78,8 @@ fletcher settings set no_upnp true
 fletcher daemon enable
 ```
 
-The full walkthrough - including a worked Tailscale example and the trade-offs -
-is in [Networking deep dive](/advanced/networking#mode-b-bring-your-own-vpn).
+For a worked Tailscale example and the trade-offs, see
+[Networking deep dive](/advanced/networking#mode-b-bring-your-own-vpn).
 
 ## Next
 

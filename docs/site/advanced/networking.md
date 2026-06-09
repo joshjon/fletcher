@@ -8,8 +8,8 @@ forwarding, the bring-your-own-VPN setup, and the CGNAT situation.
 In [Mode A](/guide/networking#mode-a-built-in-wireguard) the daemon embeds
 WireGuard. On start it brings up its own `fletcher0` interface, derives its
 public endpoint, and asks your router to forward the WireGuard UDP port via
-UPnP. There's no `wg-quick` and no `/etc/wireguard/` config on the server -
-userspace WireGuard runs inside the daemon process.
+UPnP. There's no `wg-quick` and no `/etc/wireguard/` config on the server.
+Userspace WireGuard runs inside the daemon process.
 
 Because it's userspace, `wg show` prints nothing. Use these instead:
 
@@ -20,8 +20,8 @@ fletcher daemon logs | grep -i wireguard     # peers being added
 
 ## Manual port forwarding
 
-If you'd rather not rely on UPnP - for security reasons, or because UPnP is
-flaky on your router - set your public endpoint explicitly and turn off the
+If you'd rather not rely on UPnP, for security reasons or because UPnP is flaky
+on your router, set your public endpoint explicitly and turn off the
 auto-attempt:
 
 ```sh
@@ -42,7 +42,7 @@ Then forward the port manually in your router. Look for "Port Forwarding",
 
 If you already use a VPN to reach your home network, point Fletcher at that
 network and skip the built-in WireGuard. Fletcher's services bind to `127.0.0.1`
-by default; bind them to all interfaces (or your VPN interface) and disable the
+by default. Bind them to all interfaces (or your VPN interface) and disable the
 built-in tunnel:
 
 ```sh
@@ -63,8 +63,8 @@ On the server **and** on the device you want to connect from:
 4. The gateway and MCP servers are now reachable at the server's Tailscale IP on
    ports 11500 and 11600. Point any tool at those.
 
-(`fletcher health --socket <unix socket>` won't work off-machine - Unix sockets
-are local - but the network services are reachable over the tailnet.)
+(`fletcher health --socket <unix socket>` won't work off-machine, since Unix
+sockets are local, but the network services are reachable over the tailnet.)
 
 ### Trade-off
 
@@ -77,12 +77,12 @@ LAN-only access.
 ## CGNAT
 
 CGNAT (carrier-grade NAT) means your ISP shares one public IP across many
-customers, so your router has no public IP to forward - Mode A can't open a port
-to you. `fletcher doctor` detects when your public IP is in the CGNAT range. Two
-ways forward:
+customers, so your router has no public IP to forward, and Mode A can't open a
+port to you. `fletcher doctor` detects when your public IP is in the CGNAT range.
+Two ways forward:
 
-- **Ask your ISP to take you off CGNAT.** Many will, often for free - some let
-  you toggle it in their account portal; otherwise a support ticket requesting "a
+- **Ask your ISP to take you off CGNAT.** Many will, often for free. Some let you
+  toggle it in their account portal, otherwise a support ticket requesting "a
   public IP" or "to be removed from CGNAT" usually does it. Then `fletcher daemon
   restart`.
 - **Use [Mode B](#mode-b-bring-your-own-vpn).** A VPN you already run reaches the

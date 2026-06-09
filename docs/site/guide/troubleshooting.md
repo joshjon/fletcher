@@ -19,7 +19,7 @@ Common things the doctor catches:
   imported yet (jobs and sessions can't boot until one is)
 - `/dev/net/tun` missing (kernel TUN module not loaded)
 - Multiple default routes on the same subnet (causes asymmetric paths)
-- Public IP in the CGNAT range (need a VPN; see [Mode
+- Public IP in the CGNAT range (need a VPN, see [Mode
   B](/advanced/networking#mode-b-bring-your-own-vpn))
 - UPnP not responding (enable it on the router, or use the manual path)
 - Upstream model providers unreachable (DNS / outbound firewall)
@@ -53,10 +53,9 @@ fletcher daemon logs | grep -i wireguard
 ```
 
 (The daemon runs userspace WireGuard, so `wg show` prints nothing.) If the peer
-is registered, the issue is network reachability - the port forward isn't
-actually open, or the endpoint in the config is wrong. Test from outside your
-LAN: an online UDP port checker against `<your-public-ip>:51820` should report
-"open".
+is registered, the issue is network reachability. The port forward isn't actually
+open, or the endpoint in the config is wrong. Test from outside your LAN: an
+online UDP port checker against `<your-public-ip>:51820` should report "open".
 
 ## `login` worked but commands return `401`
 

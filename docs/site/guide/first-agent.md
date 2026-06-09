@@ -1,12 +1,12 @@
 # Your first agent
 
-This is the payoff: an agent running inside a hardware-isolated microVM on your
+This is the payoff. An agent running inside a hardware-isolated microVM on your
 box, reaching a model only through the daemon's gateway, with no other network
 egress.
 
 ## Check your runtime
 
-On a host with KVM, the daemon defaults to the **Firecracker** runtime - each
+On a host with KVM, the daemon defaults to the **Firecracker** runtime, so each
 job boots its own microVM. Confirm what you have:
 
 ```sh
@@ -21,7 +21,7 @@ fallbacks.
 ## 1. Import a base image
 
 An agent needs a base-image rootfs to boot from. Pull the published image and
-import it as an ext4 rootfs - no local build needed:
+import it as an ext4 rootfs (no local build needed):
 
 ```sh
 sudo fletcher image import ghcr.io/joshjon/fletcher-base:debian-13 \
@@ -30,14 +30,14 @@ sudo fletcher image import ghcr.io/joshjon/fletcher-base:debian-13 \
   --name fletcher-base
 ```
 
-The rootfs is roughly 3 GB, so make sure the snapshot root has a few GB free; on
+The rootfs is roughly 3 GB, so make sure the snapshot root has a few GB free. On
 btrfs the per-job clones are reflinks. The importer injects the microVM init for
 you.
 
 ## 2. Give the daemon a model key
 
 The gateway needs a key so it can reach models on the agent's behalf. The key
-lives with the daemon and never enters a VM:
+lives with the daemon and never enters a VM.
 
 ```sh
 fletcher secret set anthropic_api_key sk-ant-...
@@ -62,7 +62,7 @@ what the gateway can route to with `fletcher model list`.
 
 - The daemon cloned a copy-on-write fork of `fletcher-base` and booted it as a
   Firecracker microVM.
-- The agent process ran inside that VM with no credentials and no NIC - just a
+- The agent process ran inside that VM with no credentials and no NIC, just a
   vsock channel back to the daemon.
 - When the agent called its model, the request went over vsock to the daemon's
   gateway, which attached your key and forwarded it. The fork was torn down when
