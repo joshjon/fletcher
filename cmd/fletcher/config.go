@@ -118,3 +118,48 @@ func decodeLoginBlob(s string) (loginBlob, error) {
 	}
 	return blob, nil
 }
+
+// pairBlobVersion is the schema version of the pair blob produced by
+// `fletcher peer pair --mobile`. Native clients (iOS) refuse to decode
+// other versions; bump on any incompatible field change.
+const pairBlobVersion = 1
+
+// pairBlob is the unified payload emitted by `fletcher peer pair
+// --mobile` for native clients that do their own WireGuard keygen.
+// Field tags are short to keep the QR small.
+type pairBlob struct {
+	Version             int      `json:"v"`
+	PairingCode         string   `json:"code"`
+	ExpiresAt           int64    `json:"exp"`
+	ServerPublicKey     string   `json:"spk"`
+	Endpoint            string   `json:"ep"`
+	Address             string   `json:"addr"`
+	AllowedIPs          []string `json:"aips"`
+	APIEndpoint         string   `json:"api"`
+	PersistentKeepalive int32    `json:"ka"`
+	Name                string   `json:"name"`
+}
+
+func encodePairBlob(b pairBlob) string {
+	b.Version = pairBlobVersion
+	raw, _ := json.Marshal(b)
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func decodePairBlob(s string) (pairBlob, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(s))
+	if err != nil {
+		return pairBlob{}, errors.New("not a valid pair blob")
+	}
+	var b pairBlob
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return pairBlob{}, errors.New("not a valid pair blob")
+	}
+	if b.Version != pairBlobVersion {
+		return pairBlob{}, fmt.Errorf("unsupported pair blob version %d", b.Version)
+	}
+	if b.PairingCode == "" || b.ServerPublicKey == "" || b.Endpoint == "" || b.Address == "" {
+		return pairBlob{}, errors.New("pair blob is missing required fields")
+	}
+	return b, nil
+}

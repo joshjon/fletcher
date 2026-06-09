@@ -30,6 +30,18 @@ func TestPublicFromPrivateRoundTripsAgainstGenerate(t *testing.T) {
 	require.Equal(t, kp.Public, derived)
 }
 
+func TestValidatePublicKeyAcceptsGeneratedAndRejectsMalformed(t *testing.T) {
+	kp, err := wireguard.GenerateKeypair()
+	require.NoError(t, err)
+	require.NoError(t, wireguard.ValidatePublicKey(kp.Public))
+
+	require.Error(t, wireguard.ValidatePublicKey(""))
+	require.Error(t, wireguard.ValidatePublicKey("not-base64-!@#"))
+	// Right encoding, wrong length.
+	short := wireguard.Key(base64.StdEncoding.EncodeToString([]byte("twenty-byte string..")))
+	require.Error(t, wireguard.ValidatePublicKey(short))
+}
+
 func TestRenderServerIncludesPeerBlocks(t *testing.T) {
 	out := wireguard.RenderServer(wireguard.ServerConfig{
 		PrivateKey: "AAAA",

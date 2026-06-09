@@ -56,3 +56,20 @@ func PublicFromPrivate(priv Key) (Key, error) {
 	}
 	return Key(base64.StdEncoding.EncodeToString(k.PublicKey().Bytes())), nil
 }
+
+// ValidatePublicKey returns nil if k decodes as a 32-byte X25519 public
+// key in wg-quick base64 form. Used to reject malformed client-supplied
+// keys before they enter the peer registry.
+func ValidatePublicKey(k Key) error {
+	if k == "" {
+		return fmt.Errorf("public key is required")
+	}
+	raw, err := base64.StdEncoding.DecodeString(string(k))
+	if err != nil {
+		return fmt.Errorf("decode public key: %w", err)
+	}
+	if len(raw) != 32 {
+		return fmt.Errorf("public key is %d bytes; expected 32", len(raw))
+	}
+	return nil
+}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/mdp/qrterminal/v3"
@@ -44,12 +45,24 @@ for you.
 The rendered config is printed in full; if stdout is a terminal,
 a QR code is also rendered for scanning with the WireGuard mobile
 app. The private key is shown exactly once - paste it into the
-device immediately and don't log it elsewhere.`,
+device immediately and don't log it elsewhere.
+
+Pass --mobile when pairing a native client (the Fletcher iOS app)
+that generates its own WireGuard keypair locally. The daemon
+returns a single pairing blob that bundles every field the app
+needs in one QR; the app keeps its private key in its secure
+enclave and completes pairing over the tunnel handshake. The
+daemon's API token is only released after the app supplies its
+public key, so a copied blob does not authorise API access.`,
 		Flags: []cli.Flag{
 			socketFlag(),
 			&cli.BoolFlag{
 				Name:  "no-qr",
 				Usage: "skip the QR-code render (useful when copying the config to a non-mobile device)",
+			},
+			&cli.BoolFlag{
+				Name:  "mobile",
+				Usage: "emit a single pair blob for a native client (e.g. the Fletcher iOS app) that does its own keygen",
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -58,6 +71,14 @@ device immediately and don't log it elsewhere.`,
 				return errors.New("peer name is required")
 			}
 			client := newPeersClient(cmd)
+			if cmd.Bool("mobile") {
+				resp, err := client.BeginPair(ctx, connect.NewRequest(&fletcherv1.BeginPairRequest{Name: name}))
+				if err != nil {
+					return err
+				}
+				renderMobilePairResult(os.Stdout, name, resp.Msg, !cmd.Bool("no-qr"))
+				return nil
+			}
 			resp, err := client.PairPeer(ctx, connect.NewRequest(&fletcherv1.PairPeerRequest{Name: name}))
 			if err != nil {
 				return err
@@ -66,6 +87,44 @@ device immediately and don't log it elsewhere.`,
 			return nil
 		},
 	}
+}
+
+func renderMobilePairResult(w io.Writer, name string, resp *fletcherv1.BeginPairResponse, withQR bool) {
+	blob := encodePairBlob(pairBlob{
+		PairingCode:         resp.GetPairingCode(),
+		ExpiresAt:           resp.GetExpiresAt(),
+		ServerPublicKey:     resp.GetServerPublicKey(),
+		Endpoint:            resp.GetEndpoint(),
+		Address:             resp.GetAddress(),
+		AllowedIPs:          resp.GetAllowedIps(),
+		APIEndpoint:         resp.GetApiEndpoint(),
+		PersistentKeepalive: resp.GetPersistentKeepalive(),
+		Name:                name,
+	})
+	expires := time.Unix(resp.GetExpiresAt(), 0).UTC().Format(time.RFC3339)
+	fmt.Fprintf(w, "pairing slot reserved for %s\n", name)
+	fmt.Fprintf(w, "  address:  %s\n", resp.GetAddress())
+	fmt.Fprintf(w, "  endpoint: %s\n", resp.GetEndpoint())
+	fmt.Fprintf(w, "  expires:  %s (slot released if the app does not complete pairing in time)\n", expires)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "# ===== PAIR BLOB (paste into the Fletcher iOS app, or scan the QR) =====")
+	fmt.Fprintln(w, blob)
+	if withQR && isTerminal(w) {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Scan with the Fletcher iOS app:")
+		qrterminal.GenerateWithConfig(blob, qrterminal.Config{
+			Level:          qrterminal.M,
+			Writer:         w,
+			HalfBlocks:     true,
+			BlackChar:      qrterminal.BLACK_BLACK,
+			WhiteBlackChar: qrterminal.WHITE_BLACK,
+			WhiteChar:      qrterminal.WHITE_WHITE,
+			BlackWhiteChar: qrterminal.BLACK_WHITE,
+			QuietZone:      1,
+		})
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "# The API token is released to the app only after it supplies its WireGuard public key.")
 }
 
 func renderPairResult(w io.Writer, resp *fletcherv1.PairPeerResponse, withQR bool) {

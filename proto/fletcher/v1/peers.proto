@@ -15,6 +15,20 @@ service PeerService {
   // a fully-rendered client wg-quick config ready to drop on the
   // device. Fails clearly if the daemon has no public_endpoint set.
   rpc PairPeer(PairPeerRequest) returns (PairPeerResponse) {}
+  // BeginPair starts a client-keygen pairing flow used by native
+  // clients (iOS) that generate their own WireGuard keypair locally.
+  // The daemon allocates a tunnel address, mints a short-lived
+  // pairing code, and returns the server-side material the client
+  // needs to assemble its own wg-quick config. No peer row is
+  // committed until CompletePair is called with the client public
+  // key; the slot expires if the code is not redeemed in time.
+  rpc BeginPair(BeginPairRequest) returns (BeginPairResponse) {}
+  // CompletePair finishes a client-keygen pairing flow. The caller
+  // supplies the pairing code from BeginPair plus the WireGuard
+  // public key it generated locally; the daemon registers the peer
+  // and returns the per-peer API token. The private half of the
+  // keypair never leaves the client.
+  rpc CompletePair(CompletePairRequest) returns (CompletePairResponse) {}
   // CreatePeer is the power-user path: the caller supplies the
   // tunnel address and server endpoint explicitly. Use PairPeer for
   // the common case.
@@ -75,6 +89,61 @@ message PairPeerRequest {
   // name is the only required input; everything else is daemon-resolved.
   string name = 1;
 }
+
+message BeginPairRequest {
+  // name is the only required input; everything else is daemon-resolved.
+  string name = 1;
+}
+message BeginPairResponse {
+  // pairing_code is the short-lived, one-time-use string the client
+  // returns in CompletePair to claim this pairing slot.
+  string pairing_code = 1;
+  // expires_at is the unix-seconds deadline after which the pairing
+  // code is rejected and the allocated address is released.
+  int64 expires_at = 2;
+  // server_public_key is the daemon's WireGuard public key, base64.
+  string server_public_key = 3;
+  // endpoint is the host:port the client's WireGuard interface dials
+  // (copied from the daemon's configured public_endpoint).
+  string endpoint = 4;
+  // address is the tunnel /32 the daemon reserved for this peer; the
+  // client uses it as its WireGuard interface address.
+  string address = 5;
+  // allowed_ips are the CIDRs the client should route through the
+  // tunnel (typically the daemon's tunnel CIDR, e.g. "10.99.0.0/24").
+  repeated string allowed_ips = 6;
+  // api_endpoint is the tunnel-side host:port a client dials to drive
+  // the daemon's network API once the tunnel is up.
+  string api_endpoint = 7;
+  // persistent_keepalive is the WireGuard keepalive interval in
+  // seconds the client should configure. 0 disables.
+  int32 persistent_keepalive = 8;
+}
+
+message CompletePairRequest {
+  // pairing_code is the value returned by BeginPair. One-time use;
+  // the daemon rejects a second call with the same code.
+  string pairing_code = 1;
+  // name must match the BeginPair request that issued the code. The
+  // duplicate is a typo guard, not an auth factor.
+  string name = 2;
+  // client_public_key is the base64-encoded Curve25519 public key the
+  // client generated locally; the daemon stores it as the peer's
+  // public half.
+  string client_public_key = 3;
+}
+message CompletePairResponse {
+  Peer peer = 1;
+  // api_token is the per-peer bearer token for the daemon's network
+  // API, returned exactly once. Clients send it as
+  // `Authorization: Bearer <token>` when driving the daemon.
+  string api_token = 2;
+  // api_endpoint is the tunnel-side host:port the client dials to
+  // drive the daemon's network API; echoed here for clients that
+  // only persist the CompletePair response.
+  string api_endpoint = 3;
+}
+
 message PairPeerResponse {
   Peer peer = 1;
   // client_config is the rendered wg-quick body, ready to drop on the

@@ -62,3 +62,50 @@ func TestDecodeLoginBlobRejectsGarbage(t *testing.T) {
 		require.Errorf(t, err, "expected error for %q", s)
 	}
 }
+
+func TestPairBlobRoundTrip(t *testing.T) {
+	in := pairBlob{
+		PairingCode:         "code-123",
+		ExpiresAt:           1_700_000_000,
+		ServerPublicKey:     "SERVERPUB",
+		Endpoint:            "home.example.com:51820",
+		Address:             "10.99.0.2/32",
+		AllowedIPs:          []string{"10.99.0.0/24"},
+		APIEndpoint:         "10.99.0.1:11700",
+		PersistentKeepalive: 25,
+		Name:                "phone",
+	}
+	encoded := encodePairBlob(in)
+	got, err := decodePairBlob(encoded)
+	require.NoError(t, err)
+	require.Equal(t, pairBlobVersion, got.Version)
+	require.Equal(t, in.PairingCode, got.PairingCode)
+	require.Equal(t, in.ServerPublicKey, got.ServerPublicKey)
+	require.Equal(t, in.Endpoint, got.Endpoint)
+	require.Equal(t, in.Address, got.Address)
+	require.Equal(t, in.AllowedIPs, got.AllowedIPs)
+	require.Equal(t, in.APIEndpoint, got.APIEndpoint)
+	require.Equal(t, in.PersistentKeepalive, got.PersistentKeepalive)
+	require.Equal(t, in.Name, got.Name)
+
+	// Tolerates surrounding whitespace from a copy-paste.
+	got, err = decodePairBlob("  " + encoded + "\n")
+	require.NoError(t, err)
+	require.Equal(t, in.PairingCode, got.PairingCode)
+}
+
+func TestDecodePairBlobRejectsGarbage(t *testing.T) {
+	cases := []string{
+		"",
+		"not-base64-!!!",
+		base64.RawURLEncoding.EncodeToString([]byte("not json")),
+		// Wrong version.
+		base64.RawURLEncoding.EncodeToString([]byte(`{"v":99,"code":"x","spk":"y","ep":"z","addr":"a"}`)),
+		// Missing required field (code).
+		base64.RawURLEncoding.EncodeToString([]byte(`{"v":1,"spk":"y","ep":"z","addr":"a"}`)),
+	}
+	for _, s := range cases {
+		_, err := decodePairBlob(s)
+		require.Errorf(t, err, "expected error for %q", s)
+	}
+}

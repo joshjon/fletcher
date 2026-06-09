@@ -23,6 +23,12 @@ type PeersBackend interface {
 	Delete(ctx context.Context, id string) (bool, error)
 	// NextAvailableAddress is the auto-allocator backing PairPeer.
 	NextAvailableAddress(ctx context.Context) (string, error)
+	// BeginPair starts a client-keygen pairing flow; the daemon reserves
+	// a tunnel address and pairing code without persisting a peer.
+	BeginPair(ctx context.Context, name string) (peer.BeginPairResult, error)
+	// CompletePair finishes a client-keygen pairing flow, registering
+	// the peer with the caller-supplied public key.
+	CompletePair(ctx context.Context, code, name string, clientPub wireguard.Key) (peer.CompletedPair, error)
 	// PublicEndpoint returns the operator-configured host:port for
 	// PairPeer; empty disables pairing with a clear error.
 	PublicEndpoint() string
@@ -126,6 +132,57 @@ func (s *PeersService) PairPeer(ctx context.Context, req *connect.Request[fletch
 		Endpoint:     endpoint,
 		ApiToken:     created.APIToken,
 		ApiEndpoint:  s.peers.APIEndpoint(),
+	}), nil
+}
+
+// BeginPair starts a client-keygen pairing flow used by native clients
+// (iOS) that generate their own WireGuard keypair locally. The daemon
+// reserves a tunnel address and returns the material the client needs
+// to assemble its own wg-quick config; no peer row is committed until
+// CompletePair is called.
+func (s *PeersService) BeginPair(ctx context.Context, req *connect.Request[fletcherv1.BeginPairRequest]) (*connect.Response[fletcherv1.BeginPairResponse], error) {
+	if s.serverKey == nil {
+		return nil, errors.New("server key provider not configured")
+	}
+	res, err := s.peers.BeginPair(ctx, req.Msg.GetName())
+	if err != nil {
+		return nil, err
+	}
+	serverPub, err := s.serverKey.ServerPublicKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load server public key: %w", err)
+	}
+	return connect.NewResponse(&fletcherv1.BeginPairResponse{
+		PairingCode:         res.Code,
+		ExpiresAt:           res.ExpiresAt.Unix(),
+		ServerPublicKey:     string(serverPub),
+		Endpoint:            s.peers.PublicEndpoint(),
+		Address:             res.Address,
+		AllowedIps:          []string{s.peers.TunnelCIDR()},
+		ApiEndpoint:         s.peers.APIEndpoint(),
+		PersistentKeepalive: 25,
+	}), nil
+}
+
+// CompletePair finishes a client-keygen pairing flow. The caller
+// supplies the pairing code, the name from BeginPair, and the
+// WireGuard public key it generated locally; the daemon registers the
+// peer and returns the per-peer API token. The private half never
+// touches the daemon.
+func (s *PeersService) CompletePair(ctx context.Context, req *connect.Request[fletcherv1.CompletePairRequest]) (*connect.Response[fletcherv1.CompletePairResponse], error) {
+	done, err := s.peers.CompletePair(ctx,
+		req.Msg.GetPairingCode(),
+		req.Msg.GetName(),
+		wireguard.Key(req.Msg.GetClientPublicKey()),
+	)
+	if err != nil {
+		return nil, err
+	}
+	s.syncPeers(ctx)
+	return connect.NewResponse(&fletcherv1.CompletePairResponse{
+		Peer:        peerToProto(done.Peer),
+		ApiToken:    done.APIToken,
+		ApiEndpoint: s.peers.APIEndpoint(),
 	}), nil
 }
 

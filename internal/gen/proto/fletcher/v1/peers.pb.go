@@ -582,6 +582,299 @@ func (x *PairPeerRequest) GetName() string {
 	return ""
 }
 
+type BeginPairRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name is the only required input; everything else is daemon-resolved.
+	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BeginPairRequest) Reset() {
+	*x = BeginPairRequest{}
+	mi := &file_fletcher_v1_peers_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BeginPairRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BeginPairRequest) ProtoMessage() {}
+
+func (x *BeginPairRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_peers_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BeginPairRequest.ProtoReflect.Descriptor instead.
+func (*BeginPairRequest) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_peers_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *BeginPairRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type BeginPairResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// pairing_code is the short-lived, one-time-use string the client
+	// returns in CompletePair to claim this pairing slot.
+	PairingCode string `protobuf:"bytes,1,opt,name=pairing_code,json=pairingCode,proto3" json:"pairing_code,omitempty"`
+	// expires_at is the unix-seconds deadline after which the pairing
+	// code is rejected and the allocated address is released.
+	ExpiresAt int64 `protobuf:"varint,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	// server_public_key is the daemon's WireGuard public key, base64.
+	ServerPublicKey string `protobuf:"bytes,3,opt,name=server_public_key,json=serverPublicKey,proto3" json:"server_public_key,omitempty"`
+	// endpoint is the host:port the client's WireGuard interface dials
+	// (copied from the daemon's configured public_endpoint).
+	Endpoint string `protobuf:"bytes,4,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
+	// address is the tunnel /32 the daemon reserved for this peer; the
+	// client uses it as its WireGuard interface address.
+	Address string `protobuf:"bytes,5,opt,name=address,proto3" json:"address,omitempty"`
+	// allowed_ips are the CIDRs the client should route through the
+	// tunnel (typically the daemon's tunnel CIDR, e.g. "10.99.0.0/24").
+	AllowedIps []string `protobuf:"bytes,6,rep,name=allowed_ips,json=allowedIps,proto3" json:"allowed_ips,omitempty"`
+	// api_endpoint is the tunnel-side host:port a client dials to drive
+	// the daemon's network API once the tunnel is up.
+	ApiEndpoint string `protobuf:"bytes,7,opt,name=api_endpoint,json=apiEndpoint,proto3" json:"api_endpoint,omitempty"`
+	// persistent_keepalive is the WireGuard keepalive interval in
+	// seconds the client should configure. 0 disables.
+	PersistentKeepalive int32 `protobuf:"varint,8,opt,name=persistent_keepalive,json=persistentKeepalive,proto3" json:"persistent_keepalive,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *BeginPairResponse) Reset() {
+	*x = BeginPairResponse{}
+	mi := &file_fletcher_v1_peers_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BeginPairResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BeginPairResponse) ProtoMessage() {}
+
+func (x *BeginPairResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_peers_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BeginPairResponse.ProtoReflect.Descriptor instead.
+func (*BeginPairResponse) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_peers_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *BeginPairResponse) GetPairingCode() string {
+	if x != nil {
+		return x.PairingCode
+	}
+	return ""
+}
+
+func (x *BeginPairResponse) GetExpiresAt() int64 {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return 0
+}
+
+func (x *BeginPairResponse) GetServerPublicKey() string {
+	if x != nil {
+		return x.ServerPublicKey
+	}
+	return ""
+}
+
+func (x *BeginPairResponse) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
+	}
+	return ""
+}
+
+func (x *BeginPairResponse) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *BeginPairResponse) GetAllowedIps() []string {
+	if x != nil {
+		return x.AllowedIps
+	}
+	return nil
+}
+
+func (x *BeginPairResponse) GetApiEndpoint() string {
+	if x != nil {
+		return x.ApiEndpoint
+	}
+	return ""
+}
+
+func (x *BeginPairResponse) GetPersistentKeepalive() int32 {
+	if x != nil {
+		return x.PersistentKeepalive
+	}
+	return 0
+}
+
+type CompletePairRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// pairing_code is the value returned by BeginPair. One-time use;
+	// the daemon rejects a second call with the same code.
+	PairingCode string `protobuf:"bytes,1,opt,name=pairing_code,json=pairingCode,proto3" json:"pairing_code,omitempty"`
+	// name must match the BeginPair request that issued the code. The
+	// duplicate is a typo guard, not an auth factor.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// client_public_key is the base64-encoded Curve25519 public key the
+	// client generated locally; the daemon stores it as the peer's
+	// public half.
+	ClientPublicKey string `protobuf:"bytes,3,opt,name=client_public_key,json=clientPublicKey,proto3" json:"client_public_key,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CompletePairRequest) Reset() {
+	*x = CompletePairRequest{}
+	mi := &file_fletcher_v1_peers_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompletePairRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompletePairRequest) ProtoMessage() {}
+
+func (x *CompletePairRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_peers_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompletePairRequest.ProtoReflect.Descriptor instead.
+func (*CompletePairRequest) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_peers_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *CompletePairRequest) GetPairingCode() string {
+	if x != nil {
+		return x.PairingCode
+	}
+	return ""
+}
+
+func (x *CompletePairRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CompletePairRequest) GetClientPublicKey() string {
+	if x != nil {
+		return x.ClientPublicKey
+	}
+	return ""
+}
+
+type CompletePairResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Peer  *Peer                  `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`
+	// api_token is the per-peer bearer token for the daemon's network
+	// API, returned exactly once. Clients send it as
+	// `Authorization: Bearer <token>` when driving the daemon.
+	ApiToken string `protobuf:"bytes,2,opt,name=api_token,json=apiToken,proto3" json:"api_token,omitempty"`
+	// api_endpoint is the tunnel-side host:port the client dials to
+	// drive the daemon's network API; echoed here for clients that
+	// only persist the CompletePair response.
+	ApiEndpoint   string `protobuf:"bytes,3,opt,name=api_endpoint,json=apiEndpoint,proto3" json:"api_endpoint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompletePairResponse) Reset() {
+	*x = CompletePairResponse{}
+	mi := &file_fletcher_v1_peers_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompletePairResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompletePairResponse) ProtoMessage() {}
+
+func (x *CompletePairResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_peers_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompletePairResponse.ProtoReflect.Descriptor instead.
+func (*CompletePairResponse) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_peers_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *CompletePairResponse) GetPeer() *Peer {
+	if x != nil {
+		return x.Peer
+	}
+	return nil
+}
+
+func (x *CompletePairResponse) GetApiToken() string {
+	if x != nil {
+		return x.ApiToken
+	}
+	return ""
+}
+
+func (x *CompletePairResponse) GetApiEndpoint() string {
+	if x != nil {
+		return x.ApiEndpoint
+	}
+	return ""
+}
+
 type PairPeerResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Peer  *Peer                  `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`
@@ -610,7 +903,7 @@ type PairPeerResponse struct {
 
 func (x *PairPeerResponse) Reset() {
 	*x = PairPeerResponse{}
-	mi := &file_fletcher_v1_peers_proto_msgTypes[10]
+	mi := &file_fletcher_v1_peers_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -622,7 +915,7 @@ func (x *PairPeerResponse) String() string {
 func (*PairPeerResponse) ProtoMessage() {}
 
 func (x *PairPeerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_peers_proto_msgTypes[10]
+	mi := &file_fletcher_v1_peers_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -635,7 +928,7 @@ func (x *PairPeerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PairPeerResponse.ProtoReflect.Descriptor instead.
 func (*PairPeerResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_peers_proto_rawDescGZIP(), []int{10}
+	return file_fletcher_v1_peers_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PairPeerResponse) GetPeer() *Peer {
@@ -697,7 +990,7 @@ type ServerConfigRequest struct {
 
 func (x *ServerConfigRequest) Reset() {
 	*x = ServerConfigRequest{}
-	mi := &file_fletcher_v1_peers_proto_msgTypes[11]
+	mi := &file_fletcher_v1_peers_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -709,7 +1002,7 @@ func (x *ServerConfigRequest) String() string {
 func (*ServerConfigRequest) ProtoMessage() {}
 
 func (x *ServerConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_peers_proto_msgTypes[11]
+	mi := &file_fletcher_v1_peers_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -722,7 +1015,7 @@ func (x *ServerConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerConfigRequest.ProtoReflect.Descriptor instead.
 func (*ServerConfigRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_peers_proto_rawDescGZIP(), []int{11}
+	return file_fletcher_v1_peers_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ServerConfigRequest) GetAddress() string {
@@ -752,7 +1045,7 @@ type ServerConfigResponse struct {
 
 func (x *ServerConfigResponse) Reset() {
 	*x = ServerConfigResponse{}
-	mi := &file_fletcher_v1_peers_proto_msgTypes[12]
+	mi := &file_fletcher_v1_peers_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -764,7 +1057,7 @@ func (x *ServerConfigResponse) String() string {
 func (*ServerConfigResponse) ProtoMessage() {}
 
 func (x *ServerConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_peers_proto_msgTypes[12]
+	mi := &file_fletcher_v1_peers_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -777,7 +1070,7 @@ func (x *ServerConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerConfigResponse.ProtoReflect.Descriptor instead.
 func (*ServerConfigResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_peers_proto_rawDescGZIP(), []int{12}
+	return file_fletcher_v1_peers_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ServerConfigResponse) GetConfig() string {
@@ -839,7 +1132,28 @@ const file_fletcher_v1_peers_proto_rawDesc = "" +
 	"\x12DeletePeerResponse\x12\x18\n" +
 	"\aexisted\x18\x01 \x01(\bR\aexisted\"%\n" +
 	"\x0fPairPeerRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\xf5\x01\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"&\n" +
+	"\x10BeginPairRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\xae\x02\n" +
+	"\x11BeginPairResponse\x12!\n" +
+	"\fpairing_code\x18\x01 \x01(\tR\vpairingCode\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x02 \x01(\x03R\texpiresAt\x12*\n" +
+	"\x11server_public_key\x18\x03 \x01(\tR\x0fserverPublicKey\x12\x1a\n" +
+	"\bendpoint\x18\x04 \x01(\tR\bendpoint\x12\x18\n" +
+	"\aaddress\x18\x05 \x01(\tR\aaddress\x12\x1f\n" +
+	"\vallowed_ips\x18\x06 \x03(\tR\n" +
+	"allowedIps\x12!\n" +
+	"\fapi_endpoint\x18\a \x01(\tR\vapiEndpoint\x121\n" +
+	"\x14persistent_keepalive\x18\b \x01(\x05R\x13persistentKeepalive\"x\n" +
+	"\x13CompletePairRequest\x12!\n" +
+	"\fpairing_code\x18\x01 \x01(\tR\vpairingCode\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12*\n" +
+	"\x11client_public_key\x18\x03 \x01(\tR\x0fclientPublicKey\"}\n" +
+	"\x14CompletePairResponse\x12%\n" +
+	"\x04peer\x18\x01 \x01(\v2\x11.fletcher.v1.PeerR\x04peer\x12\x1b\n" +
+	"\tapi_token\x18\x02 \x01(\tR\bapiToken\x12!\n" +
+	"\fapi_endpoint\x18\x03 \x01(\tR\vapiEndpoint\"\xf5\x01\n" +
 	"\x10PairPeerResponse\x12%\n" +
 	"\x04peer\x18\x01 \x01(\v2\x11.fletcher.v1.PeerR\x04peer\x12#\n" +
 	"\rclient_config\x18\x02 \x01(\tR\fclientConfig\x12\x1f\n" +
@@ -856,9 +1170,11 @@ const file_fletcher_v1_peers_proto_rawDesc = "" +
 	"\x14ServerConfigResponse\x12\x16\n" +
 	"\x06config\x18\x01 \x01(\tR\x06config\x12\x1d\n" +
 	"\n" +
-	"public_key\x18\x02 \x01(\tR\tpublicKey2\xe7\x03\n" +
+	"public_key\x18\x02 \x01(\tR\tpublicKey2\x8c\x05\n" +
 	"\vPeerService\x12I\n" +
-	"\bPairPeer\x12\x1c.fletcher.v1.PairPeerRequest\x1a\x1d.fletcher.v1.PairPeerResponse\"\x00\x12O\n" +
+	"\bPairPeer\x12\x1c.fletcher.v1.PairPeerRequest\x1a\x1d.fletcher.v1.PairPeerResponse\"\x00\x12L\n" +
+	"\tBeginPair\x12\x1d.fletcher.v1.BeginPairRequest\x1a\x1e.fletcher.v1.BeginPairResponse\"\x00\x12U\n" +
+	"\fCompletePair\x12 .fletcher.v1.CompletePairRequest\x1a!.fletcher.v1.CompletePairResponse\"\x00\x12O\n" +
 	"\n" +
 	"CreatePeer\x12\x1e.fletcher.v1.CreatePeerRequest\x1a\x1f.fletcher.v1.CreatePeerResponse\"\x00\x12F\n" +
 	"\aGetPeer\x12\x1b.fletcher.v1.GetPeerRequest\x1a\x1c.fletcher.v1.GetPeerResponse\"\x00\x12L\n" +
@@ -881,7 +1197,7 @@ func file_fletcher_v1_peers_proto_rawDescGZIP() []byte {
 	return file_fletcher_v1_peers_proto_rawDescData
 }
 
-var file_fletcher_v1_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_fletcher_v1_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_fletcher_v1_peers_proto_goTypes = []any{
 	(*Peer)(nil),                 // 0: fletcher.v1.Peer
 	(*CreatePeerRequest)(nil),    // 1: fletcher.v1.CreatePeerRequest
@@ -893,32 +1209,41 @@ var file_fletcher_v1_peers_proto_goTypes = []any{
 	(*DeletePeerRequest)(nil),    // 7: fletcher.v1.DeletePeerRequest
 	(*DeletePeerResponse)(nil),   // 8: fletcher.v1.DeletePeerResponse
 	(*PairPeerRequest)(nil),      // 9: fletcher.v1.PairPeerRequest
-	(*PairPeerResponse)(nil),     // 10: fletcher.v1.PairPeerResponse
-	(*ServerConfigRequest)(nil),  // 11: fletcher.v1.ServerConfigRequest
-	(*ServerConfigResponse)(nil), // 12: fletcher.v1.ServerConfigResponse
+	(*BeginPairRequest)(nil),     // 10: fletcher.v1.BeginPairRequest
+	(*BeginPairResponse)(nil),    // 11: fletcher.v1.BeginPairResponse
+	(*CompletePairRequest)(nil),  // 12: fletcher.v1.CompletePairRequest
+	(*CompletePairResponse)(nil), // 13: fletcher.v1.CompletePairResponse
+	(*PairPeerResponse)(nil),     // 14: fletcher.v1.PairPeerResponse
+	(*ServerConfigRequest)(nil),  // 15: fletcher.v1.ServerConfigRequest
+	(*ServerConfigResponse)(nil), // 16: fletcher.v1.ServerConfigResponse
 }
 var file_fletcher_v1_peers_proto_depIdxs = []int32{
 	0,  // 0: fletcher.v1.CreatePeerResponse.peer:type_name -> fletcher.v1.Peer
 	0,  // 1: fletcher.v1.GetPeerResponse.peer:type_name -> fletcher.v1.Peer
 	0,  // 2: fletcher.v1.ListPeersResponse.peers:type_name -> fletcher.v1.Peer
-	0,  // 3: fletcher.v1.PairPeerResponse.peer:type_name -> fletcher.v1.Peer
-	9,  // 4: fletcher.v1.PeerService.PairPeer:input_type -> fletcher.v1.PairPeerRequest
-	1,  // 5: fletcher.v1.PeerService.CreatePeer:input_type -> fletcher.v1.CreatePeerRequest
-	3,  // 6: fletcher.v1.PeerService.GetPeer:input_type -> fletcher.v1.GetPeerRequest
-	5,  // 7: fletcher.v1.PeerService.ListPeers:input_type -> fletcher.v1.ListPeersRequest
-	7,  // 8: fletcher.v1.PeerService.DeletePeer:input_type -> fletcher.v1.DeletePeerRequest
-	11, // 9: fletcher.v1.PeerService.ServerConfig:input_type -> fletcher.v1.ServerConfigRequest
-	10, // 10: fletcher.v1.PeerService.PairPeer:output_type -> fletcher.v1.PairPeerResponse
-	2,  // 11: fletcher.v1.PeerService.CreatePeer:output_type -> fletcher.v1.CreatePeerResponse
-	4,  // 12: fletcher.v1.PeerService.GetPeer:output_type -> fletcher.v1.GetPeerResponse
-	6,  // 13: fletcher.v1.PeerService.ListPeers:output_type -> fletcher.v1.ListPeersResponse
-	8,  // 14: fletcher.v1.PeerService.DeletePeer:output_type -> fletcher.v1.DeletePeerResponse
-	12, // 15: fletcher.v1.PeerService.ServerConfig:output_type -> fletcher.v1.ServerConfigResponse
-	10, // [10:16] is the sub-list for method output_type
-	4,  // [4:10] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	0,  // 3: fletcher.v1.CompletePairResponse.peer:type_name -> fletcher.v1.Peer
+	0,  // 4: fletcher.v1.PairPeerResponse.peer:type_name -> fletcher.v1.Peer
+	9,  // 5: fletcher.v1.PeerService.PairPeer:input_type -> fletcher.v1.PairPeerRequest
+	10, // 6: fletcher.v1.PeerService.BeginPair:input_type -> fletcher.v1.BeginPairRequest
+	12, // 7: fletcher.v1.PeerService.CompletePair:input_type -> fletcher.v1.CompletePairRequest
+	1,  // 8: fletcher.v1.PeerService.CreatePeer:input_type -> fletcher.v1.CreatePeerRequest
+	3,  // 9: fletcher.v1.PeerService.GetPeer:input_type -> fletcher.v1.GetPeerRequest
+	5,  // 10: fletcher.v1.PeerService.ListPeers:input_type -> fletcher.v1.ListPeersRequest
+	7,  // 11: fletcher.v1.PeerService.DeletePeer:input_type -> fletcher.v1.DeletePeerRequest
+	15, // 12: fletcher.v1.PeerService.ServerConfig:input_type -> fletcher.v1.ServerConfigRequest
+	14, // 13: fletcher.v1.PeerService.PairPeer:output_type -> fletcher.v1.PairPeerResponse
+	11, // 14: fletcher.v1.PeerService.BeginPair:output_type -> fletcher.v1.BeginPairResponse
+	13, // 15: fletcher.v1.PeerService.CompletePair:output_type -> fletcher.v1.CompletePairResponse
+	2,  // 16: fletcher.v1.PeerService.CreatePeer:output_type -> fletcher.v1.CreatePeerResponse
+	4,  // 17: fletcher.v1.PeerService.GetPeer:output_type -> fletcher.v1.GetPeerResponse
+	6,  // 18: fletcher.v1.PeerService.ListPeers:output_type -> fletcher.v1.ListPeersResponse
+	8,  // 19: fletcher.v1.PeerService.DeletePeer:output_type -> fletcher.v1.DeletePeerResponse
+	16, // 20: fletcher.v1.PeerService.ServerConfig:output_type -> fletcher.v1.ServerConfigResponse
+	13, // [13:21] is the sub-list for method output_type
+	5,  // [5:13] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_fletcher_v1_peers_proto_init() }
@@ -932,7 +1257,7 @@ func file_fletcher_v1_peers_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fletcher_v1_peers_proto_rawDesc), len(file_fletcher_v1_peers_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

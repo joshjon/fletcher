@@ -35,6 +35,11 @@ const (
 const (
 	// PeerServicePairPeerProcedure is the fully-qualified name of the PeerService's PairPeer RPC.
 	PeerServicePairPeerProcedure = "/fletcher.v1.PeerService/PairPeer"
+	// PeerServiceBeginPairProcedure is the fully-qualified name of the PeerService's BeginPair RPC.
+	PeerServiceBeginPairProcedure = "/fletcher.v1.PeerService/BeginPair"
+	// PeerServiceCompletePairProcedure is the fully-qualified name of the PeerService's CompletePair
+	// RPC.
+	PeerServiceCompletePairProcedure = "/fletcher.v1.PeerService/CompletePair"
 	// PeerServiceCreatePeerProcedure is the fully-qualified name of the PeerService's CreatePeer RPC.
 	PeerServiceCreatePeerProcedure = "/fletcher.v1.PeerService/CreatePeer"
 	// PeerServiceGetPeerProcedure is the fully-qualified name of the PeerService's GetPeer RPC.
@@ -56,6 +61,20 @@ type PeerServiceClient interface {
 	// a fully-rendered client wg-quick config ready to drop on the
 	// device. Fails clearly if the daemon has no public_endpoint set.
 	PairPeer(context.Context, *connect.Request[v1.PairPeerRequest]) (*connect.Response[v1.PairPeerResponse], error)
+	// BeginPair starts a client-keygen pairing flow used by native
+	// clients (iOS) that generate their own WireGuard keypair locally.
+	// The daemon allocates a tunnel address, mints a short-lived
+	// pairing code, and returns the server-side material the client
+	// needs to assemble its own wg-quick config. No peer row is
+	// committed until CompletePair is called with the client public
+	// key; the slot expires if the code is not redeemed in time.
+	BeginPair(context.Context, *connect.Request[v1.BeginPairRequest]) (*connect.Response[v1.BeginPairResponse], error)
+	// CompletePair finishes a client-keygen pairing flow. The caller
+	// supplies the pairing code from BeginPair plus the WireGuard
+	// public key it generated locally; the daemon registers the peer
+	// and returns the per-peer API token. The private half of the
+	// keypair never leaves the client.
+	CompletePair(context.Context, *connect.Request[v1.CompletePairRequest]) (*connect.Response[v1.CompletePairResponse], error)
 	// CreatePeer is the power-user path: the caller supplies the
 	// tunnel address and server endpoint explicitly. Use PairPeer for
 	// the common case.
@@ -83,6 +102,18 @@ func NewPeerServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			httpClient,
 			baseURL+PeerServicePairPeerProcedure,
 			connect.WithSchema(peerServiceMethods.ByName("PairPeer")),
+			connect.WithClientOptions(opts...),
+		),
+		beginPair: connect.NewClient[v1.BeginPairRequest, v1.BeginPairResponse](
+			httpClient,
+			baseURL+PeerServiceBeginPairProcedure,
+			connect.WithSchema(peerServiceMethods.ByName("BeginPair")),
+			connect.WithClientOptions(opts...),
+		),
+		completePair: connect.NewClient[v1.CompletePairRequest, v1.CompletePairResponse](
+			httpClient,
+			baseURL+PeerServiceCompletePairProcedure,
+			connect.WithSchema(peerServiceMethods.ByName("CompletePair")),
 			connect.WithClientOptions(opts...),
 		),
 		createPeer: connect.NewClient[v1.CreatePeerRequest, v1.CreatePeerResponse](
@@ -121,6 +152,8 @@ func NewPeerServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 // peerServiceClient implements PeerServiceClient.
 type peerServiceClient struct {
 	pairPeer     *connect.Client[v1.PairPeerRequest, v1.PairPeerResponse]
+	beginPair    *connect.Client[v1.BeginPairRequest, v1.BeginPairResponse]
+	completePair *connect.Client[v1.CompletePairRequest, v1.CompletePairResponse]
 	createPeer   *connect.Client[v1.CreatePeerRequest, v1.CreatePeerResponse]
 	getPeer      *connect.Client[v1.GetPeerRequest, v1.GetPeerResponse]
 	listPeers    *connect.Client[v1.ListPeersRequest, v1.ListPeersResponse]
@@ -131,6 +164,16 @@ type peerServiceClient struct {
 // PairPeer calls fletcher.v1.PeerService.PairPeer.
 func (c *peerServiceClient) PairPeer(ctx context.Context, req *connect.Request[v1.PairPeerRequest]) (*connect.Response[v1.PairPeerResponse], error) {
 	return c.pairPeer.CallUnary(ctx, req)
+}
+
+// BeginPair calls fletcher.v1.PeerService.BeginPair.
+func (c *peerServiceClient) BeginPair(ctx context.Context, req *connect.Request[v1.BeginPairRequest]) (*connect.Response[v1.BeginPairResponse], error) {
+	return c.beginPair.CallUnary(ctx, req)
+}
+
+// CompletePair calls fletcher.v1.PeerService.CompletePair.
+func (c *peerServiceClient) CompletePair(ctx context.Context, req *connect.Request[v1.CompletePairRequest]) (*connect.Response[v1.CompletePairResponse], error) {
+	return c.completePair.CallUnary(ctx, req)
 }
 
 // CreatePeer calls fletcher.v1.PeerService.CreatePeer.
@@ -166,6 +209,20 @@ type PeerServiceHandler interface {
 	// a fully-rendered client wg-quick config ready to drop on the
 	// device. Fails clearly if the daemon has no public_endpoint set.
 	PairPeer(context.Context, *connect.Request[v1.PairPeerRequest]) (*connect.Response[v1.PairPeerResponse], error)
+	// BeginPair starts a client-keygen pairing flow used by native
+	// clients (iOS) that generate their own WireGuard keypair locally.
+	// The daemon allocates a tunnel address, mints a short-lived
+	// pairing code, and returns the server-side material the client
+	// needs to assemble its own wg-quick config. No peer row is
+	// committed until CompletePair is called with the client public
+	// key; the slot expires if the code is not redeemed in time.
+	BeginPair(context.Context, *connect.Request[v1.BeginPairRequest]) (*connect.Response[v1.BeginPairResponse], error)
+	// CompletePair finishes a client-keygen pairing flow. The caller
+	// supplies the pairing code from BeginPair plus the WireGuard
+	// public key it generated locally; the daemon registers the peer
+	// and returns the per-peer API token. The private half of the
+	// keypair never leaves the client.
+	CompletePair(context.Context, *connect.Request[v1.CompletePairRequest]) (*connect.Response[v1.CompletePairResponse], error)
 	// CreatePeer is the power-user path: the caller supplies the
 	// tunnel address and server endpoint explicitly. Use PairPeer for
 	// the common case.
@@ -189,6 +246,18 @@ func NewPeerServiceHandler(svc PeerServiceHandler, opts ...connect.HandlerOption
 		PeerServicePairPeerProcedure,
 		svc.PairPeer,
 		connect.WithSchema(peerServiceMethods.ByName("PairPeer")),
+		connect.WithHandlerOptions(opts...),
+	)
+	peerServiceBeginPairHandler := connect.NewUnaryHandler(
+		PeerServiceBeginPairProcedure,
+		svc.BeginPair,
+		connect.WithSchema(peerServiceMethods.ByName("BeginPair")),
+		connect.WithHandlerOptions(opts...),
+	)
+	peerServiceCompletePairHandler := connect.NewUnaryHandler(
+		PeerServiceCompletePairProcedure,
+		svc.CompletePair,
+		connect.WithSchema(peerServiceMethods.ByName("CompletePair")),
 		connect.WithHandlerOptions(opts...),
 	)
 	peerServiceCreatePeerHandler := connect.NewUnaryHandler(
@@ -225,6 +294,10 @@ func NewPeerServiceHandler(svc PeerServiceHandler, opts ...connect.HandlerOption
 		switch r.URL.Path {
 		case PeerServicePairPeerProcedure:
 			peerServicePairPeerHandler.ServeHTTP(w, r)
+		case PeerServiceBeginPairProcedure:
+			peerServiceBeginPairHandler.ServeHTTP(w, r)
+		case PeerServiceCompletePairProcedure:
+			peerServiceCompletePairHandler.ServeHTTP(w, r)
 		case PeerServiceCreatePeerProcedure:
 			peerServiceCreatePeerHandler.ServeHTTP(w, r)
 		case PeerServiceGetPeerProcedure:
@@ -246,6 +319,14 @@ type UnimplementedPeerServiceHandler struct{}
 
 func (UnimplementedPeerServiceHandler) PairPeer(context.Context, *connect.Request[v1.PairPeerRequest]) (*connect.Response[v1.PairPeerResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.PeerService.PairPeer is not implemented"))
+}
+
+func (UnimplementedPeerServiceHandler) BeginPair(context.Context, *connect.Request[v1.BeginPairRequest]) (*connect.Response[v1.BeginPairResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.PeerService.BeginPair is not implemented"))
+}
+
+func (UnimplementedPeerServiceHandler) CompletePair(context.Context, *connect.Request[v1.CompletePairRequest]) (*connect.Response[v1.CompletePairResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.PeerService.CompletePair is not implemented"))
 }
 
 func (UnimplementedPeerServiceHandler) CreatePeer(context.Context, *connect.Request[v1.CreatePeerRequest]) (*connect.Response[v1.CreatePeerResponse], error) {
