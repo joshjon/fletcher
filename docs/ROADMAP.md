@@ -386,7 +386,7 @@ DESIGN.md §11 and §9.
   image): driving a real `claude` agent through the gateway in a microVM. Every
   mechanism it relies on is proven - the VM runs commands, reaches the daemon
   gateway over vsock, has no egress, and the gateway already stamps credentials
-  (M1-M4). It is the operator's final validation, documented in setup.md.
+  (M1-M4). It is the operator's final validation, documented in docs/site/guide/first-agent.md.
 
 ### Milestone 6 - Durable sessions (interactive, persistent workspaces) - DONE
 

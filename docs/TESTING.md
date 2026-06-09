@@ -1,7 +1,7 @@
 # Testing Fletcher (developer smoke tests)
 
 > **This doc is for Fletcher developers**, not end users. If you want to
-> install and use Fletcher, read [`setup.md`](setup.md) instead.
+> install and use Fletcher, read the [user guide](site/guide/introduction.md) instead.
 
 Automated tests live alongside the code (`make test`); this file covers
 the manual end-to-end smoke tests we run against a daemon before
@@ -9,7 +9,7 @@ shipping a change.
 
 Two flows: **macOS for development** (no Linux, no networking knowledge
 required) and **Linux server for real deployment** (covered in detail in
-`setup.md`; the testing-specific bits are below).
+the [user guide](site/guide/introduction.md); the testing-specific bits are below).
 
 ## macOS (development)
 
@@ -219,7 +219,7 @@ To start clean between runs: `rm -rf /tmp/fletcher-data`.
 
 For the full setup flow that an end user follows (install, networking,
 pairing a device, security notes, troubleshooting), see
-[`setup.md`](setup.md). This section covers what's testing-specific
+the [user guide](site/guide/introduction.md). This section covers what's testing-specific
 for developers iterating on Fletcher itself.
 
 ### First deploy to a test server
@@ -240,7 +240,7 @@ restart matter when the unit file has changed in your branch.
 
 For first install, let UPnP auto-detect the public endpoint, or set it with
 `fletcher settings set public_endpoint <host>:51820` (see
-[setup.md § Mode A](setup.md#mode-a-built-in-wireguard-recommended-for-most-homelabs)),
+[the networking guide, Mode A](site/guide/networking.md#mode-a-built-in-wireguard)),
 then `fletcher daemon enable`. For testing inside a single LAN, you can skip
 both the port forward and the endpoint - peers on the same
 network reach the daemon via its LAN IP.
@@ -693,7 +693,7 @@ This creates the `fletcher` user, installs the binary + unit, adds the daemon to
 the `kvm` group and you to the `fletcher` group - exactly what `curl | sudo sh`
 does once a release is tagged.
 
-**4. From here, follow [`setup.md`](setup.md) as a user would** - `fletcher
+**4. From here, follow the [user guide](site/guide/introduction.md) as a user would** - `fletcher
 daemon enable`, `fletcher doctor`, import the base image, run an agent. Anything
 in that flow that needs a step the docs don't mention is a fresh-user-experience
 bug to fix before tagging.

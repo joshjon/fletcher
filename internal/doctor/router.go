@@ -76,7 +76,7 @@ func CheckUPnP(listenPort int) Checker {
 						Label: "Skip Fletcher's WireGuard, use a VPN you already run",
 						Steps: []string{
 							"# Bring your own VPN (Tailscale, Headscale, ZeroTier, plain WireGuard).",
-							"# See docs/setup.md \"Mode B: bring your own VPN\".",
+							"# See docs/site/advanced/networking.md \"Mode B: bring your own VPN\".",
 						},
 					}},
 				},

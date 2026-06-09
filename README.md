@@ -51,14 +51,15 @@ job needs a base image first. Pull the published one and import it:
 ext4 --name <name>`, then `fletcher job create --image <name> --command "..."`.
 The full walkthrough - importing the image,
 running an agent in a microVM, `fletcher settings` / `fletcher daemon`, and
-driving the daemon from a paired device - is in [`docs/setup.md`](docs/setup.md).
+driving the daemon from a paired device - is in the
+[documentation](docs/site/guide/introduction.md).
 (No KVM? The daemon falls back to the mock runtime, where
 `fletcher job create --command "echo hi"` runs as a plain subprocess.)
 
 The daemon brings up its own WireGuard interface and asks your router to
 forward the listening port via UPnP - on most home connections that's
 the whole setup. Troubleshooting and the "bring-your-own-VPN" alternative
-(Tailscale, etc.) are in [`docs/setup.md`](docs/setup.md) too.
+(Tailscale, etc.) are in the [networking guide](docs/site/guide/networking.md) too.
 
 The CLI talks to the daemon over a local Unix socket, or to a remote daemon
 over the tunnel: run `fletcher login <token>` once (the token is printed by
@@ -73,11 +74,12 @@ a Docker image: `fletcher deploy <image> --host app.example.com` builds or pulls
 the image, runs it, and serves it publicly over HTTPS on a domain you own, with
 the app sandboxed in a no-egress microVM. The daemon pulls registry images itself,
 so `deploy` works from a laptop over the tunnel with no local Docker. Walkthroughs
-for both are in [`docs/setup.md`](docs/setup.md).
+for both are in [durable sessions](docs/site/guide/sessions.md) and
+[deploying apps](docs/site/guide/deploy.md).
 
 ## Documentation
 
-- [`docs/setup.md`](docs/setup.md) - end-user install, first run,
+- [User guide](docs/site/guide/introduction.md) - end-user install, first run,
   running agents, configuration, the remote client, networking modes,
   security notes, troubleshooting. Start here if you're running Fletcher.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) - delivery status: what is built,

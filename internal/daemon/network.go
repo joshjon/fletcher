@@ -119,7 +119,7 @@ func bringUpNetwork(
 		// the operator deserves a clear path forward.
 		logger.Error("wireguard tunnel start failed; continuing without tunnel",
 			slog.String("err", err.Error()),
-			slog.String("hint", "ensure the daemon runs as root or with CAP_NET_ADMIN; see docs/setup.md"),
+			slog.String("hint", "ensure the daemon runs as root or with CAP_NET_ADMIN; see docs/site/guide/troubleshooting.md"),
 		)
 		return setup, nil
 	}

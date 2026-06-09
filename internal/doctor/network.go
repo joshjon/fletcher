@@ -77,7 +77,7 @@ func CheckPublicIP() Checker {
 						Label: "Use a VPN you already run (recommended)",
 						Steps: []string{
 							"# Bring your own VPN (Tailscale, Headscale, ZeroTier, plain WireGuard).",
-							"# See docs/setup.md \"Mode B: bring your own VPN\" for the bind config.",
+							"# See docs/site/advanced/networking.md \"Mode B: bring your own VPN\" for the bind config.",
 						},
 					}, {
 						Label: "Use a small public-IP relay (advanced)",
