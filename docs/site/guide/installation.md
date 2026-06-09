@@ -40,13 +40,3 @@ command on macOS detects the platform and installs the **client only** - no
 daemon. Use it to drive a remote daemon from your laptop; see
 [Remote control](/guide/remote).
 :::
-
-## Building from source
-
-If you're on an architecture the release tarballs don't cover, or you want to
-track `main`, build it yourself. See [Building from source](/advanced/building).
-
-## What's next
-
-The daemon isn't running yet - you start it as part of choosing how you'll reach
-it. Continue to [Networking & first run](/guide/networking).
