@@ -33,6 +33,7 @@ import (
 	"github.com/joshjon/fletcher/internal/image"
 	"github.com/joshjon/fletcher/internal/job"
 	fletchermcp "github.com/joshjon/fletcher/internal/mcp"
+	"github.com/joshjon/fletcher/internal/network/pairingtls"
 	"github.com/joshjon/fletcher/internal/network/wireguard"
 	"github.com/joshjon/fletcher/internal/peer"
 	"github.com/joshjon/fletcher/internal/runtime"
@@ -155,6 +156,11 @@ type Config struct {
 	// hub-side tunnel. Defaults to 51820. The same value is what UPnP
 	// asks the router to forward.
 	WireGuardListenPort int
+	// PairingPort is the public TCP port the pairing listener binds for
+	// CompletePair over TLS (the pre-tunnel bootstrap native clients use).
+	// Defaults to defaultPairingPort; UPnP forwards the same port.
+	// Settings-managed (pairing_port).
+	PairingPort int
 	// DisableUPnP turns off the automatic router-port-forward attempt
 	// at startup. Useful when running behind a router known to mishandle
 	// UPnP, or in test environments. Default false (UPnP enabled).
@@ -286,6 +292,9 @@ type services struct {
 	remoteSrv       *http.Server
 	remoteLn        net.Listener
 	remoteAddr      string
+	pairingSrv      *http.Server
+	pairingLn       net.Listener
+	pairingAddr     string
 	gatewayUnix     string
 	mcpUnix         string
 	gatewayBaseURL  string
@@ -504,6 +513,13 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	connectSrv := newHTTPServer(startedAt.Unix(), connectDeps, logger)
 	remoteSrv := newRemoteServer(remoteLn, peerSvc, connectSrv.Handler)
 
+	// Public pairing listener: the pre-tunnel bootstrap native clients use.
+	// CompletePair cannot travel over the tunnel it is trying to establish
+	// (the daemon only learns the client key at CompletePair), so it is
+	// exposed here over TLS with a pinned self-signed cert, gated by the
+	// one-time pairing code. Only meaningful when the tunnel is up.
+	pairingSrv, pairingLn, pairingAddr := buildPairingListener(ctx, cfg, netSetup, peerSvc, connectDeps, logger)
+
 	return &services{
 		cfg:             cfg,
 		supervisor:      supervisor,
@@ -527,6 +543,9 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		remoteSrv:       remoteSrv,
 		remoteLn:        remoteLn,
 		remoteAddr:      apiEndpoint,
+		pairingSrv:      pairingSrv,
+		pairingLn:       pairingLn,
+		pairingAddr:     pairingAddr,
 		gatewayUnix:     gatewayUnix,
 		mcpUnix:         mcpUnix,
 		gatewayBaseURL:  gatewayURL,
@@ -620,6 +639,10 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	if s.remoteSrv != nil {
 		//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
 		g.Add(httpServeActor(logger, "remote-api", s.remoteSrv, s.remoteLn, "http://"+s.remoteAddr))
+	}
+	if s.pairingSrv != nil {
+		//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
+		g.Add(tlsServeActor(logger, "pairing", s.pairingSrv, s.pairingLn, "https://"+s.pairingAddr))
 	}
 	g.Add(supervisorActor(ctx, s.supervisor))
 	if s.cfg.SessionIdleTimeout > 0 {
@@ -906,6 +929,96 @@ func listenTCP(ctx context.Context, addr, role string) (net.Listener, string, er
 	return ln, fmt.Sprintf("http://%s:%d", host, tcp.Port), nil
 }
 
+// pairingProcedure is the single Connect procedure the public pairing
+// listener exposes. Everything else 404s so the public surface is exactly
+// "complete a pairing with a valid one-time code" and nothing more.
+const pairingProcedure = "/fletcher.v1.PeerService/CompletePair"
+
+// pairingCertDir is where the self-signed pairing certificate lives, next
+// to the database so it shares the daemon's state directory and backups.
+func pairingCertDir(cfg Config) string {
+	return filepath.Join(filepath.Dir(cfg.DatabasePath), "pairing")
+}
+
+// buildPairingListener brings up the public TLS pairing endpoint when the
+// tunnel is up: it loads (or generates) the self-signed cert, binds the
+// public TCP port, forwards it via UPnP, and tells the peer service to
+// advertise the endpoint + fingerprint in BeginPair. Every failure is
+// non-fatal (logged); the daemon still runs, mobile pairing just stays
+// unavailable. Returns nil servers when pairing cannot be offered (no
+// tunnel, cert error, or bind failure).
+func buildPairingListener(
+	ctx context.Context,
+	cfg Config,
+	netSetup *networkSetup,
+	peerSvc *peer.Service,
+	deps connectDeps,
+	logger *slog.Logger,
+) (*http.Server, net.Listener, string) {
+	if netSetup.Tunnel == nil {
+		// No tunnel means a paired client could not establish WireGuard
+		// afterward, so there is nothing to bootstrap.
+		return nil, nil, ""
+	}
+	mat, err := pairingtls.EnsureCert(pairingCertDir(cfg))
+	if err != nil {
+		logger.Error("pairing listener disabled: cannot load TLS cert", slog.String("err", err.Error()))
+		return nil, nil, ""
+	}
+	port := pairingPort(cfg)
+	ln, _, err := listenTCP(ctx, fmt.Sprintf("0.0.0.0:%d", port), "pairing")
+	if err != nil {
+		logger.Error("pairing listener disabled: cannot bind", slog.Int("port", port), slog.String("err", err.Error()))
+		return nil, nil, ""
+	}
+	addr := ln.Addr().String()
+	// Advertise only now that the listener is real, then open the router
+	// port so the endpoint is reachable from outside the LAN.
+	peerSvc.SetPairing(port, mat.Fingerprint)
+	tryUPnPTCP(ctx, logger, port, "fletcher pairing")
+	logger.Info("pairing listener ready",
+		slog.String("addr", addr),
+		slog.String("tls_fingerprint", mat.Fingerprint))
+	return newPairingServer(deps, mat, logger), ln, addr
+}
+
+// newPairingServer builds the TLS-terminated pairing server. It serves
+// ONLY CompletePair, authenticated by the one-time pairing code in the
+// request body (not a per-peer token - the client has none yet), and
+// 404s every other path. The same PeersService backends as the local API
+// are reused, so a completed pairing syncs the new peer into the tunnel.
+func newPairingServer(deps connectDeps, mat pairingtls.Material, logger *slog.Logger) *http.Server {
+	interceptors := connect.WithInterceptors(
+		api.RequestIDInterceptor(),
+		api.ErrorInterceptor(logger),
+	)
+	path, handler := fletcherv1connect.NewPeerServiceHandler(
+		api.NewPeersService(deps.peers, deps.serverKey, deps.peerSync), interceptors,
+	)
+	mux := http.NewServeMux()
+	mux.Handle(path, handler)
+	return &http.Server{
+		Handler:           restrictToPairing(mux),
+		TLSConfig:         mat.TLSConfig(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+}
+
+// restrictToPairing wraps the PeerService handler so the public listener
+// answers only CompletePair and 404s every other path. This is the public
+// surface's guard rail: the full PeerService (ListPeers, DeletePeer, ...)
+// must never be reachable without a per-peer token, and the pairing
+// listener is deliberately token-free.
+func restrictToPairing(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != pairingProcedure {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func newGatewayHTTPServer(gw *gateway.Gateway) *http.Server {
 	return &http.Server{
 		Handler:           gw.Handler(),
@@ -1058,6 +1171,7 @@ func settingsDefaults(cfg Config) map[string]string {
 		settings.KeyBtrfsRoot:           btrfsRoot,
 		settings.KeyPublicEndpoint:      cfg.PublicEndpoint,
 		settings.KeyWireGuardPort:       strconv.Itoa(cfg.WireGuardListenPort),
+		settings.KeyPairingPort:         strconv.Itoa(pairingPort(cfg)),
 		settings.KeyLogLevel:            cfg.LogLevel,
 		settings.KeyCredentialsDir:      cfg.CredentialsDir,
 		settings.KeyNoUPnP:              strconv.FormatBool(cfg.DisableUPnP),
@@ -1157,6 +1271,10 @@ func applySetting(cfg *Config, k, v string) bool {
 	case settings.KeyWireGuardPort:
 		if n, perr := strconv.Atoi(v); perr == nil {
 			cfg.WireGuardListenPort = n
+		}
+	case settings.KeyPairingPort:
+		if n, perr := strconv.Atoi(v); perr == nil {
+			cfg.PairingPort = n
 		}
 	case settings.KeyLogLevel:
 		cfg.LogLevel = v

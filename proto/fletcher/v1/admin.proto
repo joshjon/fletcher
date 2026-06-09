@@ -45,4 +45,10 @@ message HealthResponse {
   // completion (success, no-update, or error). It lets a client tell "no update"
   // apart from "not checked yet" in the brief window right after a restart.
   bool base_image_update_checked = 10;
+  // pairing_endpoint is the public host:port the native (iOS) client dials to
+  // complete pairing over TLS, as resolved at startup. Empty means the pairing
+  // listener is not up (no public endpoint, or it failed to bind), so the iOS
+  // app cannot pair even though laptop/CLI pairing is unaffected. Exposed so
+  // `fletcher doctor` can report iOS-pairing readiness.
+  string pairing_endpoint = 11;
 }

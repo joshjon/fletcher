@@ -90,8 +90,14 @@ type HealthResponse struct {
 	// completion (success, no-update, or error). It lets a client tell "no update"
 	// apart from "not checked yet" in the brief window right after a restart.
 	BaseImageUpdateChecked bool `protobuf:"varint,10,opt,name=base_image_update_checked,json=baseImageUpdateChecked,proto3" json:"base_image_update_checked,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// pairing_endpoint is the public host:port the native (iOS) client dials to
+	// complete pairing over TLS, as resolved at startup. Empty means the pairing
+	// listener is not up (no public endpoint, or it failed to bind), so the iOS
+	// app cannot pair even though laptop/CLI pairing is unaffected. Exposed so
+	// `fletcher doctor` can report iOS-pairing readiness.
+	PairingEndpoint string `protobuf:"bytes,11,opt,name=pairing_endpoint,json=pairingEndpoint,proto3" json:"pairing_endpoint,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *HealthResponse) Reset() {
@@ -194,12 +200,19 @@ func (x *HealthResponse) GetBaseImageUpdateChecked() bool {
 	return false
 }
 
+func (x *HealthResponse) GetPairingEndpoint() string {
+	if x != nil {
+		return x.PairingEndpoint
+	}
+	return ""
+}
+
 var File_fletcher_v1_admin_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_admin_proto_rawDesc = "" +
 	"\n" +
 	"\x17fletcher/v1/admin.proto\x12\vfletcher.v1\"\x0f\n" +
-	"\rHealthRequest\"\x84\x03\n" +
+	"\rHealthRequest\"\xaf\x03\n" +
 	"\x0eHealthResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
@@ -212,7 +225,8 @@ const file_fletcher_v1_admin_proto_rawDesc = "" +
 	"\x14base_image_available\x18\b \x01(\bR\x12baseImageAvailable\x12=\n" +
 	"\x1bbase_image_update_available\x18\t \x01(\bR\x18baseImageUpdateAvailable\x129\n" +
 	"\x19base_image_update_checked\x18\n" +
-	" \x01(\bR\x16baseImageUpdateChecked2S\n" +
+	" \x01(\bR\x16baseImageUpdateChecked\x12)\n" +
+	"\x10pairing_endpoint\x18\v \x01(\tR\x0fpairingEndpoint2S\n" +
 	"\fAdminService\x12C\n" +
 	"\x06Health\x12\x1a.fletcher.v1.HealthRequest\x1a\x1b.fletcher.v1.HealthResponse\"\x00B\xb1\x01\n" +
 	"\x0fcom.fletcher.v1B\n" +

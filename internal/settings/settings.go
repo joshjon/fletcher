@@ -26,6 +26,7 @@ const (
 	KeyBtrfsRoot      = "btrfs_root"
 	KeyPublicEndpoint = "public_endpoint"
 	KeyWireGuardPort  = "wireguard_port"
+	KeyPairingPort    = "pairing_port"
 	KeyLogLevel       = "log_level"
 	KeyCredentialsDir = "credentials_dir"
 	KeyNoUPnP         = "no_upnp"
@@ -62,6 +63,7 @@ var registry = []definition{
 	{KeyBtrfsRoot, "btrfs snapshot root directory", nil},
 	{KeyPublicEndpoint, "host:port peers dial to reach this daemon", nil},
 	{KeyWireGuardPort, "WireGuard UDP listen port, 1-65535", portNumber},
+	{KeyPairingPort, "public TCP port the iOS app dials to complete pairing (TLS, self-signed cert pinned via QR), 1-65535", portNumber},
 	{KeyLogLevel, "log level: debug | info | warn | error", oneOf("debug", "info", "warn", "error")},
 	{KeyCredentialsDir, "host directory for trusted-credential mounts", nil},
 	{KeyNoUPnP, "disable the automatic UPnP port-forward: true | false", oneOf("true", "false")},

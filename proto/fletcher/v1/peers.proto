@@ -118,6 +118,21 @@ message BeginPairResponse {
   // persistent_keepalive is the WireGuard keepalive interval in
   // seconds the client should configure. 0 disables.
   int32 persistent_keepalive = 8;
+  // pairing_endpoint is the public host:port the client dials to call
+  // CompletePair *before* the WireGuard tunnel exists. Pairing is a
+  // bootstrap: the daemon only learns the client's public key at
+  // CompletePair, so that one call cannot travel over the tunnel it is
+  // trying to establish. The client POSTs CompletePair here over TLS
+  // (pinning pairing_tls_fingerprint), then brings up the tunnel and
+  // uses api_endpoint for everything after. Empty when the daemon has
+  // no public endpoint or the pairing listener is down.
+  string pairing_endpoint = 9;
+  // pairing_tls_fingerprint is the lowercase hex SHA-256 of the pairing
+  // listener's leaf certificate (DER). The listener uses a self-signed
+  // cert, so the client pins exactly this fingerprint instead of
+  // trusting a CA - the QR is the out-of-band trust anchor. Empty when
+  // pairing_endpoint is empty.
+  string pairing_tls_fingerprint = 10;
 }
 
 message CompletePairRequest {

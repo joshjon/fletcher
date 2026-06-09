@@ -35,6 +35,13 @@ type PeersBackend interface {
 	// APIEndpoint returns the tunnel-side host:port clients dial to drive
 	// the daemon's network API.
 	APIEndpoint() string
+	// PairingEndpoint returns the public host:port a client dials to call
+	// CompletePair before the tunnel is up; empty when no public endpoint
+	// or pairing listener is available.
+	PairingEndpoint() string
+	// PairingTLSFingerprint returns the lowercase hex SHA-256 of the
+	// pairing listener's leaf certificate, for the client to pin.
+	PairingTLSFingerprint() string
 	// TunnelCIDR is the subnet the server side announces as AllowedIPs
 	// to peers (so they route only fletcher-network traffic through).
 	TunnelCIDR() string
@@ -153,14 +160,16 @@ func (s *PeersService) BeginPair(ctx context.Context, req *connect.Request[fletc
 		return nil, fmt.Errorf("load server public key: %w", err)
 	}
 	return connect.NewResponse(&fletcherv1.BeginPairResponse{
-		PairingCode:         res.Code,
-		ExpiresAt:           res.ExpiresAt.Unix(),
-		ServerPublicKey:     string(serverPub),
-		Endpoint:            s.peers.PublicEndpoint(),
-		Address:             res.Address,
-		AllowedIps:          []string{s.peers.TunnelCIDR()},
-		ApiEndpoint:         s.peers.APIEndpoint(),
-		PersistentKeepalive: 25,
+		PairingCode:           res.Code,
+		ExpiresAt:             res.ExpiresAt.Unix(),
+		ServerPublicKey:       string(serverPub),
+		Endpoint:              s.peers.PublicEndpoint(),
+		Address:               res.Address,
+		AllowedIps:            []string{s.peers.TunnelCIDR()},
+		ApiEndpoint:           s.peers.APIEndpoint(),
+		PersistentKeepalive:   25,
+		PairingEndpoint:       s.peers.PairingEndpoint(),
+		PairingTlsFingerprint: s.peers.PairingTLSFingerprint(),
 	}), nil
 }
 

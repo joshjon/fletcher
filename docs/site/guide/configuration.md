@@ -28,6 +28,7 @@ fletcher settings unset log_level     # revert to the flag/env default
 | `default_image` | Base image `job` / `session create` use when `--image` is omitted (`fletcher-base` out of the box, set empty to make `--image` required) |
 | `public_endpoint` | Your public `host:port` for WireGuard (overrides UPnP discovery) |
 | `wireguard_port` | UDP port for the built-in tunnel (default 51820) |
+| `pairing_port` | Public TCP port the iOS app dials to complete pairing over TLS (default 51821; see [Pair a device](/guide/pairing)) |
 | `no_upnp` | Disable the automatic UPnP port-forward attempt |
 | `gateway_listen` | Listen address for the model gateway (default `127.0.0.1:11500`) |
 | `mcp_listen` | Listen address for the MCP server (default `127.0.0.1:11600`) |

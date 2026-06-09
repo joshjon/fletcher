@@ -51,9 +51,11 @@ Pass --mobile when pairing a native client (the Fletcher iOS app)
 that generates its own WireGuard keypair locally. The daemon
 returns a single pairing blob that bundles every field the app
 needs in one QR; the app keeps its private key in its secure
-enclave and completes pairing over the tunnel handshake. The
-daemon's API token is only released after the app supplies its
-public key, so a copied blob does not authorise API access.`,
+enclave. It calls CompletePair over the public pairing endpoint
+(a TLS port whose self-signed cert it pins from the blob) to
+register its public key, then brings up the tunnel. The daemon's
+API token is only released after the app supplies its public key,
+so a copied blob does not authorise API access.`,
 		Flags: []cli.Flag{
 			socketFlag(),
 			&cli.BoolFlag{
@@ -90,6 +92,13 @@ public key, so a copied blob does not authorise API access.`,
 }
 
 func renderMobilePairResult(w io.Writer, name string, resp *fletcherv1.BeginPairResponse, withQR bool) {
+	if resp.GetPairingEndpoint() == "" {
+		fmt.Fprintf(w, "pairing slot reserved for %s, but the daemon has no public pairing listener.\n", name)
+		fmt.Fprintln(w, "The iOS app cannot complete pairing without it. Restart the daemon so the")
+		fmt.Fprintln(w, "pairing listener can bind (it needs the WireGuard tunnel up and a public endpoint),")
+		fmt.Fprintln(w, "then run `fletcher peer pair --mobile` again.")
+		return
+	}
 	blob := encodePairBlob(pairBlob{
 		PairingCode:         resp.GetPairingCode(),
 		ExpiresAt:           resp.GetExpiresAt(),
@@ -100,11 +109,14 @@ func renderMobilePairResult(w io.Writer, name string, resp *fletcherv1.BeginPair
 		APIEndpoint:         resp.GetApiEndpoint(),
 		PersistentKeepalive: resp.GetPersistentKeepalive(),
 		Name:                name,
+		PairingEndpoint:     resp.GetPairingEndpoint(),
+		PairingFingerprint:  resp.GetPairingTlsFingerprint(),
 	})
 	expires := time.Unix(resp.GetExpiresAt(), 0).UTC().Format(time.RFC3339)
 	fmt.Fprintf(w, "pairing slot reserved for %s\n", name)
 	fmt.Fprintf(w, "  address:  %s\n", resp.GetAddress())
 	fmt.Fprintf(w, "  endpoint: %s\n", resp.GetEndpoint())
+	fmt.Fprintf(w, "  pairing:  %s\n", resp.GetPairingEndpoint())
 	fmt.Fprintf(w, "  expires:  %s (slot released if the app does not complete pairing in time)\n", expires)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "# ===== PAIR BLOB (paste into the Fletcher iOS app, or scan the QR) =====")

@@ -12,11 +12,14 @@ import (
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 )
 
-// PublicEndpointProvider reports the host:port the daemon will advertise to
-// paired devices. The peer service satisfies it; Health surfaces the value so
-// doctor can diagnose a stale or missing endpoint.
+// PublicEndpointProvider reports the host:port endpoints the daemon will
+// advertise to paired devices: PublicEndpoint for the WireGuard tunnel and
+// PairingEndpoint for the native-client pairing listener. The peer service
+// satisfies it; Health surfaces the values so doctor can diagnose a stale or
+// missing endpoint or pairing listener.
 type PublicEndpointProvider interface {
 	PublicEndpoint() string
+	PairingEndpoint() string
 }
 
 // RuntimeStatus is the daemon's effective runtime configuration resolved at
@@ -60,8 +63,10 @@ func NewAdminService(startedAt int64, endpoint PublicEndpointProvider, runtime R
 func (s *AdminService) Health(_ context.Context, _ *connect.Request[fletcherv1.HealthRequest]) (*connect.Response[fletcherv1.HealthResponse], error) {
 	info := buildinfo.Info()
 	endpoint := ""
+	pairingEndpoint := ""
 	if s.endpoint != nil {
 		endpoint = s.endpoint.PublicEndpoint()
+		pairingEndpoint = s.endpoint.PairingEndpoint()
 	}
 	updateAvailable := s.runtime.BaseImageUpdate != nil && s.runtime.BaseImageUpdate.Load()
 	updateChecked := s.runtime.BaseImageChecked != nil && s.runtime.BaseImageChecked.Load()
@@ -76,5 +81,6 @@ func (s *AdminService) Health(_ context.Context, _ *connect.Request[fletcherv1.H
 		BaseImageAvailable:       s.runtime.BaseImageAvailable,
 		BaseImageUpdateAvailable: updateAvailable,
 		BaseImageUpdateChecked:   updateChecked,
+		PairingEndpoint:          pairingEndpoint,
 	}), nil
 }

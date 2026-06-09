@@ -80,3 +80,52 @@ func CheckPublicEndpoint(socketPath string) Checker {
 		}
 	})
 }
+
+// CheckPairingEndpoint asks the daemon whether its public pairing listener is
+// up - the TLS endpoint the native (iOS) app dials to complete pairing before
+// the WireGuard tunnel exists. A non-empty pairing endpoint means the listener
+// bound and is being advertised; empty means the iOS app cannot pair (laptop
+// and CLI pairing are unaffected, which is why this warns rather than fails).
+//
+// The empty case overlaps with a missing public endpoint, which
+// CheckPublicEndpoint already reports as a blocker with a restart plan, so this
+// stays a warning and does not duplicate that remediation.
+func CheckPairingEndpoint(socketPath string) Checker {
+	return CheckerFunc(func(ctx context.Context) Result {
+		client := &http.Client{
+			Timeout: 3 * time.Second,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					var d net.Dialer
+					return d.DialContext(ctx, "unix", socketPath)
+				},
+			},
+		}
+		admin := fletcherv1connect.NewAdminServiceClient(client, "http://unix")
+		resp, err := admin.Health(ctx, connect.NewRequest(&fletcherv1.HealthRequest{}))
+		if err != nil {
+			return Result{
+				Category: CategoryReachability,
+				Name:     "iOS pairing endpoint",
+				Status:   StatusSkip,
+				Detail:   "skipped: daemon not reachable (see DAEMON above)",
+			}
+		}
+
+		if endpoint := resp.Msg.GetPairingEndpoint(); endpoint != "" {
+			return Result{
+				Category: CategoryReachability,
+				Name:     "iOS pairing endpoint",
+				Status:   StatusOK,
+				Detail:   "daemon advertises " + endpoint + " for the iOS app to complete pairing",
+			}
+		}
+
+		return Result{
+			Category: CategoryReachability,
+			Name:     "iOS pairing endpoint",
+			Status:   StatusWarn,
+			Detail:   "no pairing listener; the iOS app cannot pair (laptop/CLI pairing is unaffected). Needs a public endpoint and a daemon restart.",
+		}
+	})
+}

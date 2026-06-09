@@ -40,7 +40,16 @@ func TestHealthReportsEmptyEndpointWhenUnset(t *testing.T) {
 	require.Empty(t, resp.Msg.GetPublicEndpoint())
 }
 
-// stubEndpoint is a fixed PublicEndpointProvider for tests.
+// stubEndpoint is a fixed PublicEndpointProvider for tests. The pairing
+// endpoint is derived by swapping in a fixed pairing port so a non-empty
+// public endpoint yields a non-empty pairing endpoint.
 type stubEndpoint string
 
 func (s stubEndpoint) PublicEndpoint() string { return string(s) }
+
+func (s stubEndpoint) PairingEndpoint() string {
+	if s == "" {
+		return ""
+	}
+	return string(s)
+}

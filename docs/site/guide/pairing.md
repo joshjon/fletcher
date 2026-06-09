@@ -46,9 +46,49 @@ read. Confirm the interface with `ip addr show fletcher0`, and watch peers being
 added with `fletcher daemon logs | grep -i wireguard`.
 :::
 
-A phone can join the tunnel, but there's no client to drive the daemon from iOS
-yet. That's the native app, still to come. Today the tunnel works from the phone,
-but control is laptop-only.
+The steps above use the generic WireGuard app, which gives the phone a tunnel
+but no way to drive the daemon. The native Fletcher iOS app pairs differently -
+see below.
+
+## Pair the iOS app (native client)
+
+The native app generates its own WireGuard keypair on the device (the private
+half never leaves the secure enclave), so it uses a different command:
+
+```sh
+fletcher peer pair --mobile phone
+```
+
+This prints (and renders as a QR) a single **pair blob** carrying everything the
+app needs: the reserved tunnel address, the server's WireGuard key, the public
+endpoint, a one-time pairing code, and the **pairing endpoint** plus its **TLS
+fingerprint** (explained below). Scan it in the app.
+
+Pairing is a bootstrap, and the order matters. The app must register its public
+key with the daemon *before* it can bring up the tunnel - WireGuard will not
+complete a handshake from a key the daemon has never heard of. So the app:
+
+1. Calls `CompletePair` over the **pairing endpoint**: a public TCP port
+   (default 51821), separate from the WireGuard port, served over TLS. The
+   daemon registers the device's public key and returns the API token.
+2. Brings up the WireGuard tunnel. The daemon now knows the key, so the
+   handshake succeeds.
+3. Drives the daemon over the tunnel at the tunnel-side API endpoint
+   (`10.99.0.1:11700`) using the token, exactly like the laptop flow.
+
+The pairing endpoint uses a **self-signed certificate**, because the daemon has
+no CA and often only a bare IP. The pair blob carries that certificate's SHA-256
+fingerprint, and the app pins it: the QR is the out-of-band trust anchor, so a
+man-in-the-middle cannot substitute a certificate. The endpoint serves only
+`CompletePair`, gated by the one-time code - nothing else is reachable there.
+
+::: tip Pairing needs the pairing port reachable too
+Like the WireGuard port, the pairing TCP port (default 51821) must reach the box
+from outside. The daemon forwards it via UPnP at startup; if UPnP is unavailable,
+forward it manually alongside the WireGuard port. `fletcher peer pair --mobile`
+warns when the daemon has no pairing listener (no public endpoint, or the tunnel
+is down).
+:::
 
 ## Connect a laptop
 

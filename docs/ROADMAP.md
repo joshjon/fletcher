@@ -615,6 +615,29 @@ M6 already expose; the app consumes the daemon, it does not extend it:
    networking. A generated Connect-Swift (or grpc-swift) client rides the tunnel.
    Proven by pairing a clean phone and listing / creating / stopping sessions.
    Foundation for everything else.
+
+   > **Update (2026-06-09): the "no new networking" assumption was wrong.**
+   > The first real-device pairing test surfaced a bootstrap deadlock. The
+   > client-keygen flow (commit `183f405`) exposed `CompletePair` only on the
+   > tunnel-side API (`10.99.0.1:11700`, behind a per-peer token), but a native
+   > client cannot reach that: the daemon only learns the device's WireGuard
+   > public key *at* `CompletePair`, so the tunnel that call would travel over
+   > cannot exist yet (WireGuard will not handshake an unknown key), and the
+   > per-peer token gating it is the very thing `CompletePair` returns. On a real
+   > phone the request leaked to iCloud Private Relay and timed out.
+   >
+   > **Fix (shipped):** a dedicated **public pairing listener** - a TLS-terminated
+   > TCP port (default 51821, settings key `pairing_port`, UPnP-forwarded) that
+   > serves *only* `CompletePair`, authenticated by the one-time pairing code
+   > rather than a peer token. It uses a self-signed cert whose SHA-256 leaf
+   > fingerprint is carried in the pairing blob; the app pins it (the QR is the
+   > out-of-band trust anchor), so a bare-IP endpoint with no CA is still
+   > MITM-proof. The app now calls `CompletePair` over this endpoint first, then
+   > brings up the tunnel (the daemon now knows its key) and uses the tunnel API
+   > for everything after. The steady-state invariant holds - clients remain
+   > WireGuard-only peers; the public channel exists solely for the short-lived,
+   > code-gated bootstrap. New fields: `BeginPairResponse.pairing_endpoint` and
+   > `pairing_tls_fingerprint`, plumbed into the pairing blob.
 2. **In-app terminal (the hero interaction).** A SwiftUI terminal over
    `ShellSession`: attach to a session, run `claude`, detach and reattach.
    Backgrounding the app never kills the session - durability is server-side

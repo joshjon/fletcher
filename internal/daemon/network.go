@@ -20,6 +20,20 @@ import (
 // the WireGuard project's documented standard.
 const defaultWireGuardListenPort = 51820
 
+// defaultPairingPort is the public TCP port the pairing listener binds by
+// default (and UPnP forwards). Sits next to the WireGuard port so an
+// operator forwarding ports manually has one obvious neighbour to open.
+const defaultPairingPort = 51821
+
+// pairingPort resolves the configured pairing port, falling back to the
+// default when unset.
+func pairingPort(cfg Config) int {
+	if cfg.PairingPort != 0 {
+		return cfg.PairingPort
+	}
+	return defaultPairingPort
+}
+
 // upnpLeaseDuration caps how long the router holds the port-forward
 // without a refresh. Long enough that a typical homelab daemon doesn't
 // need to re-up frequently; short enough that abandoned forwards

@@ -90,6 +90,12 @@ func serveCmd() *cli.Command {
 				Sources: cli.EnvVars("FLETCHER_WIREGUARD_PORT"),
 				Value:   51820,
 			},
+			&cli.IntFlag{
+				Name:    "pairing-port",
+				Usage:   "public TCP port the iOS app dials to complete pairing over TLS (and asks UPnP to forward)",
+				Sources: cli.EnvVars("FLETCHER_PAIRING_PORT"),
+				Value:   51821,
+			},
 			&cli.BoolFlag{
 				Name:    "no-upnp",
 				Usage:   "skip the automatic router-port-forward attempt at startup",
@@ -112,6 +118,7 @@ func serveCmd() *cli.Command {
 				CredentialsDir:      cmd.String("credentials-dir"),
 				PublicEndpoint:      cmd.String("public-endpoint"),
 				WireGuardListenPort: cmd.Int("wireguard-port"),
+				PairingPort:         cmd.Int("pairing-port"),
 				DisableUPnP:         cmd.Bool("no-upnp"),
 			})
 		},

@@ -15,7 +15,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -95,9 +97,11 @@ type CreatedWithPublicKey struct {
 
 // Service is the high-level peers API.
 type Service struct {
-	q           sqliteq.Querier
-	tunnelCIDR  string
-	apiEndpoint string
+	q                  sqliteq.Querier
+	tunnelCIDR         string
+	apiEndpoint        string
+	pairingPort        int
+	pairingFingerprint string
 
 	mu             sync.RWMutex
 	publicEndpoint string
@@ -119,6 +123,15 @@ type Options struct {
 	// drive the daemon's network API (e.g. "10.99.0.1:11700"). Surfaced in
 	// pairing output so the client knows where to point.
 	APIEndpoint string
+	// PairingPort is the public TCP port the client dials to call
+	// CompletePair before the tunnel exists. The host is taken from the
+	// (UPnP-updatable) public endpoint, so PairingEndpoint tracks it. 0
+	// disables the advertised pairing endpoint.
+	PairingPort int
+	// PairingTLSFingerprint is the lowercase hex SHA-256 of the pairing
+	// listener's self-signed leaf certificate, published so the client
+	// can pin it. Empty disables the advertised pairing endpoint.
+	PairingTLSFingerprint string
 }
 
 // NewService wires a Service to a sqlc querier with the given options.
@@ -128,11 +141,13 @@ func NewService(q sqliteq.Querier, opts Options) *Service {
 		cidr = DefaultTunnelCIDR
 	}
 	return &Service{
-		q:              q,
-		tunnelCIDR:     cidr,
-		publicEndpoint: opts.PublicEndpoint,
-		apiEndpoint:    opts.APIEndpoint,
-		pending:        newPendingPairs(),
+		q:                  q,
+		tunnelCIDR:         cidr,
+		publicEndpoint:     opts.PublicEndpoint,
+		apiEndpoint:        opts.APIEndpoint,
+		pairingPort:        opts.PairingPort,
+		pairingFingerprint: opts.PairingTLSFingerprint,
+		pending:            newPendingPairs(),
 	}
 }
 
@@ -159,6 +174,48 @@ func (s *Service) SetPublicEndpoint(endpoint string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.publicEndpoint = endpoint
+}
+
+// SetPairing records the pairing listener's port and leaf-cert
+// fingerprint so BeginPair starts advertising the pairing endpoint. The
+// daemon calls this only after the listener actually binds, so an empty
+// advertisement means "no pairing listener", not "try a dead port".
+func (s *Service) SetPairing(port int, fingerprint string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pairingPort = port
+	s.pairingFingerprint = fingerprint
+}
+
+// PairingEndpoint returns the public host:port a client dials to call
+// CompletePair before the tunnel is up: the public endpoint's host with
+// the configured pairing port. Empty when there is no public endpoint or
+// no pairing port (so BeginPair advertises nothing and the client falls
+// back to whatever it can reach). Tracks UPnP-updated endpoints because
+// it derives the host from the live public endpoint.
+func (s *Service) PairingEndpoint() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.publicEndpoint == "" || s.pairingPort == 0 {
+		return ""
+	}
+	host := s.publicEndpoint
+	if h, _, err := net.SplitHostPort(s.publicEndpoint); err == nil {
+		host = h
+	}
+	return net.JoinHostPort(host, strconv.Itoa(s.pairingPort))
+}
+
+// PairingTLSFingerprint returns the lowercase hex SHA-256 of the pairing
+// listener's leaf certificate, for the client to pin. Empty when no
+// pairing endpoint is advertised.
+func (s *Service) PairingTLSFingerprint() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.publicEndpoint == "" || s.pairingPort == 0 {
+		return ""
+	}
+	return s.pairingFingerprint
 }
 
 // NextAvailableAddress returns the next free /32 inside the service's

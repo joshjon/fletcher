@@ -652,8 +652,23 @@ type BeginPairResponse struct {
 	// persistent_keepalive is the WireGuard keepalive interval in
 	// seconds the client should configure. 0 disables.
 	PersistentKeepalive int32 `protobuf:"varint,8,opt,name=persistent_keepalive,json=persistentKeepalive,proto3" json:"persistent_keepalive,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// pairing_endpoint is the public host:port the client dials to call
+	// CompletePair *before* the WireGuard tunnel exists. Pairing is a
+	// bootstrap: the daemon only learns the client's public key at
+	// CompletePair, so that one call cannot travel over the tunnel it is
+	// trying to establish. The client POSTs CompletePair here over TLS
+	// (pinning pairing_tls_fingerprint), then brings up the tunnel and
+	// uses api_endpoint for everything after. Empty when the daemon has
+	// no public endpoint or the pairing listener is down.
+	PairingEndpoint string `protobuf:"bytes,9,opt,name=pairing_endpoint,json=pairingEndpoint,proto3" json:"pairing_endpoint,omitempty"`
+	// pairing_tls_fingerprint is the lowercase hex SHA-256 of the pairing
+	// listener's leaf certificate (DER). The listener uses a self-signed
+	// cert, so the client pins exactly this fingerprint instead of
+	// trusting a CA - the QR is the out-of-band trust anchor. Empty when
+	// pairing_endpoint is empty.
+	PairingTlsFingerprint string `protobuf:"bytes,10,opt,name=pairing_tls_fingerprint,json=pairingTlsFingerprint,proto3" json:"pairing_tls_fingerprint,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *BeginPairResponse) Reset() {
@@ -740,6 +755,20 @@ func (x *BeginPairResponse) GetPersistentKeepalive() int32 {
 		return x.PersistentKeepalive
 	}
 	return 0
+}
+
+func (x *BeginPairResponse) GetPairingEndpoint() string {
+	if x != nil {
+		return x.PairingEndpoint
+	}
+	return ""
+}
+
+func (x *BeginPairResponse) GetPairingTlsFingerprint() string {
+	if x != nil {
+		return x.PairingTlsFingerprint
+	}
+	return ""
 }
 
 type CompletePairRequest struct {
@@ -1134,7 +1163,7 @@ const file_fletcher_v1_peers_proto_rawDesc = "" +
 	"\x0fPairPeerRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"&\n" +
 	"\x10BeginPairRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\xae\x02\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\x91\x03\n" +
 	"\x11BeginPairResponse\x12!\n" +
 	"\fpairing_code\x18\x01 \x01(\tR\vpairingCode\x12\x1d\n" +
 	"\n" +
@@ -1145,7 +1174,10 @@ const file_fletcher_v1_peers_proto_rawDesc = "" +
 	"\vallowed_ips\x18\x06 \x03(\tR\n" +
 	"allowedIps\x12!\n" +
 	"\fapi_endpoint\x18\a \x01(\tR\vapiEndpoint\x121\n" +
-	"\x14persistent_keepalive\x18\b \x01(\x05R\x13persistentKeepalive\"x\n" +
+	"\x14persistent_keepalive\x18\b \x01(\x05R\x13persistentKeepalive\x12)\n" +
+	"\x10pairing_endpoint\x18\t \x01(\tR\x0fpairingEndpoint\x126\n" +
+	"\x17pairing_tls_fingerprint\x18\n" +
+	" \x01(\tR\x15pairingTlsFingerprint\"x\n" +
 	"\x13CompletePairRequest\x12!\n" +
 	"\fpairing_code\x18\x01 \x01(\tR\vpairingCode\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12*\n" +

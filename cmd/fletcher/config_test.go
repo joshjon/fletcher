@@ -74,6 +74,8 @@ func TestPairBlobRoundTrip(t *testing.T) {
 		APIEndpoint:         "10.99.0.1:11700",
 		PersistentKeepalive: 25,
 		Name:                "phone",
+		PairingEndpoint:     "home.example.com:51821",
+		PairingFingerprint:  "abc123def456",
 	}
 	encoded := encodePairBlob(in)
 	got, err := decodePairBlob(encoded)
@@ -87,6 +89,8 @@ func TestPairBlobRoundTrip(t *testing.T) {
 	require.Equal(t, in.APIEndpoint, got.APIEndpoint)
 	require.Equal(t, in.PersistentKeepalive, got.PersistentKeepalive)
 	require.Equal(t, in.Name, got.Name)
+	require.Equal(t, in.PairingEndpoint, got.PairingEndpoint)
+	require.Equal(t, in.PairingFingerprint, got.PairingFingerprint)
 
 	// Tolerates surrounding whitespace from a copy-paste.
 	got, err = decodePairBlob("  " + encoded + "\n")

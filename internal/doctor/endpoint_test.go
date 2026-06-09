@@ -15,19 +15,29 @@ import (
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 )
 
-// fakeAdmin serves a canned Health response with a fixed public endpoint.
+// fakeAdmin serves a canned Health response with fixed endpoints.
 type fakeAdmin struct {
 	fletcherv1connect.UnimplementedAdminServiceHandler
 	endpoint string
+	pairing  string
 }
 
 func (f fakeAdmin) Health(context.Context, *connect.Request[fletcherv1.HealthRequest]) (*connect.Response[fletcherv1.HealthResponse], error) {
-	return connect.NewResponse(&fletcherv1.HealthResponse{Status: "ok", PublicEndpoint: f.endpoint}), nil
+	return connect.NewResponse(&fletcherv1.HealthResponse{
+		Status:          "ok",
+		PublicEndpoint:  f.endpoint,
+		PairingEndpoint: f.pairing,
+	}), nil
 }
 
 // serveFakeAdmin starts an AdminService over a Unix socket and returns its
 // path. /tmp keeps sun_path within the 104-byte limit on macOS and Linux.
 func serveFakeAdmin(t *testing.T, endpoint string) string {
+	return serveFakeAdminWith(t, fakeAdmin{endpoint: endpoint})
+}
+
+// serveFakeAdminWith starts an AdminService serving the supplied canned admin.
+func serveFakeAdminWith(t *testing.T, admin fakeAdmin) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "fl-doc-")
 	require.NoError(t, err)
@@ -38,7 +48,7 @@ func serveFakeAdmin(t *testing.T, endpoint string) string {
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
-	path, h := fletcherv1connect.NewAdminServiceHandler(fakeAdmin{endpoint: endpoint})
+	path, h := fletcherv1connect.NewAdminServiceHandler(admin)
 	mux.Handle(path, h)
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(ln) }()
@@ -68,4 +78,25 @@ func TestCheckPublicEndpointSkipsWhenDaemonUnreachable(t *testing.T) {
 	res := CheckPublicEndpoint("/tmp/fletcher-nonexistent-doctor.sock").Check(context.Background())
 	require.Equal(t, StatusSkip, res.Status)
 	require.Nil(t, res.Plan)
+}
+
+func TestCheckPairingEndpointReportsListener(t *testing.T) {
+	sock := serveFakeAdminWith(t, fakeAdmin{endpoint: "vpn.example.com:51820", pairing: "vpn.example.com:51821"})
+	res := CheckPairingEndpoint(sock).Check(context.Background())
+	require.Equal(t, StatusOK, res.Status)
+	require.Contains(t, res.Detail, "vpn.example.com:51821")
+}
+
+func TestCheckPairingEndpointWarnsWhenAbsent(t *testing.T) {
+	// A public endpoint but no pairing listener: the iOS app cannot pair,
+	// but laptop/CLI pairing still works, so this warns rather than fails.
+	sock := serveFakeAdminWith(t, fakeAdmin{endpoint: "vpn.example.com:51820"})
+	res := CheckPairingEndpoint(sock).Check(context.Background())
+	require.Equal(t, StatusWarn, res.Status)
+	require.Nil(t, res.Plan)
+}
+
+func TestCheckPairingEndpointSkipsWhenDaemonUnreachable(t *testing.T) {
+	res := CheckPairingEndpoint("/tmp/fletcher-nonexistent-doctor.sock").Check(context.Background())
+	require.Equal(t, StatusSkip, res.Status)
 }

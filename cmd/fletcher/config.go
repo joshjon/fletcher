@@ -138,6 +138,12 @@ type pairBlob struct {
 	APIEndpoint         string   `json:"api"`
 	PersistentKeepalive int32    `json:"ka"`
 	Name                string   `json:"name"`
+	// PairingEndpoint is the public host:port the app POSTs CompletePair
+	// to over TLS, before the tunnel exists. PairingFingerprint is the
+	// lowercase hex SHA-256 of that endpoint's leaf certificate, which the
+	// app pins (the QR is the out-of-band trust anchor).
+	PairingEndpoint    string `json:"pep"`
+	PairingFingerprint string `json:"fp"`
 }
 
 func encodePairBlob(b pairBlob) string {
@@ -160,6 +166,9 @@ func decodePairBlob(s string) (pairBlob, error) {
 	}
 	if b.PairingCode == "" || b.ServerPublicKey == "" || b.Endpoint == "" || b.Address == "" {
 		return pairBlob{}, errors.New("pair blob is missing required fields")
+	}
+	if b.PairingEndpoint == "" || b.PairingFingerprint == "" {
+		return pairBlob{}, errors.New("pair blob is missing the pairing endpoint or its TLS fingerprint (daemon has no public pairing listener)")
 	}
 	return b, nil
 }
