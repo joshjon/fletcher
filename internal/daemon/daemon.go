@@ -941,12 +941,14 @@ func pairingCertDir(cfg Config) string {
 }
 
 // buildPairingListener brings up the public TLS pairing endpoint when the
-// tunnel is up: it loads (or generates) the self-signed cert, binds the
-// public TCP port, forwards it via UPnP, and tells the peer service to
-// advertise the endpoint + fingerprint in BeginPair. Every failure is
-// non-fatal (logged); the daemon still runs, mobile pairing just stays
-// unavailable. Returns nil servers when pairing cannot be offered (no
-// tunnel, cert error, or bind failure).
+// tunnel is up and a public endpoint is known: it loads (or generates) a
+// self-signed cert bound to the public endpoint host (so iOS's TLS checks
+// pass alongside the app's pin), binds the public TCP port, forwards it via
+// UPnP, and wires the peer service to advertise the endpoint and serve the
+// cert's live fingerprint. Every failure is non-fatal (logged); the daemon
+// still runs, mobile pairing just stays unavailable. Returns nil servers
+// when pairing cannot be offered (no tunnel, no public endpoint, cert
+// error, or bind failure).
 func buildPairingListener(
 	ctx context.Context,
 	cfg Config,
@@ -960,8 +962,15 @@ func buildPairingListener(
 		// afterward, so there is nothing to bootstrap.
 		return nil, nil, ""
 	}
-	mat, err := pairingtls.EnsureCert(pairingCertDir(cfg))
-	if err != nil {
+	host := publicEndpointHost(netSetup.EffectivePublicEndpoint)
+	if host == "" {
+		// The cert's SAN binds to this host, and the client has nowhere to
+		// dial without it, so there is no pairing endpoint to offer.
+		logger.Warn("pairing listener disabled: no public endpoint to bind the pairing certificate to")
+		return nil, nil, ""
+	}
+	mgr := pairingtls.NewManager(pairingCertDir(cfg), logger)
+	if err := mgr.EnsureHost(host); err != nil {
 		logger.Error("pairing listener disabled: cannot load TLS cert", slog.String("err", err.Error()))
 		return nil, nil, ""
 	}
@@ -973,13 +982,16 @@ func buildPairingListener(
 	}
 	addr := ln.Addr().String()
 	// Advertise only now that the listener is real, then open the router
-	// port so the endpoint is reachable from outside the LAN.
-	peerSvc.SetPairing(port, mat.Fingerprint)
+	// port so the endpoint is reachable from outside the LAN. The manager
+	// is also the rotation hook: a later SetPublicEndpoint re-issues the
+	// cert for the new host through it.
+	peerSvc.SetPairingCert(port, mgr)
 	tryUPnPTCP(ctx, logger, port, "fletcher pairing")
 	logger.Info("pairing listener ready",
 		slog.String("addr", addr),
-		slog.String("tls_fingerprint", mat.Fingerprint))
-	return newPairingServer(deps, mat, logger), ln, addr
+		slog.String("host", host),
+		slog.String("tls_fingerprint", mgr.Fingerprint()))
+	return newPairingServer(deps, mgr, logger), ln, addr
 }
 
 // newPairingServer builds the TLS-terminated pairing server. It serves
@@ -987,7 +999,9 @@ func buildPairingListener(
 // request body (not a per-peer token - the client has none yet), and
 // 404s every other path. The same PeersService backends as the local API
 // are reused, so a completed pairing syncs the new peer into the tunnel.
-func newPairingServer(deps connectDeps, mat pairingtls.Material, logger *slog.Logger) *http.Server {
+// The cert is served via the manager's GetCertificate, so a rotation takes
+// effect on the next handshake without rebuilding the listener.
+func newPairingServer(deps connectDeps, mgr *pairingtls.Manager, logger *slog.Logger) *http.Server {
 	interceptors := connect.WithInterceptors(
 		api.RequestIDInterceptor(),
 		api.ErrorInterceptor(logger),
@@ -999,7 +1013,7 @@ func newPairingServer(deps connectDeps, mat pairingtls.Material, logger *slog.Lo
 	mux.Handle(path, handler)
 	return &http.Server{
 		Handler:           restrictToPairing(mux),
-		TLSConfig:         mat.TLSConfig(),
+		TLSConfig:         mgr.TLSConfig(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 }

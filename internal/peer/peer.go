@@ -95,16 +95,25 @@ type CreatedWithPublicKey struct {
 	APIToken string
 }
 
+// PairingCertProvider supplies the pairing listener's current TLS leaf
+// fingerprint (read live so a rotation is reflected immediately) and
+// rotates the certificate to track the public endpoint host. The daemon
+// wires this to the pairing-cert manager.
+type PairingCertProvider interface {
+	Fingerprint() string
+	SetHost(host string)
+}
+
 // Service is the high-level peers API.
 type Service struct {
-	q                  sqliteq.Querier
-	tunnelCIDR         string
-	apiEndpoint        string
-	pairingPort        int
-	pairingFingerprint string
+	q           sqliteq.Querier
+	tunnelCIDR  string
+	apiEndpoint string
 
 	mu             sync.RWMutex
 	publicEndpoint string
+	pairingPort    int
+	pairingCert    PairingCertProvider
 
 	pending *pendingPairs
 }
@@ -123,15 +132,6 @@ type Options struct {
 	// drive the daemon's network API (e.g. "10.99.0.1:11700"). Surfaced in
 	// pairing output so the client knows where to point.
 	APIEndpoint string
-	// PairingPort is the public TCP port the client dials to call
-	// CompletePair before the tunnel exists. The host is taken from the
-	// (UPnP-updatable) public endpoint, so PairingEndpoint tracks it. 0
-	// disables the advertised pairing endpoint.
-	PairingPort int
-	// PairingTLSFingerprint is the lowercase hex SHA-256 of the pairing
-	// listener's self-signed leaf certificate, published so the client
-	// can pin it. Empty disables the advertised pairing endpoint.
-	PairingTLSFingerprint string
 }
 
 // NewService wires a Service to a sqlc querier with the given options.
@@ -141,13 +141,11 @@ func NewService(q sqliteq.Querier, opts Options) *Service {
 		cidr = DefaultTunnelCIDR
 	}
 	return &Service{
-		q:                  q,
-		tunnelCIDR:         cidr,
-		publicEndpoint:     opts.PublicEndpoint,
-		apiEndpoint:        opts.APIEndpoint,
-		pairingPort:        opts.PairingPort,
-		pairingFingerprint: opts.PairingTLSFingerprint,
-		pending:            newPendingPairs(),
+		q:              q,
+		tunnelCIDR:     cidr,
+		publicEndpoint: opts.PublicEndpoint,
+		apiEndpoint:    opts.APIEndpoint,
+		pending:        newPendingPairs(),
 	}
 }
 
@@ -169,22 +167,32 @@ func (s *Service) PublicEndpoint() string {
 
 // SetPublicEndpoint replaces the public endpoint advertised in pair-time
 // configs. Used by the daemon's networking setup when UPnP discovery
-// produces an endpoint the operator didn't supply at boot.
+// produces an endpoint the operator didn't supply at boot. When a pairing
+// cert provider is wired, it also rotates the pairing cert so its SAN
+// tracks the new host (iOS rejects a cert whose name does not match the
+// dialed host, pin or not). Rotation runs outside the lock - it can mint a
+// key - and is best-effort inside the provider.
 func (s *Service) SetPublicEndpoint(endpoint string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.publicEndpoint = endpoint
+	cert := s.pairingCert
+	s.mu.Unlock()
+	if cert != nil {
+		if host := hostOnly(endpoint); host != "" {
+			cert.SetHost(host)
+		}
+	}
 }
 
-// SetPairing records the pairing listener's port and leaf-cert
-// fingerprint so BeginPair starts advertising the pairing endpoint. The
-// daemon calls this only after the listener actually binds, so an empty
-// advertisement means "no pairing listener", not "try a dead port".
-func (s *Service) SetPairing(port int, fingerprint string) {
+// SetPairingCert records the pairing listener's port and cert provider so
+// BeginPair starts advertising the pairing endpoint and its live
+// fingerprint. The daemon calls this only after the listener binds, so an
+// empty advertisement means "no pairing listener", not "try a dead port".
+func (s *Service) SetPairingCert(port int, cert PairingCertProvider) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pairingPort = port
-	s.pairingFingerprint = fingerprint
+	s.pairingCert = cert
 }
 
 // PairingEndpoint returns the public host:port a client dials to call
@@ -199,23 +207,32 @@ func (s *Service) PairingEndpoint() string {
 	if s.publicEndpoint == "" || s.pairingPort == 0 {
 		return ""
 	}
-	host := s.publicEndpoint
-	if h, _, err := net.SplitHostPort(s.publicEndpoint); err == nil {
-		host = h
-	}
-	return net.JoinHostPort(host, strconv.Itoa(s.pairingPort))
+	return net.JoinHostPort(hostOnly(s.publicEndpoint), strconv.Itoa(s.pairingPort))
 }
 
-// PairingTLSFingerprint returns the lowercase hex SHA-256 of the pairing
-// listener's leaf certificate, for the client to pin. Empty when no
-// pairing endpoint is advertised.
+// PairingTLSFingerprint returns the lowercase hex SHA-256 of the leaf the
+// pairing listener is currently serving, read live from the cert provider
+// so a rotation is reflected immediately. Empty when no pairing endpoint
+// is advertised.
 func (s *Service) PairingTLSFingerprint() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.publicEndpoint == "" || s.pairingPort == 0 {
+	if s.publicEndpoint == "" || s.pairingPort == 0 || s.pairingCert == nil {
 		return ""
 	}
-	return s.pairingFingerprint
+	return s.pairingCert.Fingerprint()
+}
+
+// hostOnly returns the host part of a host:port endpoint, or the input
+// unchanged when it has no port.
+func hostOnly(endpoint string) string {
+	if endpoint == "" {
+		return ""
+	}
+	if h, _, err := net.SplitHostPort(endpoint); err == nil {
+		return h
+	}
+	return endpoint
 }
 
 // NextAvailableAddress returns the next free /32 inside the service's

@@ -52,13 +52,14 @@ func TestPairingListenerCompletesPairOverPinnedTLS(t *testing.T) {
 	serverKP, err := wireguard.GenerateKeypair()
 	require.NoError(t, err)
 
-	mat, err := pairingtls.EnsureCert(t.TempDir())
-	require.NoError(t, err)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	mgr := pairingtls.NewManager(t.TempDir(), logger)
+	require.NoError(t, mgr.EnsureHost("127.0.0.1"))
 
 	srv := newPairingServer(connectDeps{
 		peers:     peerSvc,
 		serverKey: fakeServerKey{priv: serverKP.Private, pub: serverKP.Public},
-	}, mat, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, mgr, logger)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -74,7 +75,7 @@ func TestPairingListenerCompletesPairOverPinnedTLS(t *testing.T) {
 				return errors.New("no peer certificate")
 			}
 			sum := sha256.Sum256(cs.PeerCertificates[0].Raw)
-			if hex.EncodeToString(sum[:]) != mat.Fingerprint {
+			if hex.EncodeToString(sum[:]) != mgr.Fingerprint() {
 				return errors.New("pairing cert fingerprint mismatch")
 			}
 			return nil
