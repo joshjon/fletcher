@@ -30,6 +30,8 @@ type SessionsBackend interface {
 	Publish(ctx context.Context, ref string, guestPort int, name string, public bool, host string) (session.PublishedPort, error)
 	Unpublish(ctx context.Context, ref string, guestPort int) error
 	ListPorts(ctx context.Context, ref string) ([]session.PublishedPort, error)
+	Restart(ctx context.Context, ref string) (session.Session, error)
+	Logs(ctx context.Context, ref string, tailLines int) (string, error)
 }
 
 // SessionsService implements fletcherv1connect.SessionServiceHandler.
@@ -105,6 +107,25 @@ func (s *SessionsService) DeleteSession(ctx context.Context, req *connect.Reques
 		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.DeleteSessionResponse{Deleted: deleted}), nil
+}
+
+// RestartSession stops a running session's VM and starts it again against the
+// same fork (re-running the app for a run_app deploy).
+func (s *SessionsService) RestartSession(ctx context.Context, req *connect.Request[fletcherv1.RestartSessionRequest]) (*connect.Response[fletcherv1.RestartSessionResponse], error) {
+	sess, err := s.backend.Restart(ctx, req.Msg.GetRef())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.RestartSessionResponse{Session: sessionToProto(sess)}), nil
+}
+
+// GetSessionLogs returns the tail of a run_app session's app log.
+func (s *SessionsService) GetSessionLogs(ctx context.Context, req *connect.Request[fletcherv1.GetSessionLogsRequest]) (*connect.Response[fletcherv1.GetSessionLogsResponse], error) {
+	content, err := s.backend.Logs(ctx, req.Msg.GetRef(), int(req.Msg.GetTailLines()))
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.GetSessionLogsResponse{Content: content}), nil
 }
 
 // ExecSession runs a command in a running session and returns its output.

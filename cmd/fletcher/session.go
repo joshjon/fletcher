@@ -37,6 +37,7 @@ func sessionCmd() *cli.Command {
 			sessionUnpublishCmd(),
 			sessionPortsCmd(),
 			sessionLogsCmd(),
+			sessionRestartCmd(),
 		},
 	}
 }
@@ -46,6 +47,37 @@ func sessionLogsCmd() *cli.Command {
 		Name:      "logs",
 		Usage:     "show the app log of a session created with --app (or via `deploy`)",
 		ArgsUsage: "<ref>",
+		Flags: []cli.Flag{
+			socketFlag(),
+			&cli.IntFlag{
+				Name:  "tail",
+				Usage: "number of trailing lines to show (0 uses the daemon default)",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ref := cmd.Args().First()
+			if ref == "" {
+				return errors.New("session ref (id or name) is required")
+			}
+			client := newSessionsClient(cmd)
+			resp, err := client.GetSessionLogs(ctx, connect.NewRequest(&fletcherv1.GetSessionLogsRequest{
+				Ref:       ref,
+				TailLines: clampUint32(cmd.Int("tail")),
+			}))
+			if err != nil {
+				return err
+			}
+			fmt.Fprint(os.Stdout, resp.Msg.GetContent())
+			return nil
+		},
+	}
+}
+
+func sessionRestartCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "restart",
+		Usage:     "stop a session's VM and start it again (re-runs the app for a deploy)",
+		ArgsUsage: "<ref>",
 		Flags:     []cli.Flag{socketFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ref := cmd.Args().First()
@@ -53,23 +85,27 @@ func sessionLogsCmd() *cli.Command {
 				return errors.New("session ref (id or name) is required")
 			}
 			client := newSessionsClient(cmd)
-			resp, err := client.ExecSession(ctx, connect.NewRequest(&fletcherv1.ExecSessionRequest{
-				Ref:     ref,
-				Command: "cat " + appLogPathInVM + " 2>/dev/null || echo '(no app log - is this an --app session?)'",
-			}))
+			resp, err := client.RestartSession(ctx, connect.NewRequest(&fletcherv1.RestartSessionRequest{Ref: ref}))
 			if err != nil {
 				return err
 			}
-			fmt.Fprint(os.Stdout, resp.Msg.GetStdout())
-			fmt.Fprint(os.Stderr, resp.Msg.GetStderr())
+			fmt.Printf("restarted %s\n", resp.Msg.GetSession().GetName())
 			return nil
 		},
 	}
 }
 
-// appLogPathInVM is where fletcher-init writes a session app's output; mirrors
-// the guest's appLogPath.
-const appLogPathInVM = "/var/log/fletcher-app.log"
+func clampUint32(v int) uint32 {
+	const maxUint32 = 1<<32 - 1
+	switch {
+	case v < 0:
+		return 0
+	case v > maxUint32:
+		return maxUint32
+	default:
+		return uint32(v)
+	}
+}
 
 func sessionCreateCmd() *cli.Command {
 	return &cli.Command{

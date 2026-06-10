@@ -423,6 +423,42 @@ func (m *Manager) Exec(ctx context.Context, ref, command string) (ExecResult, er
 	return ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: res.ExitCode}, nil
 }
 
+// appLogPath is where a run_app session's supervisor writes the app's merged
+// stdout/stderr inside the guest.
+const appLogPath = "/var/log/fletcher-app.log"
+
+// defaultLogTailLines is how many trailing app-log lines Logs returns when the
+// caller does not specify a bound.
+const defaultLogTailLines = 200
+
+// Restart stops a running session's VM and starts it again against the same
+// fork. For a run_app (deploy) session this re-runs the image's app.
+func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
+	if _, err := m.Stop(ctx, ref); err != nil {
+		return Session{}, err
+	}
+	return m.Start(ctx, ref)
+}
+
+// Logs returns the tail of the session's app log. tailLines bounds how many
+// trailing lines to return (0 uses defaultLogTailLines). A missing log - the
+// session is not a run_app deploy, or its app has not written yet - yields
+// empty output rather than an error, since the path is fixed and the tail is
+// swallowed with `2>/dev/null || true`.
+func (m *Manager) Logs(ctx context.Context, ref string, tailLines int) (string, error) {
+	if tailLines <= 0 {
+		tailLines = defaultLogTailLines
+	}
+	// appLogPath is a fixed guest-side constant and tailLines is an int, so the
+	// command carries no caller-supplied text - no shell-injection surface.
+	cmd := fmt.Sprintf("tail -n %d %s 2>/dev/null || true", tailLines, appLogPath)
+	res, err := m.Exec(ctx, ref, cmd)
+	if err != nil {
+		return "", err
+	}
+	return res.Stdout, nil
+}
+
 // Shell opens an interactive PTY in a running session, bridging the caller's
 // stdin/stdout and window resizes to the VM, and returns the shell's exit code.
 func (m *Manager) Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error) {

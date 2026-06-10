@@ -44,6 +44,14 @@ service SessionService {
   rpc UnpublishPort(UnpublishPortRequest) returns (UnpublishPortResponse) {}
   // ListPorts returns a session's published ports.
   rpc ListPorts(ListPortsRequest) returns (ListPortsResponse) {}
+  // RestartSession stops a running session's VM and starts it again against the
+  // same fork. For a run_app (deploy) session this re-runs the image's app.
+  rpc RestartSession(RestartSessionRequest) returns (RestartSessionResponse) {}
+  // GetSessionLogs returns the tail of a run_app session's app log
+  // (/var/log/fletcher-app.log), captured from the running VM. A live-follow
+  // stream (StreamSessionLogs) lands with the guest-side change that lets the
+  // VM kill the tail when the client disconnects.
+  rpc GetSessionLogs(GetSessionLogsRequest) returns (GetSessionLogsResponse) {}
 }
 
 enum SessionState {
@@ -140,6 +148,27 @@ message ExecSessionResponse {
   string stdout = 1;
   string stderr = 2;
   int32 exit_code = 3;
+}
+
+message RestartSessionRequest {
+  // ref is a session ID or name.
+  string ref = 1;
+}
+
+message RestartSessionResponse {
+  Session session = 1;
+}
+
+message GetSessionLogsRequest {
+  // ref is a session ID or name.
+  string ref = 1;
+  // tail_lines caps how many trailing lines to return; 0 uses a default.
+  uint32 tail_lines = 2;
+}
+
+message GetSessionLogsResponse {
+  // content is the captured tail of the app log.
+  string content = 1;
 }
 
 message ShellSessionRequest {
