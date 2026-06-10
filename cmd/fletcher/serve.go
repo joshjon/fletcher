@@ -101,6 +101,11 @@ func serveCmd() *cli.Command {
 				Usage:   "skip the automatic router-port-forward attempt at startup",
 				Sources: cli.EnvVars("FLETCHER_NO_UPNP"),
 			},
+			&cli.StringFlag{
+				Name:    "remote-api-listen",
+				Usage:   "extra host:port to expose the token-gated API on, beyond the WireGuard tunnel (e.g. a Tailscale IP for the iOS app to reach over your own VPN)",
+				Sources: cli.EnvVars("FLETCHER_REMOTE_API_LISTEN"),
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return daemon.Run(ctx, daemon.Config{
@@ -120,6 +125,7 @@ func serveCmd() *cli.Command {
 				WireGuardListenPort: cmd.Int("wireguard-port"),
 				PairingPort:         cmd.Int("pairing-port"),
 				DisableUPnP:         cmd.Bool("no-upnp"),
+				RemoteAPIListen:     cmd.String("remote-api-listen"),
 			})
 		},
 	}

@@ -158,6 +158,41 @@ and documented in code; one (settings) fell through the cracks.
     loop is the natural place to drive re-derivation. Lower priority than the
     bounded retry now that the common case is handled.
 
+- **Mode B / BYO-VPN transport for the iOS app (phase 9). Design sketched
+  2026-06-10; daemon listener built, provisioning + iOS pending.**
+  Resolves three open items above at once - the Tailscale-coexistence question
+  (iOS allows one active VPN tunnel, so the app's embedded WireGuard tunnel
+  cannot run alongside Tailscale), the CGNAT / no-cooperating-router boundary,
+  and same-LAN / hairpin - by making the app's tunnel optional. In Mode B the
+  app brings up no VPN and acts as a thin RPC client over a transport the
+  operator already runs (Tailscale/Headscale/ZeroTier/plain WireGuard).
+  On-thesis: the relay is the user's own tailnet, Fletcher hosts nothing.
+  - **Daemon API bind scope (decision: configured VPN IP). DONE.**
+    `--remote-api-listen` / `FLETCHER_REMOTE_API_LISTEN` binds the token-gated
+    remote API to an operator-specified address; they set it to their Tailscale
+    IP (`100.x.y.z:11700`), so the API is reachable only over that VPN, never the
+    LAN. Default stays tunnel-only - Mode A is unchanged. `remoteAPIListenActor`
+    retries the bind indefinitely (the VPN can come up after the daemon) and is
+    independent of the Fletcher tunnel, so it serves even when no tunnel exists.
+  - **App provisioning (decision: reuse the login blob). Partly there.** The
+    `{remote, token}` login blob already exists (`encodeLoginBlob`, consumed by
+    `fletcher login` / `--remote --token`), so an already-paired peer can use
+    Mode B today by pointing it at the VPN address. No new pairing protocol and
+    no cert pinning - plain `http` over the VPN's own encryption, the same trust
+    model as today's over-the-tunnel calls. **Remaining:** a command that emits
+    a Mode-B `{remote, token}` QR with the `--remote-api-listen` address
+    pre-filled, so the operator does not hand-edit the remote.
+  - **Mode selection (decision: explicit at setup).** The user picks "set up
+    Fletcher's tunnel" (Mode A, WireGuard pairing QR) or "I already reach my box
+    over a VPN" (Mode B, scan the `{remote, token}` QR). One box, one mode;
+    switching is a re-pair. No auto-detect.
+  - **Split.** Daemon = let the API be reached over a VPN it did not create
+    (bind knob + retry; token auth unchanged). iOS = let the app talk to the box
+    without creating its own VPN (optional `NEPacketTunnelProvider`, a transport
+    abstraction so Mode A/B share the `RPCClient`/`SessionsService`/token code
+    and differ only at "how do I reach the box"). Build daemon-first (small,
+    locally testable), iOS after. The iOS ROADMAP backlog cross-references this.
+
 - **pi-extension (phases 11/14).** `images/fletcher-base/pi-extension/index.ts`
   fetches the catalog on startup but `registerProvider()` is a TODO pending a
   pinned `pi` API version. The `/v1/catalog.json` surface it consumes is done.

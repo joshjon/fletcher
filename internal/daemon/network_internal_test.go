@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -97,4 +99,73 @@ func TestDeriveEndpointReturnsMappingWithoutEndpoint(t *testing.T) {
 	res, derived := deriveEndpoint(context.Background(), discardLogger(), ensure, portmap.Request{}, false)
 	require.NotNil(t, res)
 	require.Empty(t, derived)
+}
+
+// The Mode B listener binds when its address is available and shuts down
+// cleanly on interrupt.
+func TestRemoteAPIListenActorServesAndShutsDown(t *testing.T) {
+	// Grab a free port, then hand its address to the actor to bind.
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := probe.Addr().String()
+	require.NoError(t, probe.Close())
+
+	var hit atomic.Bool
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hit.Store(true)
+		w.WriteHeader(http.StatusNoContent)
+	})}
+
+	execute, interrupt := remoteAPIListenActor(context.Background(), addr, srv, discardLogger())
+	done := make(chan error, 1)
+	go func() { done <- execute() }()
+
+	var status int
+	require.Eventually(t, func() bool {
+		resp, derr := http.Get("http://" + addr + "/")
+		if derr != nil {
+			return false
+		}
+		status = resp.StatusCode
+		_ = resp.Body.Close()
+		return true
+	}, 2*time.Second, 10*time.Millisecond)
+	require.Equal(t, http.StatusNoContent, status)
+	require.True(t, hit.Load())
+
+	interrupt(nil)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("actor did not exit after interrupt")
+	}
+}
+
+// An address that is not yet bindable (the VPN interface is down) must keep the
+// actor retrying rather than failing, and the retry loop must exit promptly on
+// ctx cancel so shutdown does not hang.
+func TestRemoteAPIListenActorRetriesUntilCancelled(t *testing.T) {
+	first, max := remoteBindFirstBackoff, remoteBindMaxBackoff
+	remoteBindFirstBackoff = 5 * time.Millisecond
+	remoteBindMaxBackoff = 10 * time.Millisecond
+	t.Cleanup(func() { remoteBindFirstBackoff, remoteBindMaxBackoff = first, max })
+
+	// 240.0.0.0/4 is reserved and assigned to no local interface, so the bind
+	// fails immediately and the actor stays in its retry loop.
+	ctx, cancel := context.WithCancel(context.Background())
+	srv := &http.Server{Handler: http.NewServeMux()}
+	execute, _ := remoteAPIListenActor(ctx, "240.0.0.1:11700", srv, discardLogger())
+
+	done := make(chan error, 1)
+	go func() { done <- execute() }()
+
+	time.Sleep(30 * time.Millisecond) // let it spin through a few retries
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("actor did not exit after ctx cancel")
+	}
 }

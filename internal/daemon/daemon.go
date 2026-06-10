@@ -166,6 +166,15 @@ type Config struct {
 	// at startup. Useful when running behind a router known to mishandle
 	// UPnP, or in test environments. Default false (UPnP enabled).
 	DisableUPnP bool
+	// RemoteAPIListen, when set, binds the token-gated remote API to an extra
+	// address beyond the WireGuard tunnel IP - typically the box's address on a
+	// VPN the operator already runs (e.g. a Tailscale IP, "100.x.y.z:11700").
+	// This is the daemon half of Mode B: a client reaches the API over that VPN
+	// instead of Fletcher's own tunnel, so it never has to stand up a second VPN
+	// (iOS allows only one active). Empty disables it and the default stays
+	// tunnel-only. The bind retries because the VPN interface can come up after
+	// the daemon; per-peer token auth applies exactly as on the tunnel listener.
+	RemoteAPIListen string
 	// SessionIdleTimeout auto-stops a session idle (no work in flight) this
 	// long; 0 disables the reaper. Settings-managed (session_idle_timeout).
 	SessionIdleTimeout time.Duration
@@ -294,6 +303,8 @@ type services struct {
 	remoteSrv       *http.Server
 	remoteLn        net.Listener
 	remoteAddr      string
+	vpnAPISrv       *http.Server
+	vpnAPIAddr      string
 	pairingSrv      *http.Server
 	pairingLn       net.Listener
 	pairingAddr     string
@@ -520,6 +531,15 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	connectSrv := newHTTPServer(startedAt.Unix(), connectDeps, logger)
 	remoteSrv := newRemoteServer(remoteLn, peerSvc, connectSrv.Handler)
 
+	// Mode B (BYO-VPN): expose the same token-gated API on an operator-run VPN
+	// address (e.g. a Tailscale IP) so a client can reach the box without
+	// standing up Fletcher's own tunnel. Independent of remoteSrv - it comes up
+	// even when there is no Fletcher tunnel.
+	var vpnAPISrv *http.Server
+	if cfg.RemoteAPIListen != "" {
+		vpnAPISrv = newRemoteAPIServer(peerSvc, connectSrv.Handler)
+	}
+
 	// Public pairing listener: the pre-tunnel bootstrap native clients use.
 	// CompletePair cannot travel over the tunnel it is trying to establish
 	// (the daemon only learns the client key at CompletePair), so it is
@@ -551,6 +571,8 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		remoteSrv:       remoteSrv,
 		remoteLn:        remoteLn,
 		remoteAddr:      apiEndpoint,
+		vpnAPISrv:       vpnAPISrv,
+		vpnAPIAddr:      cfg.RemoteAPIListen,
 		pairingSrv:      pairingSrv,
 		pairingLn:       pairingLn,
 		pairingAddr:     pairingAddr,
@@ -647,6 +669,9 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	if s.remoteSrv != nil {
 		//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
 		g.Add(httpServeActor(logger, "remote-api", s.remoteSrv, s.remoteLn, "http://"+s.remoteAddr))
+	}
+	if s.vpnAPISrv != nil {
+		g.Add(remoteAPIListenActor(ctx, s.vpnAPIAddr, s.vpnAPISrv, logger))
 	}
 	if s.pairingSrv != nil {
 		//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
@@ -1408,19 +1433,78 @@ func remoteAPIAddr() string {
 	return net.JoinHostPort(ip, strconv.Itoa(remoteAPIPort))
 }
 
-// newRemoteServer builds the network-API http.Server (the same handlers as the
-// unix socket, gated by a per-peer token), or nil when there is no listener.
-func newRemoteServer(remoteLn net.Listener, auth tokenAuthenticator, handler http.Handler) *http.Server {
-	if remoteLn == nil {
-		return nil
-	}
-	// Same h2c support as the local server so a remote `session shell` stream
-	// works over the tunnel; auth runs per request and per stream.
+// newRemoteAPIServer builds the network-API http.Server: the same handlers as
+// the unix socket, gated by a per-peer token, with h2c so a streaming RPC (e.g.
+// `session shell`) works. Shared by the tunnel-side listener and the Mode B
+// VPN listener - both serve the identical handler over different transports.
+func newRemoteAPIServer(auth tokenAuthenticator, handler http.Handler) *http.Server {
 	return &http.Server{
 		Handler:           authMiddleware(auth, handler),
 		Protocols:         h2cProtocols(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+}
+
+// newRemoteServer builds the tunnel-side network-API server, or nil when there
+// is no tunnel listener.
+func newRemoteServer(remoteLn net.Listener, auth tokenAuthenticator, handler http.Handler) *http.Server {
+	if remoteLn == nil {
+		return nil
+	}
+	return newRemoteAPIServer(auth, handler)
+}
+
+// Retry timing for remoteAPIListenActor; package vars so tests can shrink them.
+var (
+	remoteBindFirstBackoff = 2 * time.Second
+	remoteBindMaxBackoff   = 30 * time.Second
+)
+
+// remoteAPIListenActor binds the Mode B remote-API listener on addr (the box's
+// address on an operator-run VPN) and serves srv, retrying the bind for as long
+// as the daemon runs. Unlike the tunnel listener it is bound here rather than
+// at construction: the VPN interface (e.g. Tailscale) can come up after the
+// daemon, and a bind that fails once must not leave the API unreachable for the
+// whole process lifetime. The parent ctx is cancelled on shutdown, which breaks
+// the retry loop; interrupt drains an in-flight server.
+func remoteAPIListenActor(ctx context.Context, addr string, srv *http.Server, logger *slog.Logger) (func() error, func(error)) {
+	execute := func() error {
+		var lc net.ListenConfig
+		backoff := remoteBindFirstBackoff
+		for {
+			ln, err := lc.Listen(ctx, "tcp", addr)
+			if err == nil {
+				logger.Info("remote-api (vpn) listening", slog.String("addr", addr))
+				if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+					return fmt.Errorf("remote-api (vpn) serve: %w", serveErr)
+				}
+				return nil
+			}
+			if ctx.Err() != nil {
+				return nil //nolint:nilerr // ctx cancelled mid-bind is a clean shutdown, not an error
+			}
+			logger.Info("remote-api (vpn) address not bindable yet; retrying once the VPN is up",
+				slog.String("addr", addr),
+				slog.Duration("retry_in", backoff),
+				slog.String("err", err.Error()),
+			)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(backoff):
+			}
+			if backoff *= 2; backoff > remoteBindMaxBackoff {
+				backoff = remoteBindMaxBackoff
+			}
+		}
+	}
+	//nolint:contextcheck // shutdown must outlive the cancelled parent ctx
+	interrupt := func(_ error) {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}
+	return execute, interrupt
 }
 
 // listenRemoteAPI binds the tunnel-side TCP listener for the network API, or
