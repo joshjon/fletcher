@@ -147,9 +147,9 @@ func renderMobilePairResult(w io.Writer, name string, resp *fletcherv1.BeginPair
 func renderByoVPNPairResult(w io.Writer, resp *fletcherv1.PairPeerResponse, withQR bool) error {
 	remote := resp.GetRemoteApiEndpoint()
 	if remote == "" {
-		return errors.New("the daemon has no Mode B address configured: set --remote-api-listen " +
-			"(FLETCHER_REMOTE_API_LISTEN) to the box's address on your VPN (e.g. its Tailscale IP, " +
-			"100.x.y.z:11700) and restart, then pair again")
+		return errors.New("the daemon has no Mode B address configured: run " +
+			"`fletcher settings set remote_api_listen <box-vpn-ip>:11700` (e.g. your Tailscale IP), " +
+			"restart with `fletcher daemon restart`, then pair again")
 	}
 	p := resp.GetPeer()
 	blob := encodeLoginBlob(remote, resp.GetApiToken())

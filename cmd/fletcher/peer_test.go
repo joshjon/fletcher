@@ -58,6 +58,6 @@ func TestRenderByoVPNPairResultErrorsWithoutRemote(t *testing.T) {
 	var buf bytes.Buffer
 	err := renderByoVPNPairResult(&buf, resp, false)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "remote-api-listen")
+	require.Contains(t, err.Error(), "remote_api_listen")
 	require.Empty(t, buf.String())
 }
