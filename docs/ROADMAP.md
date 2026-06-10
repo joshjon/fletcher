@@ -658,6 +658,58 @@ durable Claude-Code sessions driven from a phone is *the* wedge (DESIGN.md §8,
 copy"), not a someday GUI. A first-cut HTML UI mockup of these screens (approved
 as the visual direction) lives in `design/ios-mockup/`.
 
+**Daemon-support audit (2026-06-11) - gaps the iOS milestones need.** The iOS
+app (separate repo) has shipped its M1-M5; its M6-M11 are planned. All nine
+Connect services are on the remote mux the app uses (`newRemoteServer(...,
+connectSrv.Handler)`), so every service is reachable with a peer token -
+**including `AdminService`, contrary to the "local-socket only" note below,
+which is now stale.** So the gaps are missing fields and RPCs, not missing
+services:
+
+- **M3 (shipped) - image picker.** `ImageService` has only `Import`, no
+  `ListImages`, so the app's image field is free-text. *Small: a `ListImages`
+  RPC over the imported templates.*
+- **M4 (shipped) - editable trust dials.** Egress/gateway are baked into the
+  fork at boot; no mutate RPC, so the app shows them read-only. *Medium + a
+  design call: a `SetEgressPolicy`/`SetGateway` (or `UpdateSession`) that
+  re-applies env + proxy rules; most likely "takes effect on next start", since
+  a running fork cannot change its egress live.*
+- **M5 (shipped) - TLS status chip.** `PublishedPort` has no `tls_status`;
+  certmagic state is internal. *Small-medium: surface per-host cert state
+  (issuing/valid/renew/failed). Shared with M6.*
+- **M6 (the named blocker) - deploys.** The daemon persists only `run_app`
+  (bool); it does not track entrypoint, exposed port, restart count, or app
+  health, and there is no logs RPC or restart/redeploy RPC. Per the iOS M6
+  deliverables it needs: deploy detail (`entrypoint`, `exposed_port` from the
+  image EXPOSE, `restart_count` - new supervisor tracking) on `Session` or
+  `GetSession`; `tls_status` (shared with M5); an **app-logs RPC** (tail/stream
+  `/var/log/fletcher-app.log`, none exists); and **Restart + Redeploy** RPCs
+  (only Start/Stop/Delete exist). Public hostname is already available via
+  `ListPorts` -> `PublishedPort.host`.
+- **M7 (next) - live settings.** `SettingsService` Set/Delete/List is complete;
+  `AdminService.Health` is remote with rich fields (public_endpoint, runtime,
+  base-image flags, pairing_endpoint), so the doctor-warnings row is derivable.
+  *Buildable now. Tiny optional add: a `default_agent` setting the create form
+  wants.*
+- **M8 - approvals + APNs.** `ApprovalService` (List/Get/Approve/Deny) is
+  complete, so approve/deny works today over polling. *Gap: no APNs
+  device-token registration RPC and no daemon-side APNs push - that is the real
+  M8 daemon work.*
+- **M9 - scheduled jobs.** `JobService` + `Job{schedule, next_run_at,
+  parent_id, trigger}` already cover listing cron jobs and run history
+  (client-side filter by trigger/parent_id). *Gap: no `UpdateJob`/`SetSchedule`
+  to edit a schedule (Create+Cancel only); a `parent_id`/`trigger` filter on
+  `ListJobs` would beat client-side filtering. Low priority.*
+- **M10 - inbox.** Needs the proposed `fletcher.report` MCP tool for structured
+  cards; the generic fallback works from existing job data. *Future.*
+
+Recommended order: (1) **M6** (named blocker, the largest), folding in
+`tls_status` (also closes M5's chip); (2) cheap upgrades to shipped milestones -
+`ListImages` (M3) and the M4 mutate RPC; (3) M8 APNs and M9 schedule-edit when
+those milestones are taken up. Each proto change requires re-vendoring the
+protos into fletcher-ios and regenerating the Swift stubs, so batch changes per
+milestone.
+
 **The substrate is already shipped.** This is a client on top of contracts M4 +
 M6 already expose; the app consumes the daemon, it does not extend it:
 
