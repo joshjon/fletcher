@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -109,11 +110,21 @@ type Coordinator interface {
 
 // Service is the high-level façade over the jobs storage layer.
 type Service struct {
-	q              sqliteq.Querier
-	sup            Coordinator
-	defaultImage   string
-	defaultEgress  string
-	defaultGateway string
+	q   sqliteq.Querier
+	sup Coordinator
+	// defaults holds the create-time fallbacks behind an atomic pointer so
+	// ReloadSettings can swap them live while Create reads them.
+	defaults atomic.Pointer[Defaults]
+}
+
+// Defaults are the create-time fallbacks applied when a job is created without
+// an explicit image / egress policy / gateway. The same daemon settings
+// (default_image, default_egress_policy, default_gateway) drive both jobs and
+// sessions, so ReloadSettings updates both.
+type Defaults struct {
+	Image   string
+	Egress  string
+	Gateway string
 }
 
 // NewService wires a Service to a sqlc-generated querier (anything that
@@ -122,7 +133,14 @@ type Service struct {
 // defaultImage is used when a job is created with no image (empty makes the
 // image required).
 func NewService(q sqliteq.Querier, sup Coordinator, defaultImage, defaultEgress, defaultGateway string) *Service {
-	return &Service{q: q, sup: sup, defaultImage: defaultImage, defaultEgress: defaultEgress, defaultGateway: defaultGateway}
+	s := &Service{q: q, sup: sup}
+	s.defaults.Store(&Defaults{Image: defaultImage, Egress: defaultEgress, Gateway: defaultGateway})
+	return s
+}
+
+// ReloadDefaults swaps the create-time defaults without a restart.
+func (s *Service) ReloadDefaults(image, egressPolicy, gateway string) {
+	s.defaults.Store(&Defaults{Image: image, Egress: egressPolicy, Gateway: gateway})
 }
 
 // resolveGateway canonicalises a gateway value to "on"/"off"; empty uses def,
@@ -141,14 +159,15 @@ func resolveGateway(v, def string) string {
 func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 	// Fall back to the configured default image when none is given, before
 	// validation (which still rejects an empty image when no default is set).
+	d := s.defaults.Load()
 	if strings.TrimSpace(p.Image) == "" {
-		p.Image = s.defaultImage
+		p.Image = d.Image
 	}
 	if strings.TrimSpace(p.EgressPolicy) == "" {
-		p.EgressPolicy = s.defaultEgress
+		p.EgressPolicy = d.Egress
 	}
 	p.EgressPolicy = egress.Normalize(p.EgressPolicy)
-	p.Gateway = resolveGateway(p.Gateway, s.defaultGateway)
+	p.Gateway = resolveGateway(p.Gateway, d.Gateway)
 	if err := p.validate(); err != nil {
 		return Job{}, err
 	}

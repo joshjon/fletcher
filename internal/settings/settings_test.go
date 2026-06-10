@@ -73,3 +73,26 @@ func TestDescribeCoversAllKeysAndReflectsSet(t *testing.T) {
 		}
 	}
 }
+
+// TestClassification pins the live-reloadable vs restart-required split, which
+// the daemon's ReloadSettings and the iOS settings UI both depend on.
+func TestClassification(t *testing.T) {
+	for _, k := range []string{
+		KeyDefaultImage, KeyDefaultEgressPolicy, KeyDefaultGateway,
+		KeySessionIdleTimeout, KeySessionMaxCount, KeySessionMaxDiskGB,
+	} {
+		require.False(t, RequiresRestart(k), "%s should be live-reloadable", k)
+	}
+	for _, k := range []string{
+		KeyRuntime, KeyPublicWeb, KeyGatewayListen, KeyMCPListen, KeyRemoteAPIListen,
+		KeyWireGuardPort, KeyPublicEndpoint, KeyLogLevel, KeyVMMemoryMB,
+	} {
+		require.True(t, RequiresRestart(k), "%s should need a restart", k)
+	}
+	require.True(t, RequiresRestart("nonexistent_key"), "unknown keys default to restart-required")
+
+	require.Equal(t, []string{
+		KeyDefaultEgressPolicy, KeyDefaultGateway, KeyDefaultImage,
+		KeySessionIdleTimeout, KeySessionMaxCount, KeySessionMaxDiskGB,
+	}, LiveKeys())
+}

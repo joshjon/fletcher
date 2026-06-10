@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -252,6 +253,9 @@ func Run(ctx context.Context, cfg Config) error {
 	logger.Info("migrations up to date")
 
 	queries := sqliteq.New(db)
+	// Snapshot the flag/env config before the settings overlay so ReloadSettings
+	// can re-derive the current effective config the same way boot does.
+	flagCfg := cfg
 	if err := applySettings(ctx, &cfg, settings.NewStore(queries), logger); err != nil {
 		return err
 	}
@@ -264,7 +268,7 @@ func Run(ctx context.Context, cfg Config) error {
 	imageUpdate := imageUpdateState{available: &atomic.Bool{}, checked: &atomic.Bool{}}
 	go checkForImageUpdate(ctx, cfg, logger, imageUpdate)
 
-	svcs, err := buildServices(ctx, cfg, queries, logger, imageUpdate)
+	svcs, err := buildServices(ctx, cfg, flagCfg, queries, logger, imageUpdate)
 	if err != nil {
 		return err
 	}
@@ -316,7 +320,7 @@ type services struct {
 }
 
 //nolint:funlen // the single construction hub that wires every subsystem; splitting further would scatter the boot sequence
-func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, logger *slog.Logger, imageUpdate imageUpdateState) (*services, error) {
+func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Queries, logger *slog.Logger, imageUpdate imageUpdateState) (*services, error) {
 	connectLn, err := listenUnix(ctx, cfg.SocketPath)
 	if err != nil {
 		return nil, err
@@ -506,8 +510,18 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	// just without public serving.
 	publicWeb := buildPublicWeb(ctx, cfg, sessionMgr, portMapper, logger)
 
+	jobSvc := job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg), defaultGateway(cfg))
+	reloader := &settingsReloader{
+		flagCfg:       flagCfg,
+		bootEffective: settingsDefaults(cfg),
+		store:         settings.NewStore(queries),
+		sessions:      sessionMgr,
+		jobs:          jobSvc,
+		logger:        logger,
+	}
+
 	connectDeps := connectDeps{
-		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg), defaultGateway(cfg)),
+		jobs:             jobSvc,
 		sessions:         sessionMgr,
 		publicIP:         publicEndpointHost(netSetup.EffectivePublicEndpoint),
 		imagesDir:        filepath.Join(snapshotRootDir(cfg), "images"),
@@ -520,6 +534,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 		peerSync:         &tunnelPeerSyncer{peers: peerSvc, tunnel: netSetup.Tunnel, logger: logger},
 		settings:         settings.NewStore(queries),
 		settingsDefaults: settingsDefaults(cfg),
+		settingsReloader: reloader,
 		runtimeStatus: api.RuntimeStatus{
 			Runtime:            driverKind(cfg.RuntimeKind),
 			Snapshot:           driverKind(cfg.SnapshotKind),
@@ -608,6 +623,8 @@ type connectDeps struct {
 	// settingsDefaults maps each setting key to the daemon's resolved default,
 	// so `fletcher settings list` shows the effective value, not just "(default)".
 	settingsDefaults map[string]string
+	// settingsReloader live-applies the reloadable settings (ReloadSettings).
+	settingsReloader api.SettingsReloader
 	// runtimeStatus is the effective runtime config surfaced via Health for
 	// `fletcher doctor`.
 	runtimeStatus api.RuntimeStatus
@@ -924,7 +941,7 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	mux.Handle(peersPath, peersHandler)
 
 	settingsPath, settingsHandler := fletcherv1connect.NewSettingsServiceHandler(
-		api.NewSettingsService(deps.settings, deps.settingsDefaults), interceptors,
+		api.NewSettingsService(deps.settings, deps.settingsDefaults, deps.settingsReloader), interceptors,
 	)
 	mux.Handle(settingsPath, settingsHandler)
 
@@ -1221,6 +1238,47 @@ func kvmUsable() bool {
 	}
 	_ = f.Close()
 	return true
+}
+
+// settingsReloader live-applies the reloadable settings to the running daemon
+// without a restart. It re-derives the current effective config from the
+// flag/env base plus the current store (the same path boot takes), pushes the
+// live defaults and caps into the session and job managers, and reports which
+// restart-required settings have drifted from what the daemon booted with.
+type settingsReloader struct {
+	flagCfg       Config            // flag/env config, before the settings overlay
+	bootEffective map[string]string // effective settings at boot, for drift detection
+	store         *settings.Store
+	sessions      *session.Manager
+	jobs          *job.Service
+	logger        *slog.Logger
+}
+
+// Reload re-applies the live settings and returns the keys re-applied plus the
+// restart-required keys whose value now differs from boot.
+func (r *settingsReloader) Reload(ctx context.Context) (reloaded, pendingRestart []string, err error) {
+	cur := r.flagCfg
+	if err := applySettings(ctx, &cur, r.store, r.logger); err != nil {
+		return nil, nil, err
+	}
+	r.sessions.ReloadDefaults(session.ReloadableDefaults{
+		IdleTimeout:         cur.SessionIdleTimeout,
+		MaxCount:            cur.SessionMaxCount,
+		MaxDiskBytes:        int64(cur.SessionMaxDiskGB) << 30,
+		DefaultImage:        cur.DefaultImage,
+		DefaultEgressPolicy: egressDefaultPolicy(cur),
+		DefaultGateway:      defaultGateway(cur),
+	})
+	r.jobs.ReloadDefaults(cur.DefaultImage, egressDefaultPolicy(cur), defaultGateway(cur))
+
+	curEffective := settingsDefaults(cur)
+	for key, boot := range r.bootEffective {
+		if settings.RequiresRestart(key) && curEffective[key] != boot {
+			pendingRestart = append(pendingRestart, key)
+		}
+	}
+	sort.Strings(pendingRestart)
+	return settings.LiveKeys(), pendingRestart, nil
 }
 
 // settingsDefaults maps each settings key to the daemon's resolved default value

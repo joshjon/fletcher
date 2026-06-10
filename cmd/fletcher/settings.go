@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"connectrpc.com/connect"
@@ -15,15 +16,37 @@ import (
 )
 
 // settingsCmd manages runtime-mutable operational settings stored in the
-// daemon. Set a value and restart the daemon to apply it - no systemctl edit.
+// daemon. Live settings apply via `settings reload`; the rest need a daemon
+// restart - no systemctl edit either way.
 func settingsCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "settings",
-		Usage: "view and change runtime settings (apply on `fletcher daemon restart`)",
+		Usage: "view and change runtime settings (apply live with `reload`, or on restart)",
 		Commands: []*cli.Command{
 			settingsListCmd(),
 			settingsSetCmd(),
 			settingsUnsetCmd(),
+			settingsReloadCmd(),
+		},
+	}
+}
+
+func settingsReloadCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "reload",
+		Usage: "apply the live-reloadable settings now, without restarting the daemon",
+		Flags: []cli.Flag{socketFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			client := newSettingsClient(cmd)
+			resp, err := client.ReloadSettings(ctx, connect.NewRequest(&fletcherv1.ReloadSettingsRequest{}))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("reloaded %d live setting(s)\n", len(resp.Msg.GetReloaded()))
+			if pending := resp.Msg.GetPendingRestart(); len(pending) > 0 {
+				fmt.Printf("changed settings that still need `fletcher daemon restart`: %s\n", strings.Join(pending, ", "))
+			}
+			return nil
 		},
 	}
 }
@@ -40,7 +63,7 @@ func settingsListCmd() *cli.Command {
 				return err
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-			fmt.Fprintln(w, "KEY\tVALUE\tDESCRIPTION")
+			fmt.Fprintln(w, "KEY\tVALUE\tAPPLY\tDESCRIPTION")
 			for _, s := range resp.Msg.GetSettings() {
 				// Show the effective value. Mark it "(default)" when it is not
 				// explicitly set; if there is no concrete default (auto/none),
@@ -54,12 +77,16 @@ func settingsListCmd() *cli.Command {
 				default:
 					value += " (default)"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\n", s.GetKey(), value, s.GetDescription())
+				apply := "live"
+				if s.GetRequiresRestart() {
+					apply = "restart"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.GetKey(), value, apply, s.GetDescription())
 			}
 			if err := w.Flush(); err != nil {
 				return err
 			}
-			fmt.Println("\nChanges take effect on the next `fletcher daemon restart`.")
+			fmt.Println("\nAPPLY=live: `fletcher settings reload` applies it now. APPLY=restart: needs `fletcher daemon restart`.")
 			return nil
 		},
 	}

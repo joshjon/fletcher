@@ -286,9 +286,13 @@ type Setting struct {
 	// description is the one-line help for the key.
 	Description string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	// set is true when an explicit value is stored (vs relying on the default).
-	Set           bool `protobuf:"varint,4,opt,name=set,proto3" json:"set,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Set bool `protobuf:"varint,4,opt,name=set,proto3" json:"set,omitempty"`
+	// requires_restart is true when the key only takes effect on the next daemon
+	// start; false when ReloadSettings applies it live. Clients group these
+	// separately and show a "needs restart" flag for the former.
+	RequiresRestart bool `protobuf:"varint,5,opt,name=requires_restart,json=requiresRestart,proto3" json:"requires_restart,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Setting) Reset() {
@@ -349,6 +353,104 @@ func (x *Setting) GetSet() bool {
 	return false
 }
 
+func (x *Setting) GetRequiresRestart() bool {
+	if x != nil {
+		return x.RequiresRestart
+	}
+	return false
+}
+
+type ReloadSettingsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReloadSettingsRequest) Reset() {
+	*x = ReloadSettingsRequest{}
+	mi := &file_fletcher_v1_settings_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReloadSettingsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReloadSettingsRequest) ProtoMessage() {}
+
+func (x *ReloadSettingsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_settings_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReloadSettingsRequest.ProtoReflect.Descriptor instead.
+func (*ReloadSettingsRequest) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_settings_proto_rawDescGZIP(), []int{7}
+}
+
+type ReloadSettingsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// reloaded lists the live setting keys re-applied to the running daemon.
+	Reloaded []string `protobuf:"bytes,1,rep,name=reloaded,proto3" json:"reloaded,omitempty"`
+	// pending_restart lists restart-required keys whose stored value differs from
+	// what the daemon booted with, so a client can prompt for a restart.
+	PendingRestart []string `protobuf:"bytes,2,rep,name=pending_restart,json=pendingRestart,proto3" json:"pending_restart,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ReloadSettingsResponse) Reset() {
+	*x = ReloadSettingsResponse{}
+	mi := &file_fletcher_v1_settings_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReloadSettingsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReloadSettingsResponse) ProtoMessage() {}
+
+func (x *ReloadSettingsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_settings_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReloadSettingsResponse.ProtoReflect.Descriptor instead.
+func (*ReloadSettingsResponse) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_settings_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ReloadSettingsResponse) GetReloaded() []string {
+	if x != nil {
+		return x.Reloaded
+	}
+	return nil
+}
+
+func (x *ReloadSettingsResponse) GetPendingRestart() []string {
+	if x != nil {
+		return x.PendingRestart
+	}
+	return nil
+}
+
 var File_fletcher_v1_settings_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_settings_proto_rawDesc = "" +
@@ -364,17 +466,23 @@ const file_fletcher_v1_settings_proto_rawDesc = "" +
 	"\aexisted\x18\x01 \x01(\bR\aexisted\"\x15\n" +
 	"\x13ListSettingsRequest\"H\n" +
 	"\x14ListSettingsResponse\x120\n" +
-	"\bsettings\x18\x01 \x03(\v2\x14.fletcher.v1.SettingR\bsettings\"e\n" +
+	"\bsettings\x18\x01 \x03(\v2\x14.fletcher.v1.SettingR\bsettings\"\x90\x01\n" +
 	"\aSetting\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x10\n" +
-	"\x03set\x18\x04 \x01(\bR\x03set2\x93\x02\n" +
+	"\x03set\x18\x04 \x01(\bR\x03set\x12)\n" +
+	"\x10requires_restart\x18\x05 \x01(\bR\x0frequiresRestart\"\x17\n" +
+	"\x15ReloadSettingsRequest\"]\n" +
+	"\x16ReloadSettingsResponse\x12\x1a\n" +
+	"\breloaded\x18\x01 \x03(\tR\breloaded\x12'\n" +
+	"\x0fpending_restart\x18\x02 \x03(\tR\x0ependingRestart2\xf0\x02\n" +
 	"\x0fSettingsService\x12O\n" +
 	"\n" +
 	"SetSetting\x12\x1e.fletcher.v1.SetSettingRequest\x1a\x1f.fletcher.v1.SetSettingResponse\"\x00\x12X\n" +
 	"\rDeleteSetting\x12!.fletcher.v1.DeleteSettingRequest\x1a\".fletcher.v1.DeleteSettingResponse\"\x00\x12U\n" +
-	"\fListSettings\x12 .fletcher.v1.ListSettingsRequest\x1a!.fletcher.v1.ListSettingsResponse\"\x00B\xb4\x01\n" +
+	"\fListSettings\x12 .fletcher.v1.ListSettingsRequest\x1a!.fletcher.v1.ListSettingsResponse\"\x00\x12[\n" +
+	"\x0eReloadSettings\x12\".fletcher.v1.ReloadSettingsRequest\x1a#.fletcher.v1.ReloadSettingsResponse\"\x00B\xb4\x01\n" +
 	"\x0fcom.fletcher.v1B\rSettingsProtoP\x01ZEgithub.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1\xa2\x02\x03FXX\xaa\x02\vFletcher.V1\xca\x02\vFletcher\\V1\xe2\x02\x17Fletcher\\V1\\GPBMetadata\xea\x02\fFletcher::V1b\x06proto3"
 
 var (
@@ -389,26 +497,30 @@ func file_fletcher_v1_settings_proto_rawDescGZIP() []byte {
 	return file_fletcher_v1_settings_proto_rawDescData
 }
 
-var file_fletcher_v1_settings_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_fletcher_v1_settings_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_fletcher_v1_settings_proto_goTypes = []any{
-	(*SetSettingRequest)(nil),     // 0: fletcher.v1.SetSettingRequest
-	(*SetSettingResponse)(nil),    // 1: fletcher.v1.SetSettingResponse
-	(*DeleteSettingRequest)(nil),  // 2: fletcher.v1.DeleteSettingRequest
-	(*DeleteSettingResponse)(nil), // 3: fletcher.v1.DeleteSettingResponse
-	(*ListSettingsRequest)(nil),   // 4: fletcher.v1.ListSettingsRequest
-	(*ListSettingsResponse)(nil),  // 5: fletcher.v1.ListSettingsResponse
-	(*Setting)(nil),               // 6: fletcher.v1.Setting
+	(*SetSettingRequest)(nil),      // 0: fletcher.v1.SetSettingRequest
+	(*SetSettingResponse)(nil),     // 1: fletcher.v1.SetSettingResponse
+	(*DeleteSettingRequest)(nil),   // 2: fletcher.v1.DeleteSettingRequest
+	(*DeleteSettingResponse)(nil),  // 3: fletcher.v1.DeleteSettingResponse
+	(*ListSettingsRequest)(nil),    // 4: fletcher.v1.ListSettingsRequest
+	(*ListSettingsResponse)(nil),   // 5: fletcher.v1.ListSettingsResponse
+	(*Setting)(nil),                // 6: fletcher.v1.Setting
+	(*ReloadSettingsRequest)(nil),  // 7: fletcher.v1.ReloadSettingsRequest
+	(*ReloadSettingsResponse)(nil), // 8: fletcher.v1.ReloadSettingsResponse
 }
 var file_fletcher_v1_settings_proto_depIdxs = []int32{
 	6, // 0: fletcher.v1.ListSettingsResponse.settings:type_name -> fletcher.v1.Setting
 	0, // 1: fletcher.v1.SettingsService.SetSetting:input_type -> fletcher.v1.SetSettingRequest
 	2, // 2: fletcher.v1.SettingsService.DeleteSetting:input_type -> fletcher.v1.DeleteSettingRequest
 	4, // 3: fletcher.v1.SettingsService.ListSettings:input_type -> fletcher.v1.ListSettingsRequest
-	1, // 4: fletcher.v1.SettingsService.SetSetting:output_type -> fletcher.v1.SetSettingResponse
-	3, // 5: fletcher.v1.SettingsService.DeleteSetting:output_type -> fletcher.v1.DeleteSettingResponse
-	5, // 6: fletcher.v1.SettingsService.ListSettings:output_type -> fletcher.v1.ListSettingsResponse
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
+	7, // 4: fletcher.v1.SettingsService.ReloadSettings:input_type -> fletcher.v1.ReloadSettingsRequest
+	1, // 5: fletcher.v1.SettingsService.SetSetting:output_type -> fletcher.v1.SetSettingResponse
+	3, // 6: fletcher.v1.SettingsService.DeleteSetting:output_type -> fletcher.v1.DeleteSettingResponse
+	5, // 7: fletcher.v1.SettingsService.ListSettings:output_type -> fletcher.v1.ListSettingsResponse
+	8, // 8: fletcher.v1.SettingsService.ReloadSettings:output_type -> fletcher.v1.ReloadSettingsResponse
+	5, // [5:9] is the sub-list for method output_type
+	1, // [1:5] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -425,7 +537,7 @@ func file_fletcher_v1_settings_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fletcher_v1_settings_proto_rawDesc), len(file_fletcher_v1_settings_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

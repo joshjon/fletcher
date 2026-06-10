@@ -42,6 +42,9 @@ const (
 	// SettingsServiceListSettingsProcedure is the fully-qualified name of the SettingsService's
 	// ListSettings RPC.
 	SettingsServiceListSettingsProcedure = "/fletcher.v1.SettingsService/ListSettings"
+	// SettingsServiceReloadSettingsProcedure is the fully-qualified name of the SettingsService's
+	// ReloadSettings RPC.
+	SettingsServiceReloadSettingsProcedure = "/fletcher.v1.SettingsService/ReloadSettings"
 )
 
 // SettingsServiceClient is a client for the fletcher.v1.SettingsService service.
@@ -49,6 +52,11 @@ type SettingsServiceClient interface {
 	SetSetting(context.Context, *connect.Request[v1.SetSettingRequest]) (*connect.Response[v1.SetSettingResponse], error)
 	DeleteSetting(context.Context, *connect.Request[v1.DeleteSettingRequest]) (*connect.Response[v1.DeleteSettingResponse], error)
 	ListSettings(context.Context, *connect.Request[v1.ListSettingsRequest]) (*connect.Response[v1.ListSettingsResponse], error)
+	// ReloadSettings re-applies the live-reloadable settings (each Setting's
+	// requires_restart=false) to the running daemon without a restart. Settings
+	// bound at boot (requires_restart=true) are unaffected and still need a
+	// manual `fletcher daemon restart` to take effect.
+	ReloadSettings(context.Context, *connect.Request[v1.ReloadSettingsRequest]) (*connect.Response[v1.ReloadSettingsResponse], error)
 }
 
 // NewSettingsServiceClient constructs a client for the fletcher.v1.SettingsService service. By
@@ -80,14 +88,21 @@ func NewSettingsServiceClient(httpClient connect.HTTPClient, baseURL string, opt
 			connect.WithSchema(settingsServiceMethods.ByName("ListSettings")),
 			connect.WithClientOptions(opts...),
 		),
+		reloadSettings: connect.NewClient[v1.ReloadSettingsRequest, v1.ReloadSettingsResponse](
+			httpClient,
+			baseURL+SettingsServiceReloadSettingsProcedure,
+			connect.WithSchema(settingsServiceMethods.ByName("ReloadSettings")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // settingsServiceClient implements SettingsServiceClient.
 type settingsServiceClient struct {
-	setSetting    *connect.Client[v1.SetSettingRequest, v1.SetSettingResponse]
-	deleteSetting *connect.Client[v1.DeleteSettingRequest, v1.DeleteSettingResponse]
-	listSettings  *connect.Client[v1.ListSettingsRequest, v1.ListSettingsResponse]
+	setSetting     *connect.Client[v1.SetSettingRequest, v1.SetSettingResponse]
+	deleteSetting  *connect.Client[v1.DeleteSettingRequest, v1.DeleteSettingResponse]
+	listSettings   *connect.Client[v1.ListSettingsRequest, v1.ListSettingsResponse]
+	reloadSettings *connect.Client[v1.ReloadSettingsRequest, v1.ReloadSettingsResponse]
 }
 
 // SetSetting calls fletcher.v1.SettingsService.SetSetting.
@@ -105,11 +120,21 @@ func (c *settingsServiceClient) ListSettings(ctx context.Context, req *connect.R
 	return c.listSettings.CallUnary(ctx, req)
 }
 
+// ReloadSettings calls fletcher.v1.SettingsService.ReloadSettings.
+func (c *settingsServiceClient) ReloadSettings(ctx context.Context, req *connect.Request[v1.ReloadSettingsRequest]) (*connect.Response[v1.ReloadSettingsResponse], error) {
+	return c.reloadSettings.CallUnary(ctx, req)
+}
+
 // SettingsServiceHandler is an implementation of the fletcher.v1.SettingsService service.
 type SettingsServiceHandler interface {
 	SetSetting(context.Context, *connect.Request[v1.SetSettingRequest]) (*connect.Response[v1.SetSettingResponse], error)
 	DeleteSetting(context.Context, *connect.Request[v1.DeleteSettingRequest]) (*connect.Response[v1.DeleteSettingResponse], error)
 	ListSettings(context.Context, *connect.Request[v1.ListSettingsRequest]) (*connect.Response[v1.ListSettingsResponse], error)
+	// ReloadSettings re-applies the live-reloadable settings (each Setting's
+	// requires_restart=false) to the running daemon without a restart. Settings
+	// bound at boot (requires_restart=true) are unaffected and still need a
+	// manual `fletcher daemon restart` to take effect.
+	ReloadSettings(context.Context, *connect.Request[v1.ReloadSettingsRequest]) (*connect.Response[v1.ReloadSettingsResponse], error)
 }
 
 // NewSettingsServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -137,6 +162,12 @@ func NewSettingsServiceHandler(svc SettingsServiceHandler, opts ...connect.Handl
 		connect.WithSchema(settingsServiceMethods.ByName("ListSettings")),
 		connect.WithHandlerOptions(opts...),
 	)
+	settingsServiceReloadSettingsHandler := connect.NewUnaryHandler(
+		SettingsServiceReloadSettingsProcedure,
+		svc.ReloadSettings,
+		connect.WithSchema(settingsServiceMethods.ByName("ReloadSettings")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.SettingsService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SettingsServiceSetSettingProcedure:
@@ -145,6 +176,8 @@ func NewSettingsServiceHandler(svc SettingsServiceHandler, opts ...connect.Handl
 			settingsServiceDeleteSettingHandler.ServeHTTP(w, r)
 		case SettingsServiceListSettingsProcedure:
 			settingsServiceListSettingsHandler.ServeHTTP(w, r)
+		case SettingsServiceReloadSettingsProcedure:
+			settingsServiceReloadSettingsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -164,4 +197,8 @@ func (UnimplementedSettingsServiceHandler) DeleteSetting(context.Context, *conne
 
 func (UnimplementedSettingsServiceHandler) ListSettings(context.Context, *connect.Request[v1.ListSettingsRequest]) (*connect.Response[v1.ListSettingsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SettingsService.ListSettings is not implemented"))
+}
+
+func (UnimplementedSettingsServiceHandler) ReloadSettings(context.Context, *connect.Request[v1.ReloadSettingsRequest]) (*connect.Response[v1.ReloadSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SettingsService.ReloadSettings is not implemented"))
 }

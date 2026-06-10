@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.jetify.com/typeid"
@@ -101,7 +102,10 @@ type Manager struct {
 	baseEnv    []string
 	gatewayEnv []string
 	logger     *slog.Logger
-	opts       Options
+	// opts holds the live-reloadable create-time defaults and caps. Stored
+	// behind an atomic pointer so ReloadSettings can swap them while creates and
+	// the idle reaper read them concurrently.
+	opts atomic.Pointer[Options]
 
 	mu      sync.Mutex
 	handles map[string]runtime.SessionHandle
@@ -151,17 +155,46 @@ const pubPortPrefix = "pubport"
 // NewManager constructs a Manager. rt may be nil if the configured runtime does
 // not support sessions, in which case lifecycle calls fail with a clear error.
 func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRuntime, baseEnv, gatewayEnv []string, logger *slog.Logger, opts Options) *Manager {
-	return &Manager{
+	m := &Manager{
 		q:          q,
 		snapshot:   snap,
 		runtime:    rt,
 		baseEnv:    baseEnv,
 		gatewayEnv: gatewayEnv,
 		logger:     logger,
-		opts:       opts,
 		handles:    make(map[string]runtime.SessionHandle),
 		busy:       make(map[string]int),
 	}
+	m.opts.Store(&opts)
+	return m
+}
+
+// opt returns the current create-time defaults and caps.
+func (m *Manager) opt() Options { return *m.opts.Load() }
+
+// ReloadDefaults swaps the live-reloadable defaults and caps without a restart,
+// preserving the boot-bound fields (PublicWeb, which gates public publishing
+// only while its listener is up). Called by ReloadSettings.
+func (m *Manager) ReloadDefaults(d ReloadableDefaults) {
+	cur := *m.opts.Load()
+	cur.IdleTimeout = d.IdleTimeout
+	cur.MaxCount = d.MaxCount
+	cur.MaxDiskBytes = d.MaxDiskBytes
+	cur.DefaultImage = d.DefaultImage
+	cur.DefaultEgressPolicy = d.DefaultEgressPolicy
+	cur.DefaultGateway = d.DefaultGateway
+	m.opts.Store(&cur)
+}
+
+// ReloadableDefaults is the subset of Options that ReloadSettings can apply
+// live (the create-time defaults and caps).
+type ReloadableDefaults struct {
+	IdleTimeout         time.Duration
+	MaxCount            int
+	MaxDiskBytes        int64
+	DefaultImage        string
+	DefaultEgressPolicy string
+	DefaultGateway      string
 }
 
 // envFor composes a session's environment: the base env always, plus the
@@ -212,12 +245,12 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		return Session{}, errs.New(errs.CategoryInvalidArgument, "name is required")
 	}
 	if strings.TrimSpace(egressPolicy) == "" {
-		egressPolicy = m.opts.DefaultEgressPolicy
+		egressPolicy = m.opt().DefaultEgressPolicy
 	}
 	egressPolicy = egress.Normalize(egressPolicy)
-	gateway = resolveGateway(gateway, m.opts.DefaultGateway)
+	gateway = resolveGateway(gateway, m.opt().DefaultGateway)
 	if strings.TrimSpace(image) == "" {
-		image = m.opts.DefaultImage
+		image = m.opt().DefaultImage
 	}
 	if strings.TrimSpace(image) == "" {
 		return Session{}, errs.New(errs.CategoryInvalidArgument, "image is required")
@@ -553,7 +586,7 @@ func (m *Manager) Publish(ctx context.Context, ref string, guestPort int, name s
 	}
 	host = strings.ToLower(strings.TrimSpace(host))
 	if public {
-		if !m.opts.PublicWeb {
+		if !m.opt().PublicWeb {
 			return PublishedPort{}, errs.New(errs.CategoryFailedPrecondition,
 				"public web serving is disabled; enable it with `fletcher settings set public_web true`")
 		}
@@ -872,7 +905,7 @@ func (m *Manager) takeHandle(id string) runtime.SessionHandle {
 // running agent or task is never stopped mid-work, even with no user attached.
 // It is a no-op when the idle timeout is disabled.
 func (m *Manager) ReapIdle(ctx context.Context) (int, error) {
-	if m.opts.IdleTimeout <= 0 {
+	if m.opt().IdleTimeout <= 0 {
 		return 0, nil
 	}
 	rows, err := m.q.ListSessions(ctx)
@@ -892,7 +925,7 @@ func (m *Manager) ReapIdle(ctx context.Context) (int, error) {
 			m.touch(ctx, r.ID) // working with no host op attached; reset the idle clock
 			continue
 		}
-		if time.Since(lastActivity(r)) < m.opts.IdleTimeout {
+		if time.Since(lastActivity(r)) < m.opt().IdleTimeout {
 			continue
 		}
 		if _, serr := m.Stop(ctx, r.ID); serr != nil {
@@ -908,27 +941,27 @@ func (m *Manager) ReapIdle(ctx context.Context) (int, error) {
 // checkCaps refuses a new session when a configured count or disk cap is hit,
 // reporting what is using the space rather than deleting anything.
 func (m *Manager) checkCaps(ctx context.Context) error {
-	if m.opts.MaxCount <= 0 && m.opts.MaxDiskBytes <= 0 {
+	if m.opt().MaxCount <= 0 && m.opt().MaxDiskBytes <= 0 {
 		return nil
 	}
 	rows, err := m.q.ListSessions(ctx)
 	if err != nil {
 		return fmt.Errorf("check session caps: %w", err)
 	}
-	if m.opts.MaxCount > 0 && len(rows) >= m.opts.MaxCount {
+	if m.opt().MaxCount > 0 && len(rows) >= m.opt().MaxCount {
 		return errs.Newf(errs.CategoryFailedPrecondition,
 			"session count cap reached (%d/%d). Delete one to make room:\n%s",
-			len(rows), m.opts.MaxCount, usageReport(rows))
+			len(rows), m.opt().MaxCount, usageReport(rows))
 	}
-	if m.opts.MaxDiskBytes > 0 {
+	if m.opt().MaxDiskBytes > 0 {
 		var total int64
 		for _, r := range rows {
 			total += forkBytes(r.ForkPath)
 		}
-		if total >= m.opts.MaxDiskBytes {
+		if total >= m.opt().MaxDiskBytes {
 			return errs.Newf(errs.CategoryFailedPrecondition,
 				"session disk cap reached (%d/%d GiB). Delete one to make room:\n%s",
-				total>>30, m.opts.MaxDiskBytes>>30, usageReport(rows))
+				total>>30, m.opt().MaxDiskBytes>>30, usageReport(rows))
 		}
 	}
 	return nil

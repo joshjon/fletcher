@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -83,12 +84,46 @@ var registry = []definition{
 	{KeyACMEEmail, "contact email for the ACME account used to issue public TLS certs (optional)", nil},
 }
 
+// liveKeys are the settings the daemon can re-apply to running components
+// without a restart (via ReloadSettings). Everything else is bound at boot
+// (listeners, drivers, the tunnel, certs, log level, VM memory) and takes
+// effect only on the next start.
+var liveKeys = map[string]bool{
+	KeyDefaultImage:        true,
+	KeyDefaultEgressPolicy: true,
+	KeyDefaultGateway:      true,
+	KeySessionIdleTimeout:  true,
+	KeySessionMaxCount:     true,
+	KeySessionMaxDiskGB:    true,
+}
+
+// RequiresRestart reports whether changing key takes effect only after a daemon
+// restart (true), rather than being applied live by ReloadSettings (false).
+// Unknown keys default to true - safer to ask for a restart than to silently
+// not apply.
+func RequiresRestart(key string) bool {
+	return !liveKeys[key]
+}
+
+// LiveKeys returns the setting keys ReloadSettings applies live, sorted.
+func LiveKeys() []string {
+	out := make([]string, 0, len(liveKeys))
+	for k := range liveKeys {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // View is one setting's full picture for `fletcher settings list`.
 type View struct {
 	Key         string
 	Value       string
 	Description string
 	Set         bool
+	// RequiresRestart is true when the key only takes effect on the next daemon
+	// start; false when ReloadSettings can apply it live.
+	RequiresRestart bool
 }
 
 // Store persists settings over the generated SQLite queries.
@@ -148,7 +183,13 @@ func (s *Store) Describe(ctx context.Context) ([]View, error) {
 	out := make([]View, 0, len(registry))
 	for _, d := range registry {
 		v, set := vals[d.key]
-		out = append(out, View{Key: d.key, Value: v, Description: d.description, Set: set})
+		out = append(out, View{
+			Key:             d.key,
+			Value:           v,
+			Description:     d.description,
+			Set:             set,
+			RequiresRestart: RequiresRestart(d.key),
+		})
 	}
 	return out, nil
 }

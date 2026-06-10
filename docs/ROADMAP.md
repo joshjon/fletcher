@@ -689,8 +689,13 @@ services:
 - **M7 (next) - live settings.** `SettingsService` Set/Delete/List is complete;
   `AdminService.Health` is remote with rich fields (public_endpoint, runtime,
   base-image flags, pairing_endpoint), so the doctor-warnings row is derivable.
-  *Buildable now. Tiny optional add: a `default_agent` setting the create form
-  wants.*
+  *Buildable now.* **Added 2026-06-11:** each `Setting` now carries
+  `requires_restart`, and `ReloadSettings` live-applies the reloadable ones
+  (the 6 session/job create-time defaults and caps - swapped atomically in both
+  managers) so the app's "Apply now" is instant; boot-bound settings
+  (listeners, drivers, tunnel, certs, `public_web`, `vm_memory_mb`, `log_level`)
+  stay flagged restart-required and the user restarts manually. *Tiny optional
+  add still: a `default_agent` setting the create form wants.*
 - **M8 - approvals + APNs.** `ApprovalService` (List/Get/Approve/Deny) is
   complete, so approve/deny works today over polling. *Gap: no APNs
   device-token registration RPC and no daemon-side APNs push - that is the real

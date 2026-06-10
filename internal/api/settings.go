@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 
 	"connectrpc.com/connect"
 
@@ -18,6 +19,13 @@ type SettingsBackend interface {
 	Describe(ctx context.Context) ([]settings.View, error)
 }
 
+// SettingsReloader live-applies the reloadable settings to the running daemon,
+// returning the keys re-applied and the restart-required keys that have drifted
+// from boot. May be nil when reload is unavailable.
+type SettingsReloader interface {
+	Reload(ctx context.Context) (reloaded, pendingRestart []string, err error)
+}
+
 // SettingsService implements fletcherv1connect.SettingsServiceHandler.
 type SettingsService struct {
 	fletcherv1connect.UnimplementedSettingsServiceHandler
@@ -25,12 +33,28 @@ type SettingsService struct {
 	// defaults maps each key to the daemon's resolved default value, surfaced
 	// for unset keys so a caller sees the effective value, not just "(default)".
 	defaults map[string]string
+	reloader SettingsReloader
 }
 
-// NewSettingsService wires a SettingsService to a backend and the daemon's
-// resolved per-key defaults.
-func NewSettingsService(backend SettingsBackend, defaults map[string]string) *SettingsService {
-	return &SettingsService{backend: backend, defaults: defaults}
+// NewSettingsService wires a SettingsService to a backend, the daemon's resolved
+// per-key defaults, and a live-settings reloader (nil disables ReloadSettings).
+func NewSettingsService(backend SettingsBackend, defaults map[string]string, reloader SettingsReloader) *SettingsService {
+	return &SettingsService{backend: backend, defaults: defaults, reloader: reloader}
+}
+
+// ReloadSettings re-applies the live-reloadable settings without a restart.
+func (s *SettingsService) ReloadSettings(ctx context.Context, _ *connect.Request[fletcherv1.ReloadSettingsRequest]) (*connect.Response[fletcherv1.ReloadSettingsResponse], error) {
+	if s.reloader == nil {
+		return nil, connect.NewError(connect.CodeUnimplemented, errors.New("live settings reload is not available on this daemon"))
+	}
+	reloaded, pending, err := s.reloader.Reload(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.ReloadSettingsResponse{
+		Reloaded:       reloaded,
+		PendingRestart: pending,
+	}), nil
 }
 
 // SetSetting validates and stores key=value.
@@ -64,10 +88,11 @@ func (s *SettingsService) ListSettings(ctx context.Context, _ *connect.Request[f
 			value = s.defaults[v.Key]
 		}
 		out[i] = &fletcherv1.Setting{
-			Key:         v.Key,
-			Value:       value,
-			Description: v.Description,
-			Set:         v.Set,
+			Key:             v.Key,
+			Value:           value,
+			Description:     v.Description,
+			Set:             v.Set,
+			RequiresRestart: v.RequiresRestart,
 		}
 	}
 	return connect.NewResponse(&fletcherv1.ListSettingsResponse{Settings: out}), nil

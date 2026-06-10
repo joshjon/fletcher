@@ -6,13 +6,20 @@ option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;
 
 // SettingsService manages runtime-mutable operational settings stored in the
 // daemon's SQLite database and edited via `fletcher settings`. Settings are
-// applied over the flag/env config at startup; changes take effect on the next
-// restart. Bootstrap config (database path, socket, age key, listen addresses)
-// is not managed here. See STANDARDS.md sections 95/98.
+// applied over the flag/env config at startup. Live-reloadable settings
+// (requires_restart=false) also take effect immediately via ReloadSettings; the
+// rest take effect on the next daemon restart. Bootstrap config (database path,
+// socket, age key, listen addresses) is not managed here. See STANDARDS.md
+// sections 95/98.
 service SettingsService {
   rpc SetSetting(SetSettingRequest) returns (SetSettingResponse) {}
   rpc DeleteSetting(DeleteSettingRequest) returns (DeleteSettingResponse) {}
   rpc ListSettings(ListSettingsRequest) returns (ListSettingsResponse) {}
+  // ReloadSettings re-applies the live-reloadable settings (each Setting's
+  // requires_restart=false) to the running daemon without a restart. Settings
+  // bound at boot (requires_restart=true) are unaffected and still need a
+  // manual `fletcher daemon restart` to take effect.
+  rpc ReloadSettings(ReloadSettingsRequest) returns (ReloadSettingsResponse) {}
 }
 
 message SetSettingRequest {
@@ -42,4 +49,17 @@ message Setting {
   string description = 3;
   // set is true when an explicit value is stored (vs relying on the default).
   bool set = 4;
+  // requires_restart is true when the key only takes effect on the next daemon
+  // start; false when ReloadSettings applies it live. Clients group these
+  // separately and show a "needs restart" flag for the former.
+  bool requires_restart = 5;
+}
+
+message ReloadSettingsRequest {}
+message ReloadSettingsResponse {
+  // reloaded lists the live setting keys re-applied to the running daemon.
+  repeated string reloaded = 1;
+  // pending_restart lists restart-required keys whose stored value differs from
+  // what the daemon booted with, so a client can prompt for a restart.
+  repeated string pending_restart = 2;
 }
