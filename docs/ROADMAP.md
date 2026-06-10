@@ -134,6 +134,18 @@ and documented in code; one (settings) fell through the cracks.
   hosting a relay"). The on-thesis option is leaning on a user-provided relay
   (e.g. the operator's own Tailscale/Headscale) as an opt-in transport - a
   deliberate product decision, not yet made.
+- **Boot-time endpoint resilience (phase 9). Found on hardware 2026-06-10.**
+  The daemon resolves its public endpoint (and brings up the WireGuard tunnel +
+  pairing listener) once at startup in `bringUpNetwork`. After a host reboot the
+  daemon can start before the WAN/router is reachable, so NAT-PMP/UPnP discovery
+  fails, the endpoint is empty, and the tunnel + pairing listener never come up
+  until a manual `systemctl restart fletcher`. Two fixes: (a) cheap insurance -
+  add `Wants=network-online.target` / `After=network-online.target` to the
+  systemd unit; (b) the real fix - when no public endpoint is resolved at boot,
+  keep retrying derivation (and bring the tunnel up) once the network appears.
+  The `portmap.Mapper` already runs a refresh loop that could drive (b); the
+  endpoint derivation and tunnel bring-up just need to hang off it rather than
+  being one-shot.
 
 - **pi-extension (phases 11/14).** `images/fletcher-base/pi-extension/index.ts`
   fetches the catalog on startup but `registerProvider()` is a TODO pending a
