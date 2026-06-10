@@ -78,6 +78,17 @@ fletcher settings set no_upnp true
 fletcher daemon enable
 ```
 
+To also drive the daemon itself (and the iOS app) over your VPN, expose the
+control API on your VPN address - bound there only, not the whole LAN:
+
+```sh
+fletcher settings set remote_api_listen 100.x.y.z:11700   # your box's Tailscale IP
+fletcher daemon restart
+```
+
+Then pair a client with `fletcher peer pair <name> --byo-vpn` (see
+[Pair a device](/guide/pairing#or-pair-the-app-over-your-own-vpn-mode-b)).
+
 For a worked Tailscale example and the trade-offs, see
 [Networking deep dive](/advanced/networking#mode-b-bring-your-own-vpn).
 

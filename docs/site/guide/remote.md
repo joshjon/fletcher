@@ -73,13 +73,22 @@ from the device is tunnel reachability, not the API.
 
 ## How access is gated
 
-The network API binds to the tunnel interface only and requires the token. The
-local Unix socket needs neither, since it's gated by file permissions. Revoke a
-device any time with `fletcher peer delete <id>`, which drops both its tunnel
-access and its token. See [Security](/guide/security).
+The network API binds to the tunnel interface and requires the token. In
+[Mode B](/advanced/networking#mode-b-bring-your-own-vpn) it also binds the
+address you set in `remote_api_listen` (e.g. your Tailscale IP), still
+token-gated. The local Unix socket needs neither, since it's gated by file
+permissions. Revoke a device any time with `fletcher peer delete <id>`, which
+drops both its tunnel access and its token. See [Security](/guide/security).
 
 ## From a phone
 
-A phone can join the tunnel (it's a WireGuard peer), but there's no client to
-drive the daemon from iOS yet. That's the native app, still to come. Today the
-tunnel works from the phone, but control is laptop-only.
+The native Fletcher iOS app pairs with your box and lists your sessions. It
+connects either way:
+
+- **Mode A:** scan a `fletcher peer pair --mobile` QR; the app brings up
+  Fletcher's WireGuard tunnel itself.
+- **Mode B:** scan a `fletcher peer pair --byo-vpn` QR; the app brings up no
+  tunnel and reaches the box over a VPN you already run (e.g. Tailscale), which
+  is how it coexists with that VPN.
+
+See [Pair a device](/guide/pairing) for both flows.

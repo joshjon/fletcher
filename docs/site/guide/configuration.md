@@ -32,6 +32,7 @@ fletcher settings unset log_level     # revert to the flag/env default
 | `no_upnp` | Disable the automatic UPnP port-forward attempt |
 | `gateway_listen` | Listen address for the model gateway (default `127.0.0.1:11500`) |
 | `mcp_listen` | Listen address for the MCP server (default `127.0.0.1:11600`) |
+| `remote_api_listen` | Mode B: extra `host:port` to expose the token-gated API on, beyond the WireGuard tunnel (e.g. your Tailscale IP, so the app reaches the box over a VPN you already run; see [Networking](/advanced/networking#mode-b-bring-your-own-vpn)) |
 | `public_web` | Opt in to public HTTPS on ports 80/443 (see [Public web](/advanced/public-web)) |
 | `acme_staging` | Use Let's Encrypt staging certs while testing |
 | `log_level` | Daemon log level |

@@ -90,6 +90,33 @@ warns when the daemon has no pairing listener (no public endpoint, or the tunnel
 is down).
 :::
 
+### Or pair the app over your own VPN (Mode B)
+
+If you already reach your box with a VPN like Tailscale, the app does not need
+Fletcher's tunnel at all. Since iOS allows only one active VPN at a time, this is
+how the app coexists with Tailscale: it brings up no tunnel of its own and drives
+the daemon directly over your VPN.
+
+First expose the API on your VPN address (once), then restart:
+
+```sh
+fletcher settings set remote_api_listen 100.x.y.z:11700   # your box's Tailscale IP
+fletcher daemon restart
+```
+
+Then pair with `--byo-vpn`:
+
+```sh
+fletcher peer pair iphone --byo-vpn
+```
+
+This prints (and renders as a QR) a `{remote, token}` blob pointed at that VPN
+address. Scan it in the app with your VPN active. There is no pairing endpoint
+and no cert pinning - your VPN already encrypts the path, and the per-peer token
+gates the API. The same blob works from a laptop on the VPN via `fletcher login
+<blob>`. See [Networking - Mode B](/advanced/networking#mode-b-bring-your-own-vpn)
+for the trade-offs.
+
 ## Connect a laptop
 
 Same command, different name:
