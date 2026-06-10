@@ -106,9 +106,10 @@ type PairingCertProvider interface {
 
 // Service is the high-level peers API.
 type Service struct {
-	q           sqliteq.Querier
-	tunnelCIDR  string
-	apiEndpoint string
+	q                 sqliteq.Querier
+	tunnelCIDR        string
+	apiEndpoint       string
+	remoteAPIEndpoint string
 
 	mu             sync.RWMutex
 	publicEndpoint string
@@ -132,6 +133,11 @@ type Options struct {
 	// drive the daemon's network API (e.g. "10.99.0.1:11700"). Surfaced in
 	// pairing output so the client knows where to point.
 	APIEndpoint string
+	// RemoteAPIEndpoint is the Mode B host:port a client dials to reach the
+	// API over a VPN the operator already runs (the daemon's
+	// --remote-api-listen, e.g. a Tailscale IP "100.x.y.z:11700"). Empty when
+	// Mode B is not configured; surfaced so `peer pair --byo-vpn` can render it.
+	RemoteAPIEndpoint string
 }
 
 // NewService wires a Service to a sqlc querier with the given options.
@@ -141,17 +147,22 @@ func NewService(q sqliteq.Querier, opts Options) *Service {
 		cidr = DefaultTunnelCIDR
 	}
 	return &Service{
-		q:              q,
-		tunnelCIDR:     cidr,
-		publicEndpoint: opts.PublicEndpoint,
-		apiEndpoint:    opts.APIEndpoint,
-		pending:        newPendingPairs(),
+		q:                 q,
+		tunnelCIDR:        cidr,
+		publicEndpoint:    opts.PublicEndpoint,
+		apiEndpoint:       opts.APIEndpoint,
+		remoteAPIEndpoint: opts.RemoteAPIEndpoint,
+		pending:           newPendingPairs(),
 	}
 }
 
 // APIEndpoint returns the tunnel-side host:port clients dial to drive the
 // daemon's network API.
 func (s *Service) APIEndpoint() string { return s.apiEndpoint }
+
+// RemoteAPIEndpoint returns the Mode B host:port clients dial to reach the API
+// over an operator-run VPN, or "" when Mode B is not configured.
+func (s *Service) RemoteAPIEndpoint() string { return s.remoteAPIEndpoint }
 
 // TunnelCIDR returns the subnet used for auto-allocation. The caller
 // renders this into the server-side AllowedIPs when needed.

@@ -21,17 +21,18 @@ import (
 // Known setting keys. The same names are used as the stored keys and by the
 // daemon when applying settings over its config.
 const (
-	KeyRuntime        = "runtime"
-	KeySnapshot       = "snapshot"
-	KeyBtrfsRoot      = "btrfs_root"
-	KeyPublicEndpoint = "public_endpoint"
-	KeyWireGuardPort  = "wireguard_port"
-	KeyPairingPort    = "pairing_port"
-	KeyLogLevel       = "log_level"
-	KeyCredentialsDir = "credentials_dir"
-	KeyNoUPnP         = "no_upnp"
-	KeyGatewayListen  = "gateway_listen"
-	KeyMCPListen      = "mcp_listen"
+	KeyRuntime         = "runtime"
+	KeySnapshot        = "snapshot"
+	KeyBtrfsRoot       = "btrfs_root"
+	KeyPublicEndpoint  = "public_endpoint"
+	KeyWireGuardPort   = "wireguard_port"
+	KeyPairingPort     = "pairing_port"
+	KeyLogLevel        = "log_level"
+	KeyCredentialsDir  = "credentials_dir"
+	KeyNoUPnP          = "no_upnp"
+	KeyGatewayListen   = "gateway_listen"
+	KeyMCPListen       = "mcp_listen"
+	KeyRemoteAPIListen = "remote_api_listen"
 
 	KeySessionIdleTimeout = "session_idle_timeout"
 	KeySessionMaxCount    = "session_max_count"
@@ -69,6 +70,7 @@ var registry = []definition{
 	{KeyNoUPnP, "disable the automatic UPnP port-forward: true | false", oneOf("true", "false")},
 	{KeyGatewayListen, "model gateway listen address, host:port", hostPort},
 	{KeyMCPListen, "MCP server listen address, host:port", hostPort},
+	{KeyRemoteAPIListen, "Mode B: extra host:port to expose the token-gated API on, beyond the WireGuard tunnel (e.g. your Tailscale IP)", hostPort},
 	{KeySessionIdleTimeout, "auto-stop a session idle (no work in flight) this long, e.g. 30m; 0 disables", durationOrZero},
 	{KeySessionMaxCount, "maximum number of sessions; 0 disables the cap", nonNegInt},
 	{KeySessionMaxDiskGB, "maximum total session disk in GB; 0 disables the cap", nonNegInt},

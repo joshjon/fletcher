@@ -66,6 +66,34 @@ On the server **and** on the device you want to connect from:
 (`fletcher health --socket <unix socket>` won't work off-machine, since Unix
 sockets are local, but the network services are reachable over the tailnet.)
 
+### Driving Fletcher over Mode B (CLI and the iOS app)
+
+The gateway and MCP ports above are for agents to reach models. To drive the
+daemon itself (list sessions, run commands) over the same VPN - without standing
+up Fletcher's WireGuard tunnel - expose the token-gated control API on your VPN
+address:
+
+```sh
+# Bind the API to the box's Tailscale IP only (not the whole LAN).
+fletcher settings set remote_api_listen 100.x.y.z:11700
+fletcher daemon restart
+```
+
+Then pair a client for Mode B. This mints a per-peer token and prints a
+`{remote, token}` blob (and a QR) pointed at that VPN address:
+
+```sh
+fletcher peer pair my-phone --byo-vpn
+```
+
+On a laptop on the same tailnet, save the blob with `fletcher login <blob>` and
+run `fletcher` normally - every call rides your existing VPN. The same blob is
+what the Fletcher iOS app scans, so the app never has to bring up a second VPN
+(iOS allows only one active tunnel at a time).
+
+The API stays token-gated and, bound to the Tailscale IP, is reachable only over
+the tailnet - not from other devices on the LAN.
+
 ### Trade-off
 
 A coordination-based VPN like Tailscale sees metadata about your network (which

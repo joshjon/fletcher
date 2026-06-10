@@ -180,6 +180,12 @@ message PairPeerResponse {
   // api_endpoint is the tunnel-side host:port a client dials to drive the
   // daemon (e.g. "10.99.0.1:11700"), reachable once the tunnel is up.
   string api_endpoint = 7;
+  // remote_api_endpoint is the Mode B host:port a client dials to drive the
+  // daemon over a VPN the operator already runs (the daemon's
+  // --remote-api-listen, e.g. a Tailscale IP "100.x.y.z:11700"). Empty when
+  // Mode B is not configured. Lets a client reach the API without standing up
+  // Fletcher's own tunnel.
+  string remote_api_endpoint = 8;
 }
 
 message ServerConfigRequest {

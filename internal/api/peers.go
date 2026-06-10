@@ -35,6 +35,9 @@ type PeersBackend interface {
 	// APIEndpoint returns the tunnel-side host:port clients dial to drive
 	// the daemon's network API.
 	APIEndpoint() string
+	// RemoteAPIEndpoint returns the Mode B host:port clients dial to reach the
+	// API over an operator-run VPN, or "" when Mode B is not configured.
+	RemoteAPIEndpoint() string
 	// PairingEndpoint returns the public host:port a client dials to call
 	// CompletePair before the tunnel is up; empty when no public endpoint
 	// or pairing listener is available.
@@ -132,13 +135,14 @@ func (s *PeersService) PairPeer(ctx context.Context, req *connect.Request[fletch
 		PersistentKeepalive: 25,
 	})
 	return connect.NewResponse(&fletcherv1.PairPeerResponse{
-		Peer:         peerToProto(created.Peer),
-		ClientConfig: clientCfg,
-		PrivateKey:   string(created.PrivateKey),
-		Address:      address,
-		Endpoint:     endpoint,
-		ApiToken:     created.APIToken,
-		ApiEndpoint:  s.peers.APIEndpoint(),
+		Peer:              peerToProto(created.Peer),
+		ClientConfig:      clientCfg,
+		PrivateKey:        string(created.PrivateKey),
+		Address:           address,
+		Endpoint:          endpoint,
+		ApiToken:          created.APIToken,
+		ApiEndpoint:       s.peers.APIEndpoint(),
+		RemoteApiEndpoint: s.peers.RemoteAPIEndpoint(),
 	}), nil
 }
 

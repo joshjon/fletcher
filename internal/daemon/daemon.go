@@ -394,8 +394,9 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	approvalSvc := approval.NewService(queries, approval.ServiceOptions{})
 	apiEndpoint := remoteAPIAddr()
 	peerSvc := peer.NewService(queries, peer.Options{
-		PublicEndpoint: cfg.PublicEndpoint,
-		APIEndpoint:    apiEndpoint,
+		PublicEndpoint:    cfg.PublicEndpoint,
+		APIEndpoint:       apiEndpoint,
+		RemoteAPIEndpoint: cfg.RemoteAPIListen,
 	})
 	wgKeyProvider := newServerKeyProvider(secretsStore)
 
@@ -1243,6 +1244,7 @@ func settingsDefaults(cfg Config) map[string]string {
 		settings.KeyNoUPnP:              strconv.FormatBool(cfg.DisableUPnP),
 		settings.KeyGatewayListen:       cfg.GatewayListenAddr,
 		settings.KeyMCPListen:           cfg.MCPListenAddr,
+		settings.KeyRemoteAPIListen:     cfg.RemoteAPIListen,
 		settings.KeySessionIdleTimeout:  sessionIdleTimeoutString(cfg.SessionIdleTimeout),
 		settings.KeySessionMaxCount:     strconv.Itoa(cfg.SessionMaxCount),
 		settings.KeySessionMaxDiskGB:    strconv.Itoa(cfg.SessionMaxDiskGB),
@@ -1354,6 +1356,8 @@ func applySetting(cfg *Config, k, v string) bool {
 		cfg.GatewayListenAddr = v
 	case settings.KeyMCPListen:
 		cfg.MCPListenAddr = v
+	case settings.KeyRemoteAPIListen:
+		cfg.RemoteAPIListen = v
 	case settings.KeySessionIdleTimeout:
 		if v == "0" {
 			cfg.SessionIdleTimeout = 0

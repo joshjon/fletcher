@@ -66,11 +66,18 @@ so a copied blob does not authorise API access.`,
 				Name:  "mobile",
 				Usage: "emit a single pair blob for a native client (e.g. the Fletcher iOS app) that does its own keygen",
 			},
+			&cli.BoolFlag{
+				Name:  "byo-vpn",
+				Usage: "pair a client for Mode B: reach the box over a VPN you already run (e.g. Tailscale), no Fletcher tunnel. Requires the daemon's --remote-api-listen.",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			name := cmd.Args().First()
 			if name == "" {
 				return errors.New("peer name is required")
+			}
+			if cmd.Bool("mobile") && cmd.Bool("byo-vpn") {
+				return errors.New("--mobile and --byo-vpn are mutually exclusive: --mobile sets up Fletcher's tunnel, --byo-vpn reaches the box over a VPN you already run")
 			}
 			client := newPeersClient(cmd)
 			if cmd.Bool("mobile") {
@@ -84,6 +91,9 @@ so a copied blob does not authorise API access.`,
 			resp, err := client.PairPeer(ctx, connect.NewRequest(&fletcherv1.PairPeerRequest{Name: name}))
 			if err != nil {
 				return err
+			}
+			if cmd.Bool("byo-vpn") {
+				return renderByoVPNPairResult(os.Stdout, resp.Msg, !cmd.Bool("no-qr"))
 			}
 			renderPairResult(os.Stdout, resp.Msg, !cmd.Bool("no-qr"))
 			return nil
@@ -124,19 +134,58 @@ func renderMobilePairResult(w io.Writer, name string, resp *fletcherv1.BeginPair
 	if withQR && isTerminal(w) {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Scan with the Fletcher iOS app:")
-		qrterminal.GenerateWithConfig(blob, qrterminal.Config{
-			Level:          qrterminal.M,
-			Writer:         w,
-			HalfBlocks:     true,
-			BlackChar:      qrterminal.BLACK_BLACK,
-			WhiteBlackChar: qrterminal.WHITE_BLACK,
-			WhiteChar:      qrterminal.WHITE_WHITE,
-			BlackWhiteChar: qrterminal.BLACK_WHITE,
-			QuietZone:      1,
-		})
+		renderScanQR(w, blob)
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "# The API token is released to the app only after it supplies its WireGuard public key.")
+}
+
+// renderByoVPNPairResult renders a Mode B pairing: a {remote, token} login blob
+// (and QR) the app reaches over a VPN the operator already runs, with no
+// Fletcher tunnel. Errors when the daemon has no --remote-api-listen set, since
+// there is then no VPN address to advertise.
+func renderByoVPNPairResult(w io.Writer, resp *fletcherv1.PairPeerResponse, withQR bool) error {
+	remote := resp.GetRemoteApiEndpoint()
+	if remote == "" {
+		return errors.New("the daemon has no Mode B address configured: set --remote-api-listen " +
+			"(FLETCHER_REMOTE_API_LISTEN) to the box's address on your VPN (e.g. its Tailscale IP, " +
+			"100.x.y.z:11700) and restart, then pair again")
+	}
+	p := resp.GetPeer()
+	blob := encodeLoginBlob(remote, resp.GetApiToken())
+	fmt.Fprintf(w, "paired %s for Mode B (reach the box over your own VPN)\n", p.GetName())
+	fmt.Fprintf(w, "  id:     %s\n", p.GetId())
+	fmt.Fprintf(w, "  remote: %s\n", remote)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "# ===== LOGIN BLOB (paste into the Fletcher iOS app, or scan the QR) =====")
+	fmt.Fprintln(w, "# The app dials this address over your active VPN (e.g. Tailscale) - no Fletcher tunnel.")
+	fmt.Fprintln(w, blob)
+	if withQR && isTerminal(w) {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Scan with the Fletcher iOS app:")
+		renderScanQR(w, blob)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "# Or log in from a laptop on the same VPN:")
+	fmt.Fprintf(w, "#   fletcher login %s\n", blob)
+	return nil
+}
+
+// renderScanQR writes a half-block QR of data to w. Half-blocks pack two
+// vertical modules per character row, so the code is about a quarter of the
+// full-block size - small enough not to swamp the terminal while staying
+// scannable.
+func renderScanQR(w io.Writer, data string) {
+	qrterminal.GenerateWithConfig(data, qrterminal.Config{
+		Level:          qrterminal.M,
+		Writer:         w,
+		HalfBlocks:     true,
+		BlackChar:      qrterminal.BLACK_BLACK,
+		WhiteBlackChar: qrterminal.WHITE_BLACK,
+		WhiteChar:      qrterminal.WHITE_WHITE,
+		BlackWhiteChar: qrterminal.BLACK_WHITE,
+		QuietZone:      1,
+	})
 }
 
 func renderPairResult(w io.Writer, resp *fletcherv1.PairPeerResponse, withQR bool) {
@@ -154,20 +203,7 @@ func renderPairResult(w io.Writer, resp *fletcherv1.PairPeerResponse, withQR boo
 	if withQR && isTerminal(w) {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Scan with the WireGuard app (the QR encodes the config above):")
-		// Half-block rendering packs two vertical modules into each
-		// character row (and one cell per module horizontally), so the QR
-		// is roughly a quarter of the full-block size - small enough not to
-		// swamp the terminal while staying scannable.
-		qrterminal.GenerateWithConfig(resp.GetClientConfig(), qrterminal.Config{
-			Level:          qrterminal.M,
-			Writer:         w,
-			HalfBlocks:     true,
-			BlackChar:      qrterminal.BLACK_BLACK,
-			WhiteBlackChar: qrterminal.WHITE_BLACK,
-			WhiteChar:      qrterminal.WHITE_WHITE,
-			BlackWhiteChar: qrterminal.BLACK_WHITE,
-			QuietZone:      1,
-		})
+		renderScanQR(w, resp.GetClientConfig())
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "# ===== STEP 2: API TOKEN (shown exactly once) =====")

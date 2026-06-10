@@ -925,9 +925,15 @@ type PairPeerResponse struct {
 	ApiToken string `protobuf:"bytes,6,opt,name=api_token,json=apiToken,proto3" json:"api_token,omitempty"`
 	// api_endpoint is the tunnel-side host:port a client dials to drive the
 	// daemon (e.g. "10.99.0.1:11700"), reachable once the tunnel is up.
-	ApiEndpoint   string `protobuf:"bytes,7,opt,name=api_endpoint,json=apiEndpoint,proto3" json:"api_endpoint,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ApiEndpoint string `protobuf:"bytes,7,opt,name=api_endpoint,json=apiEndpoint,proto3" json:"api_endpoint,omitempty"`
+	// remote_api_endpoint is the Mode B host:port a client dials to drive the
+	// daemon over a VPN the operator already runs (the daemon's
+	// --remote-api-listen, e.g. a Tailscale IP "100.x.y.z:11700"). Empty when
+	// Mode B is not configured. Lets a client reach the API without standing up
+	// Fletcher's own tunnel.
+	RemoteApiEndpoint string `protobuf:"bytes,8,opt,name=remote_api_endpoint,json=remoteApiEndpoint,proto3" json:"remote_api_endpoint,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *PairPeerResponse) Reset() {
@@ -1005,6 +1011,13 @@ func (x *PairPeerResponse) GetApiToken() string {
 func (x *PairPeerResponse) GetApiEndpoint() string {
 	if x != nil {
 		return x.ApiEndpoint
+	}
+	return ""
+}
+
+func (x *PairPeerResponse) GetRemoteApiEndpoint() string {
+	if x != nil {
+		return x.RemoteApiEndpoint
 	}
 	return ""
 }
@@ -1185,7 +1198,7 @@ const file_fletcher_v1_peers_proto_rawDesc = "" +
 	"\x14CompletePairResponse\x12%\n" +
 	"\x04peer\x18\x01 \x01(\v2\x11.fletcher.v1.PeerR\x04peer\x12\x1b\n" +
 	"\tapi_token\x18\x02 \x01(\tR\bapiToken\x12!\n" +
-	"\fapi_endpoint\x18\x03 \x01(\tR\vapiEndpoint\"\xf5\x01\n" +
+	"\fapi_endpoint\x18\x03 \x01(\tR\vapiEndpoint\"\xa5\x02\n" +
 	"\x10PairPeerResponse\x12%\n" +
 	"\x04peer\x18\x01 \x01(\v2\x11.fletcher.v1.PeerR\x04peer\x12#\n" +
 	"\rclient_config\x18\x02 \x01(\tR\fclientConfig\x12\x1f\n" +
@@ -1194,7 +1207,8 @@ const file_fletcher_v1_peers_proto_rawDesc = "" +
 	"\aaddress\x18\x04 \x01(\tR\aaddress\x12\x1a\n" +
 	"\bendpoint\x18\x05 \x01(\tR\bendpoint\x12\x1b\n" +
 	"\tapi_token\x18\x06 \x01(\tR\bapiToken\x12!\n" +
-	"\fapi_endpoint\x18\a \x01(\tR\vapiEndpoint\"P\n" +
+	"\fapi_endpoint\x18\a \x01(\tR\vapiEndpoint\x12.\n" +
+	"\x13remote_api_endpoint\x18\b \x01(\tR\x11remoteApiEndpoint\"P\n" +
 	"\x13ServerConfigRequest\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x1f\n" +
 	"\vlisten_port\x18\x02 \x01(\x05R\n" +

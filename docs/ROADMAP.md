@@ -159,7 +159,7 @@ and documented in code; one (settings) fell through the cracks.
     bounded retry now that the common case is handled.
 
 - **Mode B / BYO-VPN transport for the iOS app (phase 9). Design sketched
-  2026-06-10; daemon listener built, provisioning + iOS pending.**
+  2026-06-10; daemon side built (listener + provisioning), iOS pending.**
   Resolves three open items above at once - the Tailscale-coexistence question
   (iOS allows one active VPN tunnel, so the app's embedded WireGuard tunnel
   cannot run alongside Tailscale), the CGNAT / no-cooperating-router boundary,
@@ -174,14 +174,16 @@ and documented in code; one (settings) fell through the cracks.
     LAN. Default stays tunnel-only - Mode A is unchanged. `remoteAPIListenActor`
     retries the bind indefinitely (the VPN can come up after the daemon) and is
     independent of the Fletcher tunnel, so it serves even when no tunnel exists.
-  - **App provisioning (decision: reuse the login blob). Partly there.** The
-    `{remote, token}` login blob already exists (`encodeLoginBlob`, consumed by
-    `fletcher login` / `--remote --token`), so an already-paired peer can use
-    Mode B today by pointing it at the VPN address. No new pairing protocol and
-    no cert pinning - plain `http` over the VPN's own encryption, the same trust
-    model as today's over-the-tunnel calls. **Remaining:** a command that emits
-    a Mode-B `{remote, token}` QR with the `--remote-api-listen` address
-    pre-filled, so the operator does not hand-edit the remote.
+  - **App provisioning (decision: reuse the login blob). DONE.**
+    `fletcher peer pair <name> --byo-vpn` mints a peer + token and renders the
+    existing `{remote, token}` login blob (and a QR) with the daemon's
+    `remote_api_listen` address pre-filled (surfaced via the new
+    `PairPeerResponse.remote_api_endpoint`). No new pairing protocol and no cert
+    pinning - plain `http` over the VPN's own encryption, the same trust model as
+    today's over-the-tunnel calls. The blob is decode-compatible with
+    `fletcher login`, and mutually exclusive with the versioned WireGuard pair
+    blob, so the iOS scanner can try both unambiguously. `remote_api_listen` is
+    also a settings key.
   - **Mode selection (decision: explicit at setup).** The user picks "set up
     Fletcher's tunnel" (Mode A, WireGuard pairing QR) or "I already reach my box
     over a VPN" (Mode B, scan the `{remote, token}` QR). One box, one mode;
