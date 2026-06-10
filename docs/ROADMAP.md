@@ -125,15 +125,20 @@ and documented in code; one (settings) fell through the cracks.
   Still a follow-up; NAT-PMP covers the routers seen so far.
 - **Same-LAN / hairpin (phase 9).** When a client is on the same LAN as the
   box, dialing the public endpoint needs router hairpinning, which many routers
-  lack. Planned fix: advertise the box's LAN IP (with a cert SAN that covers
-  it) and have the client prefer it when local. Pending.
+  lack. Planned fix for Mode A: advertise the box's LAN IP (with a cert SAN that
+  covers it) and have the client prefer it when local. Pending for Mode A;
+  **sidestepped entirely in Mode B**, where Tailscale connects same-LAN peers
+  directly without the public endpoint or hairpinning.
 - **CGNAT / no-cooperating-router (open question, on-thesis boundary).** When
   the ISP uses CGNAT or the router has UPnP+NAT-PMP+PCP all disabled, there is
   no public port to open and automatic mapping cannot help. The only zero-step
   fix is a relay, which DESIGN.md keeps off-thesis ("cannot be fixed without
   hosting a relay"). The on-thesis option is leaning on a user-provided relay
-  (e.g. the operator's own Tailscale/Headscale) as an opt-in transport - a
-  deliberate product decision, not yet made.
+  (e.g. the operator's own Tailscale/Headscale) as an opt-in transport.
+  **Now available via Mode B** (see the Mode B entry above): the operator runs
+  Tailscale, the daemon exposes its API on the tailnet (`--remote-api-listen`),
+  and the iOS app / CLI reach it over the user's own tailnet - whose relays
+  punch through CGNAT - with nothing Fletcher-hosted.
 - **Boot-time endpoint resilience (phase 9). Found on hardware 2026-06-10.
   Bounded retry DONE; late-WAN recovery still open.**
   The daemon resolves its public endpoint (and brings up the WireGuard tunnel +
@@ -158,8 +163,9 @@ and documented in code; one (settings) fell through the cracks.
     loop is the natural place to drive re-derivation. Lower priority than the
     bounded retry now that the common case is handled.
 
-- **Mode B / BYO-VPN transport for the iOS app (phase 9). Design sketched
-  2026-06-10; daemon side built (listener + provisioning), iOS pending.**
+- **Mode B / BYO-VPN transport for the iOS app (phase 9). DONE 2026-06-10
+  (daemon listener + provisioning; iOS optional-tunnel transport shipped in
+  fletcher-ios deb3c97).**
   Resolves three open items above at once - the Tailscale-coexistence question
   (iOS allows one active VPN tunnel, so the app's embedded WireGuard tunnel
   cannot run alongside Tailscale), the CGNAT / no-cooperating-router boundary,
