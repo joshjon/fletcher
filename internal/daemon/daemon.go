@@ -34,6 +34,7 @@ import (
 	"github.com/joshjon/fletcher/internal/job"
 	fletchermcp "github.com/joshjon/fletcher/internal/mcp"
 	"github.com/joshjon/fletcher/internal/network/pairingtls"
+	"github.com/joshjon/fletcher/internal/network/portmap"
 	"github.com/joshjon/fletcher/internal/network/wireguard"
 	"github.com/joshjon/fletcher/internal/peer"
 	"github.com/joshjon/fletcher/internal/runtime"
@@ -274,6 +275,7 @@ type services struct {
 	supervisor      *job.Supervisor
 	sessions        *session.Manager
 	portBroker      *session.Broker
+	portMapper      *portmap.Mapper
 	publicWeb       *publicWebServers
 	connectSrv      *http.Server
 	gatewaySrv      *http.Server
@@ -386,7 +388,12 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	})
 	wgKeyProvider := newServerKeyProvider(secretsStore)
 
-	netSetup, err := bringUpNetwork(ctx, cfg, logger, peerSvc, wgKeyProvider)
+	// One Mapper owns every router port-forward: it installs them via
+	// NAT-PMP/UPnP, refreshes them so they never lapse, and releases them on
+	// shutdown so Fletcher leaves no stale forwards behind.
+	portMapper := portmap.NewMapper(logger)
+
+	netSetup, err := bringUpNetwork(ctx, cfg, logger, peerSvc, wgKeyProvider, portMapper)
 	if err != nil {
 		return nil, fmt.Errorf("bring up network: %w", err)
 	}
@@ -485,7 +492,7 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	// the VM over vsock. Opt-in (the new public attack surface), and best-effort:
 	// if 443/80 cannot be bound (no CAP_NET_BIND_SERVICE) the daemon still runs,
 	// just without public serving.
-	publicWeb := buildPublicWeb(ctx, cfg, sessionMgr, logger)
+	publicWeb := buildPublicWeb(ctx, cfg, sessionMgr, portMapper, logger)
 
 	connectDeps := connectDeps{
 		jobs:             job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg), defaultGateway(cfg)),
@@ -518,13 +525,14 @@ func buildServices(ctx context.Context, cfg Config, queries *sqliteq.Queries, lo
 	// (the daemon only learns the client key at CompletePair), so it is
 	// exposed here over TLS with a pinned self-signed cert, gated by the
 	// one-time pairing code. Only meaningful when the tunnel is up.
-	pairingSrv, pairingLn, pairingAddr := buildPairingListener(ctx, cfg, netSetup, peerSvc, connectDeps, logger)
+	pairingSrv, pairingLn, pairingAddr := buildPairingListener(ctx, cfg, netSetup, peerSvc, connectDeps, portMapper, logger)
 
 	return &services{
 		cfg:             cfg,
 		supervisor:      supervisor,
 		sessions:        sessionMgr,
 		portBroker:      portBroker,
+		portMapper:      portMapper,
 		publicWeb:       publicWeb,
 		connectSrv:      connectSrv,
 		gatewaySrv:      newGatewayHTTPServer(gw),
@@ -651,6 +659,9 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	if s.tunnel != nil {
 		g.Add(tunnelActor(ctx, logger, s.tunnel))
 	}
+	if s.portMapper != nil && !s.cfg.DisableUPnP {
+		g.Add(portMapperActor(ctx, s.portMapper))
+	}
 	if s.portBroker != nil {
 		g.Add(portBrokerActor(s.portBroker))
 	}
@@ -729,7 +740,7 @@ type publicWebServers struct {
 // Returns nil when disabled, or when 443/80 cannot be bound (logged, non-fatal:
 // the daemon still serves everything else) - the usual cause is a missing
 // CAP_NET_BIND_SERVICE.
-func buildPublicWeb(ctx context.Context, cfg Config, mgr *session.Manager, logger *slog.Logger) *publicWebServers {
+func buildPublicWeb(ctx context.Context, cfg Config, mgr *session.Manager, mapper *portmap.Mapper, logger *slog.Logger) *publicWebServers {
 	if !cfg.PublicWeb {
 		return nil
 	}
@@ -753,8 +764,8 @@ func buildPublicWeb(ctx context.Context, cfg Config, mgr *session.Manager, logge
 	})
 	// Forward the public ports on the router so the box is reachable from the
 	// internet; best-effort (the operator may have forwarded them manually).
-	tryUPnPTCP(ctx, logger, publicHTTPSPort, "fletcher public https")
-	tryUPnPTCP(ctx, logger, publicHTTPPort, "fletcher public http")
+	mapTCPPort(ctx, mapper, publicHTTPSPort, "Fletcher (public web HTTPS)")
+	mapTCPPort(ctx, mapper, publicHTTPPort, "Fletcher (public web HTTP)")
 	logger.Info("public web serving enabled",
 		slog.String("https", publicHTTPSAddr),
 		slog.String("http", publicHTTPAddr),
@@ -783,6 +794,19 @@ func tlsServeActor(logger *slog.Logger, role string, srv *http.Server, ln net.Li
 		_ = srv.Shutdown(shutdownCtx)
 	}
 	return execute, interrupt
+}
+
+// portMapperActor refreshes the router port-forwards on a timer until the
+// run group shuts down, then releases them so Fletcher does not leave stale
+// forwards on the router (addressing the "what if I forget to remove these"
+// worry: Fletcher cleans up its own mappings on exit).
+func portMapperActor(ctx context.Context, mapper *portmap.Mapper) (func() error, func(error)) {
+	rctx, cancel := context.WithCancel(ctx)
+	return func() error {
+			return mapper.Run(rctx)
+		}, func(error) {
+			cancel()
+		}
 }
 
 // tunnelActor keeps the WireGuard interface alive until the run group
@@ -955,6 +979,7 @@ func buildPairingListener(
 	netSetup *networkSetup,
 	peerSvc *peer.Service,
 	deps connectDeps,
+	mapper *portmap.Mapper,
 	logger *slog.Logger,
 ) (*http.Server, net.Listener, string) {
 	if netSetup.Tunnel == nil {
@@ -986,7 +1011,9 @@ func buildPairingListener(
 	// is also the rotation hook: a later SetPublicEndpoint re-issues the
 	// cert for the new host through it.
 	peerSvc.SetPairingCert(port, mgr)
-	tryUPnPTCP(ctx, logger, port, "fletcher pairing")
+	if !cfg.DisableUPnP {
+		mapTCPPort(ctx, mapper, port, "Fletcher (iOS pairing)")
+	}
 	logger.Info("pairing listener ready",
 		slog.String("addr", addr),
 		slog.String("host", host),

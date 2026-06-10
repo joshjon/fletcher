@@ -57,24 +57,73 @@ type Result struct {
 	LeaseDuration time.Duration
 }
 
-// Map attempts to install a port mapping. The returned error is
-// informational - callers should treat absence of NAT punch-through as
-// "operator must configure manually", not as a fatal startup failure.
+// defaultMapLifetime is requested when a Request leaves LeaseDuration
+// unset. It is deliberately longer than the refresh interval so a mapping
+// outlives a missed refresh, but finite so an abandoned mapping (daemon
+// killed without releasing) eventually clears on the router.
+const defaultMapLifetime = 2 * time.Hour
+
+// Map attempts to install a port mapping, trying NAT-PMP first and falling
+// back to UPnP IGD. NAT-PMP is tried first because it is a single UDP
+// round-trip to the gateway and some routers honor it for TCP where their
+// UPnP silently does not. The returned error is informational - callers
+// should treat absence of NAT punch-through as "operator must configure
+// manually", not as a fatal startup failure.
 func Map(ctx context.Context, req Request) (Result, error) {
 	if req.Protocol != ProtocolTCP && req.Protocol != ProtocolUDP {
 		return Result{}, fmt.Errorf("invalid protocol %q", req.Protocol)
 	}
-	if req.ExternalPort == 0 {
-		req.ExternalPort = req.InternalPort
-	}
 	if req.InternalPort == 0 {
 		return Result{}, errors.New("InternalPort is required")
 	}
+	if req.ExternalPort == 0 {
+		req.ExternalPort = req.InternalPort
+	}
+	if req.LeaseDuration == 0 {
+		req.LeaseDuration = defaultMapLifetime
+	}
+
+	if gw, err := defaultGatewayV4(); err == nil {
+		if res, err := mapNATPMP(ctx, req, gw); err == nil {
+			return res, nil
+		}
+	}
+
 	internalIP, err := defaultLANIP(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("detect LAN ip: %w", err)
 	}
 	return mapUPnP(ctx, req, internalIP)
+}
+
+// Unmap removes a previously installed mapping, trying NAT-PMP then UPnP.
+// Best-effort: used on shutdown so Fletcher does not leave stale forwards
+// on the router. Errors are returned for logging but are not actionable.
+func Unmap(ctx context.Context, req Request) error {
+	if req.ExternalPort == 0 {
+		req.ExternalPort = req.InternalPort
+	}
+	if gw, err := defaultGatewayV4(); err == nil {
+		if err := unmapNATPMP(ctx, req, gw); err == nil {
+			return nil
+		}
+	}
+	return unmapUPnP(ctx, req)
+}
+
+// unmapUPnP deletes a UPnP IGD mapping by external port + protocol.
+func unmapUPnP(ctx context.Context, req Request) error {
+	if clients2, _, err := internetgateway2.NewWANIPConnection2ClientsCtx(ctx); err == nil && len(clients2) > 0 {
+		return clients2[0].DeletePortMappingCtx(ctx, "", req.ExternalPort, string(req.Protocol))
+	}
+	clients1, _, err := internetgateway2.NewWANIPConnection1ClientsCtx(ctx)
+	if err != nil {
+		return fmt.Errorf("upnp discover: %w", err)
+	}
+	if len(clients1) == 0 {
+		return errors.New("no UPnP IGD found on the LAN")
+	}
+	return clients1[0].DeletePortMappingCtx(ctx, "", req.ExternalPort, string(req.Protocol))
 }
 
 func mapUPnP(ctx context.Context, req Request, internalIP string) (Result, error) {

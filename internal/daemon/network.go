@@ -34,13 +34,6 @@ func pairingPort(cfg Config) int {
 	return defaultPairingPort
 }
 
-// upnpLeaseDuration caps how long the router holds the port-forward
-// without a refresh. Long enough that a typical homelab daemon doesn't
-// need to re-up frequently; short enough that abandoned forwards
-// eventually clear. The daemon could re-request on a timer as a future
-// polish.
-const upnpLeaseDuration = 1 * time.Hour
-
 // networkSetup is the result of bringing up the daemon's WireGuard
 // tunnel plus the (optional) UPnP port-forward at boot. The fields are
 // returned so the run group can tear them down on shutdown and so the
@@ -71,6 +64,7 @@ func bringUpNetwork(
 	logger *slog.Logger,
 	peers *peer.Service,
 	serverKey api_ServerKeyLoader,
+	mapper *portmap.Mapper,
 ) (*networkSetup, error) {
 	listenPort := cfg.WireGuardListenPort
 	if listenPort == 0 {
@@ -80,12 +74,20 @@ func bringUpNetwork(
 	setup := &networkSetup{EffectivePublicEndpoint: cfg.PublicEndpoint}
 
 	if !cfg.DisableUPnP {
-		setup.UPnPResult = tryUPnP(ctx, logger, listenPort)
-		if cfg.PublicEndpoint == "" && setup.UPnPResult != nil {
-			derived := publicEndpointFromUPnP(setup.UPnPResult)
-			if derived != "" {
-				setup.EffectivePublicEndpoint = derived
-				logger.Info("public endpoint derived from upnp", slog.String("endpoint", derived))
+		upCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		res, err := mapper.Ensure(upCtx, portmap.Request{
+			Protocol:     portmap.ProtocolUDP,
+			InternalPort: uint16(listenPort),
+			Description:  "Fletcher (WireGuard tunnel)",
+		})
+		cancel()
+		if err == nil {
+			setup.UPnPResult = &res
+			if cfg.PublicEndpoint == "" {
+				if derived := publicEndpointFromUPnP(&res); derived != "" {
+					setup.EffectivePublicEndpoint = derived
+					logger.Info("public endpoint derived from router port-mapping", slog.String("endpoint", derived))
+				}
 			}
 		}
 	}
@@ -141,56 +143,21 @@ func bringUpNetwork(
 	return setup, nil
 }
 
-// tryUPnP attempts to install a UDP port-forward for the WireGuard
-// listener. Failures are logged but not fatal - the operator may have
-// configured manual port forwarding instead.
-func tryUPnP(ctx context.Context, logger *slog.Logger, listenPort int) *portmap.Result {
-	upCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	res, err := portmap.Map(upCtx, portmap.Request{
-		InternalPort:  uint16(listenPort), //nolint:gosec // listenPort is bounded to 1..65535 by config
-		ExternalPort:  uint16(listenPort), //nolint:gosec // same
-		Protocol:      portmap.ProtocolUDP,
-		LeaseDuration: upnpLeaseDuration,
-		Description:   "fletcher daemon",
-	})
-	if err != nil {
-		logger.Warn("upnp port-forward unavailable; you may need to forward the WireGuard port manually",
-			slog.Int("port", listenPort),
-			slog.String("err", err.Error()),
-		)
-		return nil
-	}
-	logger.Info("upnp port-forward installed",
-		slog.String("method", res.Method),
-		slog.String("external_ip", res.ExternalIP),
-		slog.Int("external_port", int(res.ExternalPort)),
-		slog.Duration("lease", res.LeaseDuration),
-	)
-	return &res
-}
-
-// tryUPnPTCP installs a TCP port-forward (same external/internal port) for the
-// public web listeners. Best-effort: failures are logged, not fatal - the
-// operator may have forwarded the port manually.
-func tryUPnPTCP(ctx context.Context, logger *slog.Logger, port int, desc string) {
-	upCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	res, err := portmap.Map(upCtx, portmap.Request{
-		InternalPort:  uint16(port), //nolint:gosec // port is a fixed 80/443
-		ExternalPort:  uint16(port), //nolint:gosec // same
-		Protocol:      portmap.ProtocolTCP,
-		LeaseDuration: upnpLeaseDuration,
-		Description:   desc,
-	})
-	if err != nil {
-		logger.Warn("upnp tcp port-forward unavailable; forward it manually if the box is not the network edge",
-			slog.Int("port", port), slog.String("err", err.Error()))
+// mapTCPPort installs a TCP port-forward through the shared port Mapper
+// (which keeps it refreshed and releases it on shutdown). Best-effort:
+// failures are logged by the Mapper, not fatal - the operator may have
+// forwarded the port manually, or the box may not be the network edge.
+func mapTCPPort(ctx context.Context, mapper *portmap.Mapper, port int, desc string) {
+	if mapper == nil {
 		return
 	}
-	logger.Info("upnp tcp port-forward installed",
-		slog.String("method", res.Method), slog.Int("external_port", int(res.ExternalPort)))
+	upCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, _ = mapper.Ensure(upCtx, portmap.Request{
+		Protocol:     portmap.ProtocolTCP,
+		InternalPort: uint16(port), //nolint:gosec // port is a fixed/bounded value
+		Description:  desc,
+	})
 }
 
 // publicEndpointFromUPnP returns host:port form for the UPnP result, or

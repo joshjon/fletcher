@@ -72,7 +72,7 @@ snapshot-root setup so the few-GB space requirement is provisioned, not manual.
 | 6 | MCP server | PARTIAL | 3 demo tools; egress validation permissive |
 | 7 | Approvals | DONE | APNs push deferred (polling `Wait` instead) |
 | 8 | Real Linux runtime | DONE | runc (rootless) + btrfs (M2a) and Firecracker microVMs + ext4 (M5), both real and runnable, behind the runtime/snapshot interfaces |
-| 9 | Networking | PARTIAL | UPnP only (no NAT-PMP/PCP); **no DDNS** |
+| 9 | Networking | PARTIAL | UPnP + NAT-PMP, with lease refresh + release-on-shutdown (PCP pending); **no DDNS**; same-LAN/hairpin pending |
 | 10 | v0.1.0 polish | PARTIAL | Release tooling ready; **no tag cut yet** |
 | 11 | Base image (`fletcher-base`) | DONE | pi-extension is a skeleton (see phase 14) |
 | 12 | Trusted-credential mode | DONE | Bind-mounts blocked by `ProtectHome` until M2 |
@@ -114,9 +114,26 @@ and documented in code; one (settings) fell through the cracks.
   complete fallback; push needs Apple plumbing out of band.
 
 
-- **NAT-PMP / PCP (phase 9).** Only UPnP IGD is implemented
-  (`internal/network/portmap`); the `Method` field is shaped for the others.
-  *Why cut:* UPnP covers the common home router; the rest are follow-ups.
+- **NAT-PMP (phase 9). DONE.** `internal/network/portmap` now tries NAT-PMP
+  (gateway from `/proc/net/route`, RFC 6886) before UPnP, behind a `Mapper`
+  that refreshes every mapping on a timer and releases them on shutdown. This
+  fixed a real router that silently dropped UPnP *TCP* mappings (so the pairing
+  port never forwarded) while honoring NAT-PMP, and the missing refresh that
+  let the WireGuard UDP forward lapse after its 1-hour lease. `doctor` now
+  probes both UDP and TCP and reports the method.
+- **PCP (phase 9).** RFC 6887, the NAT-PMP successor on the same gateway port.
+  Still a follow-up; NAT-PMP covers the routers seen so far.
+- **Same-LAN / hairpin (phase 9).** When a client is on the same LAN as the
+  box, dialing the public endpoint needs router hairpinning, which many routers
+  lack. Planned fix: advertise the box's LAN IP (with a cert SAN that covers
+  it) and have the client prefer it when local. Pending.
+- **CGNAT / no-cooperating-router (open question, on-thesis boundary).** When
+  the ISP uses CGNAT or the router has UPnP+NAT-PMP+PCP all disabled, there is
+  no public port to open and automatic mapping cannot help. The only zero-step
+  fix is a relay, which DESIGN.md keeps off-thesis ("cannot be fixed without
+  hosting a relay"). The on-thesis option is leaning on a user-provided relay
+  (e.g. the operator's own Tailscale/Headscale) as an opt-in transport - a
+  deliberate product decision, not yet made.
 
 - **pi-extension (phases 11/14).** `images/fletcher-base/pi-extension/index.ts`
   fetches the catalog on startup but `registerProvider()` is a TODO pending a
@@ -1203,7 +1220,8 @@ Listed so they are visible, not lost. Items that became milestones are above.
 **Networking**
 
 - **DDNS** - for operators on a dynamic public IP (phase 9 gap).
-- **NAT-PMP / PCP** - port mapping for routers that refuse UPnP (phase 9).
+- **PCP** - the NAT-PMP successor (RFC 6887); NAT-PMP landed, PCP is the
+  remaining port-mapping protocol for routers that speak only it (phase 9).
 - **Per-peer handshake/transfer visibility** - surface wireguard-go's in-process
   stats (e.g. `fletcher peer status`) since the userspace tunnel is invisible to
   `wg show`.
