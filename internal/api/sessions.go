@@ -34,6 +34,13 @@ type SessionsBackend interface {
 	Logs(ctx context.Context, ref string, tailLines int) (string, error)
 }
 
+// DeployInfoResolver returns the image-derived deploy detail for a run_app
+// session's image (its effective entrypoint and lowest EXPOSE port), or ok
+// false when the image has no recorded template metadata.
+type DeployInfoResolver interface {
+	DeployInfo(image string) (entrypoint []string, exposedPort int, ok bool)
+}
+
 // SessionsService implements fletcherv1connect.SessionServiceHandler.
 type SessionsService struct {
 	fletcherv1connect.UnimplementedSessionServiceHandler
@@ -42,12 +49,15 @@ type SessionsService struct {
 	// endpoint), surfaced so the client can tell the operator the exact A record
 	// to create for a --public port. Empty when no public endpoint is known.
 	publicIP string
+	// deploy resolves image-derived deploy detail for GetSession; nil disables it.
+	deploy DeployInfoResolver
 }
 
 // NewSessionsService wires a SessionsService to a backend. publicIP is the
-// daemon's public IP for --public DNS guidance ("" if unknown).
-func NewSessionsService(backend SessionsBackend, publicIP string) *SessionsService {
-	return &SessionsService{backend: backend, publicIP: publicIP}
+// daemon's public IP for --public DNS guidance ("" if unknown); deploy resolves
+// run_app deploy detail for GetSession (nil disables it).
+func NewSessionsService(backend SessionsBackend, publicIP string, deploy DeployInfoResolver) *SessionsService {
+	return &SessionsService{backend: backend, publicIP: publicIP, deploy: deploy}
 }
 
 // CreateSession provisions a session and boots its VM. Categorised errors
@@ -66,7 +76,22 @@ func (s *SessionsService) GetSession(ctx context.Context, req *connect.Request[f
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&fletcherv1.GetSessionResponse{Session: sessionToProto(sess)}), nil
+	p := sessionToProto(sess)
+	// Deploy detail is image-derived and only meaningful for a run_app session;
+	// resolve it here (GetSession only) so the list stays cheap.
+	if sess.RunApp && s.deploy != nil {
+		if entrypoint, port, ok := s.deploy.DeployInfo(sess.Image); ok {
+			var exposed uint32
+			if port > 0 && port <= 65535 {
+				exposed = uint32(port)
+			}
+			p.Deploy = &fletcherv1.DeployInfo{
+				Entrypoint:  entrypoint,
+				ExposedPort: exposed,
+			}
+		}
+	}
+	return connect.NewResponse(&fletcherv1.GetSessionResponse{Session: p}), nil
 }
 
 // ListSessions returns all sessions, newest first.

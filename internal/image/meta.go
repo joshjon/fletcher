@@ -30,6 +30,13 @@ type TemplateMeta struct {
 	Format string `json:"format"`
 	// ImportedAt is when the template was imported (Unix seconds).
 	ImportedAt int64 `json:"imported_at"`
+	// Entrypoint is the image's effective launch command (ENTRYPOINT + CMD),
+	// recorded so a deploy (run_app) session can show what it runs. Empty for
+	// templates imported before this was captured.
+	Entrypoint []string `json:"entrypoint,omitempty"`
+	// ExposedPort is the image's lowest EXPOSE port (0 when the image declares
+	// none, or for templates imported before this was captured).
+	ExposedPort int `json:"exposed_port,omitempty"`
 }
 
 // MetaPath is the sidecar metadata path for a template.

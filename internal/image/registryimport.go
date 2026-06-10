@@ -131,13 +131,21 @@ func ImportRegistry(ctx context.Context, opts ImportOptions) (ImportResult, erro
 		return ImportResult{}, err
 	}
 
-	meta := TemplateMeta{Source: opts.Ref, Digest: digest.String(), Format: "ext4", ImportedAt: time.Now().Unix()}
+	exposedPort := lowestExposedPort(cfg.Config.ExposedPorts)
+	meta := TemplateMeta{
+		Source:      opts.Ref,
+		Digest:      digest.String(),
+		Format:      "ext4",
+		ImportedAt:  time.Now().Unix(),
+		Entrypoint:  spec.Argv(),
+		ExposedPort: exposedPort,
+	}
 	if err := WriteMeta(opts.ImagesDir, opts.Name, meta); err != nil {
 		// Non-fatal: the template is usable; only the update-check metadata is lost.
 		fmt.Fprintf(os.Stderr, "warning: could not record image metadata: %v\n", err)
 	}
 
-	return ImportResult{Name: opts.Name, Digest: digest.String(), ExposedPort: lowestExposedPort(cfg.Config.ExposedPorts)}, nil
+	return ImportResult{Name: opts.Name, Digest: digest.String(), ExposedPort: exposedPort}, nil
 }
 
 // extractRootfs flattens the image's layers and writes the rootfs into dir via

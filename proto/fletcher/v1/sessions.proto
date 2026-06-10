@@ -82,6 +82,21 @@ message Session {
   // run_app is whether the session runs the image's own app (its captured
   // entrypoint) on boot, rather than coming up as a bare environment. M9.
   bool run_app = 11;
+  // deploy carries the image-derived detail for a run_app (deploy) session.
+  // Populated only by GetSession (not ListSessions), and only when run_app is
+  // true and the image's template metadata is available.
+  DeployInfo deploy = 12;
+}
+
+// DeployInfo is the image-derived detail shown on a deploy's detail screen.
+message DeployInfo {
+  // entrypoint is the image's effective launch command (ENTRYPOINT + CMD).
+  repeated string entrypoint = 1;
+  // exposed_port is the image's lowest EXPOSE port (0 when it declares none).
+  uint32 exposed_port = 2;
+  // restart_count is how many times the in-guest supervisor has restarted the
+  // app. Reported once the guest exposes it; 0 until then.
+  uint32 restart_count = 3;
 }
 
 message CreateSessionRequest {

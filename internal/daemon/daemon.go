@@ -921,7 +921,7 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	mux.Handle(jobsPath, jobsHandler)
 
 	sessionsPath, sessionsHandler := fletcherv1connect.NewSessionServiceHandler(
-		api.NewSessionsService(deps.sessions, deps.publicIP), interceptors,
+		api.NewSessionsService(deps.sessions, deps.publicIP, imageDeployResolver{imagesDir: deps.imagesDir}), interceptors,
 	)
 	mux.Handle(sessionsPath, sessionsHandler)
 
@@ -1238,6 +1238,18 @@ func kvmUsable() bool {
 	}
 	_ = f.Close()
 	return true
+}
+
+// imageDeployResolver resolves a run_app session's deploy detail (entrypoint,
+// EXPOSE port) from its image template's sidecar metadata.
+type imageDeployResolver struct{ imagesDir string }
+
+func (r imageDeployResolver) DeployInfo(imageName string) (entrypoint []string, exposedPort int, ok bool) {
+	meta, found, err := image.ReadMeta(r.imagesDir, imageName)
+	if err != nil || !found {
+		return nil, 0, false
+	}
+	return meta.Entrypoint, meta.ExposedPort, true
 }
 
 // settingsReloader live-applies the reloadable settings to the running daemon
