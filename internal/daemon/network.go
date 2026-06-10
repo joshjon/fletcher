@@ -74,21 +74,22 @@ func bringUpNetwork(
 	setup := &networkSetup{EffectivePublicEndpoint: cfg.PublicEndpoint}
 
 	if !cfg.DisableUPnP {
-		upCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		res, err := mapper.Ensure(upCtx, portmap.Request{
+		req := portmap.Request{
 			Protocol:     portmap.ProtocolUDP,
 			InternalPort: uint16(listenPort),
 			Description:  "Fletcher (WireGuard tunnel)",
-		})
-		cancel()
-		if err == nil {
-			setup.UPnPResult = &res
-			if cfg.PublicEndpoint == "" {
-				if derived := publicEndpointFromUPnP(&res); derived != "" {
-					setup.EffectivePublicEndpoint = derived
-					logger.Info("public endpoint derived from router port-mapping", slog.String("endpoint", derived))
-				}
-			}
+		}
+		// Retry only when the derived endpoint is the sole source of one and a
+		// tunnel will actually use it (Linux). Operator-configured and dev
+		// hosts get a single attempt, so they never block boot on the router.
+		retry := cfg.PublicEndpoint == "" && runtime.GOOS == "linux"
+		res, derived := deriveEndpoint(ctx, logger, mapper.Ensure, req, retry)
+		if res != nil {
+			setup.UPnPResult = res
+		}
+		if cfg.PublicEndpoint == "" && derived != "" {
+			setup.EffectivePublicEndpoint = derived
+			logger.Info("public endpoint derived from router port-mapping", slog.String("endpoint", derived))
 		}
 	}
 
@@ -141,6 +142,84 @@ func bringUpNetwork(
 	}
 	setup.Tunnel = tunnel
 	return setup, nil
+}
+
+// Retry timing for deriveEndpoint; package vars so tests can shrink them.
+var (
+	deriveRetryWindow  = 60 * time.Second
+	deriveFirstBackoff = 2 * time.Second
+	deriveMaxBackoff   = 15 * time.Second
+)
+
+// deriveEndpoint opens the WireGuard UDP port on the router via ensure and
+// returns the mapping result plus the public endpoint derived from it
+// (host:port), or an empty string when the router reported no external
+// address.
+//
+// When retry is true the derived value is load-bearing: the tunnel and pairing
+// listener are wired up once, at boot, and only if we have an endpoint. On a
+// fresh boot the WAN link can lag network-online.target by a few seconds -
+// longer after a power-cut that reboots the router too - and giving up on the
+// first miss left the daemon tunnel-less until a manual restart. So we retry
+// for a bounded window. When retry is false (operator endpoint set, or a
+// non-Linux dev host where no tunnel comes up anyway) we try once and let the
+// port Mapper's refresh loop keep the mapping current after that.
+func deriveEndpoint(
+	ctx context.Context,
+	logger *slog.Logger,
+	ensure func(context.Context, portmap.Request) (portmap.Result, error),
+	req portmap.Request,
+	retry bool,
+) (*portmap.Result, string) {
+	deadline := time.Now().Add(deriveRetryWindow)
+	backoff := deriveFirstBackoff
+
+	for {
+		attemptCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		res, err := ensure(attemptCtx, req)
+		cancel()
+
+		if err == nil {
+			if derived := publicEndpointFromUPnP(&res); derived != "" {
+				return &res, derived
+			}
+			// Mapping is up but the router gave no external address. Without
+			// retry that is as good as it gets; with retry, keep waiting in
+			// case the WAN address has not settled yet.
+			if !retry {
+				return &res, ""
+			}
+		} else if !retry {
+			return nil, ""
+		}
+
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			if err == nil {
+				return &res, ""
+			}
+			return nil, ""
+		}
+
+		if err != nil {
+			logger.Info("router not ready for port-mapping yet; retrying before bringing up the tunnel",
+				slog.Duration("retry_in", backoff),
+				slog.String("err", err.Error()),
+			)
+		} else {
+			logger.Info("router mapped the port but reported no external address yet; retrying",
+				slog.Duration("retry_in", backoff),
+			)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ""
+		case <-time.After(backoff):
+		}
+		if backoff *= 2; backoff > deriveMaxBackoff {
+			backoff = deriveMaxBackoff
+		}
+	}
 }
 
 // mapTCPPort installs a TCP port-forward through the shared port Mapper

@@ -134,18 +134,29 @@ and documented in code; one (settings) fell through the cracks.
   hosting a relay"). The on-thesis option is leaning on a user-provided relay
   (e.g. the operator's own Tailscale/Headscale) as an opt-in transport - a
   deliberate product decision, not yet made.
-- **Boot-time endpoint resilience (phase 9). Found on hardware 2026-06-10.**
+- **Boot-time endpoint resilience (phase 9). Found on hardware 2026-06-10.
+  Bounded retry DONE; late-WAN recovery still open.**
   The daemon resolves its public endpoint (and brings up the WireGuard tunnel +
   pairing listener) once at startup in `bringUpNetwork`. After a host reboot the
   daemon can start before the WAN/router is reachable, so NAT-PMP/UPnP discovery
   fails, the endpoint is empty, and the tunnel + pairing listener never come up
-  until a manual `systemctl restart fletcher`. Two fixes: (a) cheap insurance -
-  add `Wants=network-online.target` / `After=network-online.target` to the
-  systemd unit; (b) the real fix - when no public endpoint is resolved at boot,
-  keep retrying derivation (and bring the tunnel up) once the network appears.
-  The `portmap.Mapper` already runs a refresh loop that could drive (b); the
-  endpoint derivation and tunnel bring-up just need to hang off it rather than
-  being one-shot.
+  until a manual `systemctl restart fletcher`.
+  - (a) `Wants=network-online.target` / `After=network-online.target` was
+    already in `init/fletcher.service`. It guarantees the local link, not WAN
+    reachability, so it is necessary but not sufficient - the race is the few
+    seconds (longer after a power-cut that reboots the router too) between the
+    link coming up and NAT-PMP/UPnP answering.
+  - (b) DONE: `deriveEndpoint` now retries derivation for a bounded window
+    (~60s, exponential backoff) before giving up, but only when the derived
+    endpoint is load-bearing (no operator `--public-endpoint`, on Linux). This
+    covers the common reboot case where the WAN settles within a minute.
+  - **Still open:** a WAN that only comes back *after* the bounded window still
+    needs a manual restart. The full fix is an async network supervisor that can
+    bring the tunnel + remote-API + pairing listeners up at any later point
+    (today those are wired once at boot, so they cannot start post-boot without
+    restructuring `buildServices`/the run group). `portmap.Mapper`'s refresh
+    loop is the natural place to drive re-derivation. Lower priority than the
+    bounded retry now that the common case is handled.
 
 - **pi-extension (phases 11/14).** `images/fletcher-base/pi-extension/index.ts`
   fetches the catalog on startup but `registerProvider()` is a TODO pending a

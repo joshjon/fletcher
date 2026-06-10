@@ -29,6 +29,10 @@ func TestDaemonServesHealthAndShutsDownCleanly(t *testing.T) {
 		GatewayListenAddr: "127.0.0.1:0", // random free port for the test
 		MCPListenAddr:     "127.0.0.1:0",
 		AgeIdentityPath:   filepath.Join(dataDir, "age.key"),
+		// No router discovery in a health/shutdown test: skip UPnP/NAT-PMP so
+		// boot does not spend the endpoint-derivation retry window probing a
+		// gateway that is not there.
+		DisableUPnP: true,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
