@@ -31,7 +31,7 @@ func TestMapperEnsureRemembersAndRecordsMethod(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "nat-pmp", res.Method)
 	require.Equal(t, "nat-pmp", m.Method())
-	require.Len(t, m.snapshot(), 1)
+	require.Len(t, m.requests(), 1)
 }
 
 func TestMapperRemembersEvenOnFailure(t *testing.T) {
@@ -42,8 +42,30 @@ func TestMapperRemembersEvenOnFailure(t *testing.T) {
 	_, err := m.Ensure(context.Background(), Request{Protocol: ProtocolUDP, InternalPort: 51820})
 	require.Error(t, err)
 	// Remembered so a later refresh can recover once the router is reachable.
-	require.Len(t, m.snapshot(), 1)
+	require.Len(t, m.requests(), 1)
 	require.Empty(t, m.Method())
+}
+
+// TestMapperReleaseSkipsUninstalled is the regression guard for the CI
+// hang: when a mapping never installed (no router), shutdown must not try
+// to release it - releasing a nonexistent mapping does slow, pointless
+// network work that previously blocked the daemon's shutdown past its
+// deadline.
+func TestMapperReleaseSkipsUninstalled(t *testing.T) {
+	m := testMapper(t)
+	m.mapFn = func(context.Context, Request) (Result, error) {
+		return Result{}, errors.New("no router on the LAN")
+	}
+	var unmapCalls int
+	m.unmapFn = func(context.Context, Request) error {
+		unmapCalls++
+		return nil
+	}
+	_, err := m.Ensure(context.Background(), Request{Protocol: ProtocolUDP, InternalPort: 51820})
+	require.Error(t, err)
+
+	m.releaseAll()
+	require.Zero(t, unmapCalls, "a mapping that never installed must not be released")
 }
 
 func TestMapperRefreshReMapsAll(t *testing.T) {

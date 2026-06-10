@@ -113,7 +113,11 @@ func natpmpExchange(ctx context.Context, conn *net.UDPConn, body []byte, minLen 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		timeout := time.Duration(attempt+1) * time.Second
+		// RFC 6886 retransmit schedule starts at 250ms and doubles: 250ms,
+		// 500ms, 1s. A responsive gateway answers on the first try in well
+		// under 250ms; an absent one fails the whole exchange in ~1.75s
+		// instead of stalling startup or shutdown.
+		timeout := time.Duration(250*(1<<attempt)) * time.Millisecond
 		if d, ok := ctx.Deadline(); ok {
 			if remaining := time.Until(d); remaining < timeout {
 				timeout = remaining

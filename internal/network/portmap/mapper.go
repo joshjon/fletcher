@@ -15,6 +15,21 @@ import (
 // dropped the WireGuard forward: the old code mapped once and never renewed.
 const refreshInterval = 10 * time.Minute
 
+// releaseTimeout bounds how long releasing a single mapping may take on
+// shutdown. Release is best-effort - a mapping not released here expires on
+// its own - so this stays short enough that shutdown is never blocked, even
+// when the router has become unreachable.
+const releaseTimeout = 2 * time.Second
+
+// entry is one desired mapping plus whether it is currently installed (so
+// shutdown only releases forwards that actually exist - releasing a mapping
+// that never installed would do pointless, slow network work).
+type entry struct {
+	req       Request
+	installed bool
+	method    string
+}
+
 // Mapper keeps a set of port mappings alive. Callers register desired
 // mappings with Ensure; Run refreshes them on a timer until its context is
 // cancelled, then releases them so Fletcher does not leave stale forwards
@@ -27,7 +42,7 @@ type Mapper struct {
 	unmapFn func(context.Context, Request) error
 
 	mu      sync.Mutex
-	desired map[string]Request
+	desired map[string]*entry
 	method  string // last protocol that worked, for status reporting
 }
 
@@ -37,7 +52,7 @@ func NewMapper(logger *slog.Logger) *Mapper {
 		logger:  logger,
 		mapFn:   Map,
 		unmapFn: Unmap,
-		desired: make(map[string]Request),
+		desired: make(map[string]*entry),
 	}
 }
 
@@ -47,19 +62,14 @@ func mappingKey(r Request) string {
 
 // Ensure installs a mapping now and remembers it for periodic refresh and
 // for release on shutdown. The initial result/error is returned (callers
-// use the result's external IP to derive the public endpoint), but the
-// mapping is remembered even on failure so a later refresh can recover
-// (e.g. after the router reboots or UPnP/NAT-PMP becomes available).
+// use the result's external IP to derive the public endpoint); the mapping
+// is remembered even on failure so a later refresh can recover (e.g. after
+// the router reboots or UPnP/NAT-PMP becomes available), but it is only
+// marked installed - and so only released on shutdown - once a map succeeds.
 func (m *Mapper) Ensure(ctx context.Context, r Request) (Result, error) {
-	m.mu.Lock()
-	m.desired[mappingKey(r)] = r
-	m.mu.Unlock()
-
 	res, err := m.mapFn(ctx, r)
+	m.record(r, res, err)
 	if err == nil {
-		m.mu.Lock()
-		m.method = res.Method
-		m.mu.Unlock()
 		m.logger.Info("router port-forward installed",
 			slog.String("method", res.Method),
 			slog.String("proto", string(r.Protocol)),
@@ -75,6 +85,24 @@ func (m *Mapper) Ensure(ctx context.Context, r Request) (Result, error) {
 	return res, err
 }
 
+// record updates the remembered state for r after a map attempt.
+func (m *Mapper) record(r Request, res Result, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	e, ok := m.desired[mappingKey(r)]
+	if !ok {
+		e = &entry{req: r}
+		m.desired[mappingKey(r)] = e
+	}
+	if err != nil {
+		e.installed = false
+		return
+	}
+	e.installed = true
+	e.method = res.Method
+	m.method = res.Method
+}
+
 // Method reports the protocol of the last successful mapping ("nat-pmp" or
 // "upnp"), or "" if none has succeeded. Used by doctor for honest status.
 func (m *Mapper) Method() string {
@@ -83,25 +111,41 @@ func (m *Mapper) Method() string {
 	return m.method
 }
 
-func (m *Mapper) snapshot() []Request {
+// requests returns the requests to refresh (all desired).
+func (m *Mapper) requests() []Request {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]Request, 0, len(m.desired))
-	for _, r := range m.desired {
-		out = append(out, r)
+	for _, e := range m.desired {
+		out = append(out, e.req)
+	}
+	return out
+}
+
+// installedRequests returns only the requests currently installed - the set
+// to release on shutdown.
+func (m *Mapper) installedRequests() []Request {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Request, 0, len(m.desired))
+	for _, e := range m.desired {
+		if e.installed {
+			out = append(out, e.req)
+		}
 	}
 	return out
 }
 
 // Run refreshes every Ensured mapping on refreshInterval until ctx is
-// cancelled, then releases them all. Intended to run as a long-lived actor.
+// cancelled, then releases the installed ones. Intended to run as a
+// long-lived actor.
 func (m *Mapper) Run(ctx context.Context) error {
 	t := time.NewTicker(refreshInterval)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			m.releaseAll() //nolint:contextcheck // ctx is already cancelled at shutdown; releaseAll uses a fresh short-lived context on purpose
+			m.releaseAll() //nolint:contextcheck // ctx is already cancelled at shutdown; releaseAll uses fresh short-lived contexts on purpose
 			return nil
 		case <-t.C:
 			m.refresh(ctx)
@@ -110,8 +154,9 @@ func (m *Mapper) Run(ctx context.Context) error {
 }
 
 func (m *Mapper) refresh(ctx context.Context) {
-	for _, r := range m.snapshot() {
+	for _, r := range m.requests() {
 		res, err := m.mapFn(ctx, r)
+		m.record(r, res, err)
 		if err != nil {
 			// Debug, not Warn: the initial Ensure already warned loudly if
 			// mapping is unavailable; a 10-minute Warn cadence would just be
@@ -120,34 +165,37 @@ func (m *Mapper) refresh(ctx context.Context) {
 				slog.String("proto", string(r.Protocol)),
 				slog.Int("port", int(r.InternalPort)),
 				slog.String("err", err.Error()))
-			continue
 		}
-		m.mu.Lock()
-		m.method = res.Method
-		m.mu.Unlock()
 	}
 }
 
-// releaseAll deletes every mapping the Mapper installed. Best-effort and
-// time-boxed: the parent context is already cancelled at shutdown, so it
-// uses a fresh short-lived context.
+// releaseAll deletes every installed mapping, each under its own short
+// timeout and concurrently, so shutdown is bounded by releaseTimeout
+// regardless of how many mappings exist or whether the router still
+// responds. Best-effort: anything not released expires on its own.
 func (m *Mapper) releaseAll() {
-	reqs := m.snapshot()
+	reqs := m.installedRequests()
 	if len(reqs) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	var wg sync.WaitGroup
 	for _, r := range reqs {
-		if err := m.unmapFn(ctx, r); err != nil {
-			m.logger.Debug("router port-forward release failed (it will expire on its own)",
+		wg.Add(1)
+		go func(r Request) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), releaseTimeout)
+			defer cancel()
+			if err := m.unmapFn(ctx, r); err != nil {
+				m.logger.Debug("router port-forward release failed (it will expire on its own)",
+					slog.String("proto", string(r.Protocol)),
+					slog.Int("port", int(r.InternalPort)),
+					slog.String("err", err.Error()))
+				return
+			}
+			m.logger.Info("router port-forward released",
 				slog.String("proto", string(r.Protocol)),
-				slog.Int("port", int(r.InternalPort)),
-				slog.String("err", err.Error()))
-			continue
-		}
-		m.logger.Info("router port-forward released",
-			slog.String("proto", string(r.Protocol)),
-			slog.Int("port", int(r.InternalPort)))
+				slog.Int("port", int(r.InternalPort)))
+		}(r)
 	}
+	wg.Wait()
 }
