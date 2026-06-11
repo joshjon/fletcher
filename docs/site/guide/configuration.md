@@ -41,6 +41,11 @@ fletcher settings unset log_level     # revert to the flag/env default
 | `session_idle_timeout` | Auto-stop idle sessions after this duration (default 30m, `0` disables) |
 | `session_max_count` | Cap on how many sessions can exist (default 10) |
 | `session_max_disk_gb` | Cap on total session disk (default 50) |
+| `apns_key_path` | Path to your APNs auth key (`.p8`) on the box, to push approval notifications to the iOS app (empty disables push; the box pushes directly to Apple with your own key) |
+| `apns_key_id` | Your APNs auth key's ID |
+| `apns_team_id` | Your Apple Developer team ID |
+| `apns_topic` | The iOS app's bundle ID (APNs topic) |
+| `apns_environment` | `production` (default) or `sandbox` |
 
 Run `fletcher settings list` for the authoritative, up-to-date list with each
 key's current value and help text.

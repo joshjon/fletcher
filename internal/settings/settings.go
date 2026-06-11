@@ -51,6 +51,12 @@ const (
 	KeyPublicWeb   = "public_web"
 	KeyACMEStaging = "acme_staging"
 	KeyACMEEmail   = "acme_email"
+
+	KeyAPNSKeyPath     = "apns_key_path"
+	KeyAPNSKeyID       = "apns_key_id"
+	KeyAPNSTeamID      = "apns_team_id"
+	KeyAPNSTopic       = "apns_topic"
+	KeyAPNSEnvironment = "apns_environment"
 )
 
 // definition describes a settable key: its help text and an optional validator.
@@ -84,6 +90,11 @@ var registry = []definition{
 	{KeyPublicWeb, "expose `session publish --public` ports on the public internet over HTTPS (binds 443/80): true | false", oneOf("true", "false")},
 	{KeyACMEStaging, "use Let's Encrypt's staging CA for public TLS certs (untrusted, but no rate limits - for testing): true | false", oneOf("true", "false")},
 	{KeyACMEEmail, "contact email for the ACME account used to issue public TLS certs (optional)", nil},
+	{KeyAPNSKeyPath, "path to the APNs auth key (.p8) on the box, for pushing approval notifications to the iOS app (empty disables push)", nil},
+	{KeyAPNSKeyID, "the APNs auth key's ID (Apple Developer)", nil},
+	{KeyAPNSTeamID, "the Apple Developer team ID", nil},
+	{KeyAPNSTopic, "the iOS app's bundle ID (APNs topic)", nil},
+	{KeyAPNSEnvironment, "APNs environment: production | sandbox", oneOf("production", "sandbox")},
 }
 
 // liveKeys are the settings the daemon can re-apply to running components

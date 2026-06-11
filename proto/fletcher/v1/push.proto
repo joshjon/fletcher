@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// PushService registers device push tokens (APNs) so the daemon can notify a
+// paired client about pending approvals. The daemon pushes directly to Apple
+// using the operator's own APNs key; nothing is routed through Fletcher.
+service PushService {
+  // RegisterPushToken records a device's APNs token. Idempotent.
+  rpc RegisterPushToken(RegisterPushTokenRequest) returns (RegisterPushTokenResponse) {}
+  // UnregisterPushToken removes a device's APNs token.
+  rpc UnregisterPushToken(UnregisterPushTokenRequest) returns (UnregisterPushTokenResponse) {}
+}
+
+message RegisterPushTokenRequest {
+  // token is the device's APNs token (hex).
+  string token = 1;
+}
+message RegisterPushTokenResponse {}
+
+message UnregisterPushTokenRequest {
+  string token = 1;
+}
+message UnregisterPushTokenResponse {
+  // existed is true when a token was actually removed.
+  bool existed = 1;
+}

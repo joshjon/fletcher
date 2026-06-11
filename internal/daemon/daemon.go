@@ -207,6 +207,14 @@ type Config struct {
 	// ACMEEmail is the optional contact email for the ACME account.
 	// Settings-managed (acme_email).
 	ACMEEmail string
+	// APNs config for pushing approval notifications to the iOS app. The daemon
+	// pushes directly to Apple with the operator's own key; empty APNSKeyPath
+	// disables push. All settings-managed (apns_*).
+	APNSKeyPath string // path to the APNs auth key (.p8)
+	APNSKeyID   string // the key's ID (Apple Developer)
+	APNSTeamID  string // the Apple Developer team ID
+	APNSTopic   string // the app's bundle ID (apns-topic)
+	APNSSandbox bool   // use Apple's sandbox APNs host (apns_environment=sandbox)
 }
 
 // Defaults for the session settings, applied when not explicitly set.
@@ -396,7 +404,14 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		slog.String("default_policy", egressDefaultPolicy(cfg)),
 	)
 
-	approvalSvc := approval.NewService(queries, approval.ServiceOptions{})
+	deviceTokens := deviceTokenStore{q: queries}
+	approvalSvc := approval.NewService(queries, approval.ServiceOptions{
+		Notifier: approvalNotifier{
+			store:  deviceTokens,
+			sender: buildAPNSSender(cfg, logger),
+			logger: logger,
+		},
+	})
 	apiEndpoint := remoteAPIAddr()
 	peerSvc := peer.NewService(queries, peer.Options{
 		PublicEndpoint:    cfg.PublicEndpoint,
@@ -533,6 +548,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		snapshotKind:     driverKind(cfg.SnapshotKind),
 		secrets:          secretsStore,
 		approvals:        approvalSvc,
+		push:             deviceTokens,
 		peers:            peerSvc,
 		serverKey:        wgKeyProvider,
 		models:           gatewayCatalog{baseURL: gatewayURL},
@@ -614,6 +630,7 @@ type connectDeps struct {
 	sessions  api.SessionsBackend
 	secrets   api.SecretsBackend
 	approvals api.ApprovalsBackend
+	push      api.PushBackend
 	peers     api.PeersBackend
 	serverKey api.ServerKeyProvider
 	models    api.CatalogBuilder
@@ -952,6 +969,11 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		api.NewApprovalsService(deps.approvals), interceptors,
 	)
 	mux.Handle(approvalsPath, approvalsHandler)
+
+	pushPath, pushHandler := fletcherv1connect.NewPushServiceHandler(
+		api.NewPushService(deps.push), interceptors,
+	)
+	mux.Handle(pushPath, pushHandler)
 
 	peersPath, peersHandler := fletcherv1connect.NewPeerServiceHandler(
 		api.NewPeersService(deps.peers, deps.serverKey, deps.peerSync), interceptors,
@@ -1385,7 +1407,20 @@ func settingsDefaults(cfg Config) map[string]string {
 		settings.KeyPublicWeb:           strconv.FormatBool(cfg.PublicWeb),
 		settings.KeyACMEStaging:         strconv.FormatBool(cfg.ACMEStaging),
 		settings.KeyACMEEmail:           cfg.ACMEEmail,
+		settings.KeyAPNSKeyPath:         cfg.APNSKeyPath,
+		settings.KeyAPNSKeyID:           cfg.APNSKeyID,
+		settings.KeyAPNSTeamID:          cfg.APNSTeamID,
+		settings.KeyAPNSTopic:           cfg.APNSTopic,
+		settings.KeyAPNSEnvironment:     apnsEnvironment(cfg.APNSSandbox),
 	}
+}
+
+// apnsEnvironment renders the apns_environment setting value from the bool.
+func apnsEnvironment(sandbox bool) string {
+	if sandbox {
+		return "sandbox"
+	}
+	return "production"
 }
 
 // sessionIdleTimeoutString renders the idle timeout for display, showing "0"
@@ -1532,6 +1567,16 @@ func applyPublicWebSetting(cfg *Config, k, v string) bool {
 		}
 	case settings.KeyACMEEmail:
 		cfg.ACMEEmail = v
+	case settings.KeyAPNSKeyPath:
+		cfg.APNSKeyPath = v
+	case settings.KeyAPNSKeyID:
+		cfg.APNSKeyID = v
+	case settings.KeyAPNSTeamID:
+		cfg.APNSTeamID = v
+	case settings.KeyAPNSTopic:
+		cfg.APNSTopic = v
+	case settings.KeyAPNSEnvironment:
+		cfg.APNSSandbox = v == "sandbox"
 	default:
 		return false // unknown key persisted by an older/newer version; ignore
 	}

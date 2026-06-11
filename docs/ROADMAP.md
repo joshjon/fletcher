@@ -712,10 +712,17 @@ services:
   (listeners, drivers, tunnel, certs, `public_web`, `vm_memory_mb`, `log_level`)
   stay flagged restart-required and the user restarts manually. *Tiny optional
   add still: a `default_agent` setting the create form wants.*
-- **M8 - approvals + APNs.** `ApprovalService` (List/Get/Approve/Deny) is
-  complete, so approve/deny works today over polling. *Gap: no APNs
-  device-token registration RPC and no daemon-side APNs push - that is the real
-  M8 daemon work.*
+- **M8 - approvals + APNs. DONE 2026-06-11.** `ApprovalService` already had
+  approve/deny. Added `PushService` (`RegisterPushToken`/`UnregisterPushToken` +
+  a `device_tokens` table) and a daemon-side APNs sender: when a pending
+  approval is created, the daemon pushes a **content-light** notification (a
+  generic alert + the approval id; the app fetches detail over the tunnel) to
+  every registered device, dropping tokens APNs reports dead. The sender is
+  hand-rolled on the stdlib (ES256 provider JWT + `net/http` HTTP/2) - no new
+  dependency - and pushes **directly to Apple** with the operator's own key (on
+  thesis; nothing through Fletcher). Operator config via `apns_*` settings (the
+  `.p8` key path, key/team IDs, topic, environment); push is off until set.
+  Untested on hardware here - needs a real key + device.
 - **M9 - scheduled jobs. Schedule-edit DONE 2026-06-11** (`UpdateJobSchedule`
   reschedules a cron definition and recomputes `next_run_at`; the poller picks
   it up on its next tick). Listing/history were already covered.

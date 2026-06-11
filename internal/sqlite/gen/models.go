@@ -4,6 +4,11 @@
 
 package sqliteq
 
+type DeviceToken struct {
+	Token     string
+	CreatedAt int64
+}
+
 type Job struct {
 	ID           string
 	Status       string

@@ -22,6 +22,7 @@ type Querier interface {
 	CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, error)
 	CreatePublishedPort(ctx context.Context, arg CreatePublishedPortParams) (PublishedPort, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	DeleteDeviceToken(ctx context.Context, token string) (int64, error)
 	DeletePeer(ctx context.Context, id string) (int64, error)
 	DeletePublishedPort(ctx context.Context, id string) (int64, error)
 	DeletePublishedPortsBySession(ctx context.Context, sessionID string) error
@@ -41,6 +42,7 @@ type Querier interface {
 	GetSessionByRef(ctx context.Context, ref string) (Session, error)
 	ListApprovals(ctx context.Context, arg ListApprovalsParams) ([]PendingApproval, error)
 	ListApprovalsByStatus(ctx context.Context, arg ListApprovalsByStatusParams) ([]PendingApproval, error)
+	ListDeviceTokens(ctx context.Context) ([]string, error)
 	ListDueCronJobs(ctx context.Context, nextRunAt *int64) ([]Job, error)
 	ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, error)
 	ListJobsByStatus(ctx context.Context, arg ListJobsByStatusParams) ([]Job, error)
@@ -60,6 +62,7 @@ type Querier interface {
 	UpdateSessionFork(ctx context.Context, arg UpdateSessionForkParams) error
 	UpdateSessionPolicy(ctx context.Context, arg UpdateSessionPolicyParams) error
 	UpdateSessionState(ctx context.Context, arg UpdateSessionStateParams) error
+	UpsertDeviceToken(ctx context.Context, arg UpsertDeviceTokenParams) error
 	UpsertSecret(ctx context.Context, arg UpsertSecretParams) error
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) error
 }

@@ -77,12 +77,24 @@ type Service struct {
 	// (we only fire wakeCh from in-process Approve/Deny - external writes
 	// would otherwise be invisible). Tests can override.
 	pollInterval time.Duration
+
+	// notifier is pinged (best-effort) when a pending approval is created, so a
+	// daemon can push a notification. nil disables it.
+	notifier Notifier
+}
+
+// Notifier is told when a pending approval is created, so a daemon can push a
+// notification to registered devices. Implementations must not block.
+type Notifier interface {
+	NotifyApprovalCreated(ctx context.Context, approvalID string)
 }
 
 // ServiceOptions configures a Service.
 type ServiceOptions struct {
 	// PollInterval bounds how long Wait can lag a decision. Default 500ms.
 	PollInterval time.Duration
+	// Notifier, when set, is pinged when a pending approval is created.
+	Notifier Notifier
 }
 
 // NewService wires a Service to a sqlc-generated querier.
@@ -94,6 +106,7 @@ func NewService(q sqliteq.Querier, opts ServiceOptions) *Service {
 		q:            q,
 		wakeCh:       make(chan struct{}, 1),
 		pollInterval: opts.PollInterval,
+		notifier:     opts.Notifier,
 	}
 }
 
@@ -121,6 +134,9 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Approval, error) 
 	})
 	if err != nil {
 		return Approval{}, fmt.Errorf("create approval: %w", err)
+	}
+	if s.notifier != nil {
+		s.notifier.NotifyApprovalCreated(ctx, row.ID)
 	}
 	return approvalFromRow(row), nil
 }

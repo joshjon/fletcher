@@ -200,3 +200,12 @@ ALTER TABLE sessions ADD COLUMN gateway TEXT NOT NULL DEFAULT 'on';
 -- restart/wake re-runs the app rather than coming up bare. Default 0 keeps
 -- existing sessions as plain interactive environments.
 ALTER TABLE sessions ADD COLUMN run_app INTEGER NOT NULL DEFAULT 0 CHECK (run_app IN (0, 1));
+
+-- File: 0015_device_tokens.up.sql
+-- device_tokens holds the APNs device tokens registered by paired clients (the
+-- iOS app), so the daemon can push approval notifications. The token is the
+-- primary key; re-registering the same token is idempotent.
+CREATE TABLE device_tokens (
+    token      TEXT    NOT NULL PRIMARY KEY,
+    created_at INTEGER NOT NULL
+) STRICT;
