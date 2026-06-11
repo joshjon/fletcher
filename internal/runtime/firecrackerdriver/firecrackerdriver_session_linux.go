@@ -359,20 +359,34 @@ func (s *fcSession) DialPort(ctx context.Context, port uint16) (net.Conn, error)
 
 // Load returns the guest's 1-minute load average via a stat control request.
 func (s *fcSession) Load(ctx context.Context) (float64, error) {
+	stat, err := s.stat(ctx)
+	return stat.Load1, err
+}
+
+// AppRestarts returns how many times the guest's app supervisor has restarted a
+// run_app session's app since the VM booted.
+func (s *fcSession) AppRestarts(ctx context.Context) (int64, error) {
+	stat, err := s.stat(ctx)
+	return stat.AppRestarts, err
+}
+
+// stat fetches the guest's liveness sample (load + app restart count) over the
+// control vsock.
+func (s *fcSession) stat(ctx context.Context) (guestproto.Stat, error) {
 	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.ControlPort)
 	if err != nil {
-		return 0, fmt.Errorf("firecracker: connect session: %w", err)
+		return guestproto.Stat{}, fmt.Errorf("firecracker: connect session: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
 
 	if err := guestproto.WriteRequest(conn, guestproto.Request{Kind: guestproto.RequestStat}); err != nil {
-		return 0, fmt.Errorf("firecracker: send stat: %w", err)
+		return guestproto.Stat{}, fmt.Errorf("firecracker: send stat: %w", err)
 	}
 	stat, err := guestproto.ReadStat(conn)
 	if err != nil {
-		return 0, fmt.Errorf("firecracker: read stat: %w", err)
+		return guestproto.Stat{}, fmt.Errorf("firecracker: read stat: %w", err)
 	}
-	return stat.Load1, nil
+	return stat, nil
 }
 
 // Stop hibernates the session: it snapshots the VM's memory to disk and exits

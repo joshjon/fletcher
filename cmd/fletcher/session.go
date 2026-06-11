@@ -54,6 +54,11 @@ func sessionLogsCmd() *cli.Command {
 				Name:  "tail",
 				Usage: "number of trailing lines to show (0 uses the daemon default)",
 			},
+			&cli.BoolFlag{
+				Name:    "follow",
+				Aliases: []string{"f"},
+				Usage:   "stream new lines as they arrive (like `tail -f`); Ctrl-C to stop",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ref := cmd.Args().First()
@@ -61,6 +66,20 @@ func sessionLogsCmd() *cli.Command {
 				return errors.New("session ref (id or name) is required")
 			}
 			client := newSessionsClient(cmd)
+			if cmd.Bool("follow") {
+				stream, err := client.StreamSessionLogs(ctx, connect.NewRequest(&fletcherv1.StreamSessionLogsRequest{
+					Ref:       ref,
+					TailLines: clampUint32(cmd.Int("tail")),
+					Follow:    true,
+				}))
+				if err != nil {
+					return err
+				}
+				for stream.Receive() {
+					_, _ = os.Stdout.Write(stream.Msg().GetData())
+				}
+				return stream.Err()
+			}
 			resp, err := client.GetSessionLogs(ctx, connect.NewRequest(&fletcherv1.GetSessionLogsRequest{
 				Ref:       ref,
 				TailLines: clampUint32(cmd.Int("tail")),

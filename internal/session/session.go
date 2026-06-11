@@ -473,23 +473,73 @@ func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
 	return m.Start(ctx, ref)
 }
 
-// Logs returns the tail of the session's app log. tailLines bounds how many
-// trailing lines to return (0 uses defaultLogTailLines). A missing log - the
-// session is not a run_app deploy, or its app has not written yet - yields
-// empty output rather than an error, since the path is fixed and the tail is
-// swallowed with `2>/dev/null || true`.
-func (m *Manager) Logs(ctx context.Context, ref string, tailLines int) (string, error) {
+// StreamLogs tails the session's app log into w. With follow it stays open
+// (like `tail -F`) until ctx is cancelled or the client disconnects; otherwise
+// it writes the trailing tailLines and returns. A missing log - the session is
+// not a run_app deploy, or its app has not written yet - yields empty output,
+// not an error. The app log path is a fixed guest-side constant and tailLines
+// is an int, so the tail command carries no caller-supplied text.
+func (m *Manager) StreamLogs(ctx context.Context, ref string, tailLines int, follow bool, w io.Writer) error {
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return err
+	}
+	handle := m.getHandle(row.ID)
+	if handle == nil || State(row.State) != StateRunning {
+		return errs.Newf(errs.CategoryFailedPrecondition,
+			"session %q is not running; start it with `fletcher session start`", row.Name)
+	}
 	if tailLines <= 0 {
 		tailLines = defaultLogTailLines
 	}
-	// appLogPath is a fixed guest-side constant and tailLines is an int, so the
-	// command carries no caller-supplied text - no shell-injection surface.
-	cmd := fmt.Sprintf("tail -n %d %s 2>/dev/null || true", tailLines, appLogPath)
-	res, err := m.Exec(ctx, ref, cmd)
-	if err != nil {
+	followFlag := ""
+	if follow {
+		// -F (not -f) so a follow stream survives the supervisor truncating the
+		// log on an app restart.
+		followFlag = "-F "
+	}
+	cmd := fmt.Sprintf("tail -n %d %s%s 2>/dev/null || true", tailLines, followFlag, appLogPath)
+
+	m.markBusy(row.ID)
+	defer m.unmarkBusy(row.ID)
+	if _, err := handle.Exec(ctx, runtime.Spec{Command: cmd}, w, w); err != nil {
+		// A follow stream ends when the client disconnects (ctx cancelled): the
+		// daemon closes the vsock conn, the guest kills the tail, and exec
+		// returns a context error - not a real failure.
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("tail session log: %w", err)
+	}
+	return nil
+}
+
+// Logs returns the tail of the session's app log (no follow).
+func (m *Manager) Logs(ctx context.Context, ref string, tailLines int) (string, error) {
+	var buf strings.Builder
+	if err := m.StreamLogs(ctx, ref, tailLines, false, &buf); err != nil {
 		return "", err
 	}
-	return res.Stdout, nil
+	return buf.String(), nil
+}
+
+// AppRestartCount returns how many times a running run_app session's app has
+// restarted (queried from the guest), and whether the count is available (the
+// session is running with a live handle).
+func (m *Manager) AppRestartCount(ctx context.Context, ref string) (int64, bool) {
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return 0, false
+	}
+	handle := m.getHandle(row.ID)
+	if handle == nil || State(row.State) != StateRunning {
+		return 0, false
+	}
+	n, err := handle.AppRestarts(ctx)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // Redeploy replaces a session's disk with a fresh fork of its current template

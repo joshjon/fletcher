@@ -103,6 +103,9 @@ type Stat struct {
 	// Load1 is the 1-minute load average: a proxy for in-guest work in flight
 	// (an agent or task running even with no host connection attached).
 	Load1 float64 `json:"load1"`
+	// AppRestarts is how many times the app supervisor has restarted a run_app
+	// session's app since the VM booted (0 for a non-app session).
+	AppRestarts int64 `json:"app_restarts"`
 }
 
 // WriteStat sends a Stat as a length-prefixed JSON message.

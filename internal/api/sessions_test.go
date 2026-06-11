@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -17,8 +18,11 @@ import (
 // would nil-panic, which is fine: this test exercises GetSession alone.
 type fakeSessionsBackend struct {
 	api.SessionsBackend
-	sess  session.Session
-	ports []session.PublishedPort
+	sess       session.Session
+	ports      []session.PublishedPort
+	restarts   int64
+	restartsOK bool
+	logs       string
 }
 
 func (f fakeSessionsBackend) Get(context.Context, string) (session.Session, error) {
@@ -31,6 +35,15 @@ func (f fakeSessionsBackend) ListPorts(context.Context, string) ([]session.Publi
 
 func (f fakeSessionsBackend) Redeploy(context.Context, string) (session.Session, error) {
 	return f.sess, nil
+}
+
+func (f fakeSessionsBackend) AppRestartCount(context.Context, string) (int64, bool) {
+	return f.restarts, f.restartsOK
+}
+
+func (f fakeSessionsBackend) StreamLogs(_ context.Context, _ string, _ int, _ bool, w io.Writer) error {
+	_, err := io.WriteString(w, f.logs)
+	return err
 }
 
 type fakeRefresher struct {
@@ -75,10 +88,14 @@ func TestGetSessionPopulatesDeployInfo(t *testing.T) {
 		return resp.Msg.GetSession().GetDeploy()
 	}
 
-	d := get(api.NewSessionsService(fakeSessionsBackend{sess: runApp}, api.SessionsDeps{Deploy: resolver}))
+	d := get(api.NewSessionsService(
+		fakeSessionsBackend{sess: runApp, restarts: 3, restartsOK: true},
+		api.SessionsDeps{Deploy: resolver},
+	))
 	require.NotNil(t, d)
 	require.Equal(t, []string{"/app", "serve"}, d.GetEntrypoint())
 	require.EqualValues(t, 8080, d.GetExposedPort())
+	require.EqualValues(t, 3, d.GetRestartCount())
 
 	// A bare (non-run_app) session carries no deploy info even with a resolver.
 	bare := session.Session{ID: "s2", Name: "app", Image: "myapp"}

@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -100,6 +101,11 @@ func startApp() {
 // app does not spin the CPU (matches the sshd relaunch backoff).
 const appRestartBackoff = time.Second
 
+// appRestarts counts how many times superviseApp has restarted the app after a
+// death (the initial start is 0). Reported in Stat so the host can surface a
+// deploy's restart count. Resets when the VM boots.
+var appRestarts atomic.Int64
+
 // superviseApp runs the app and restarts it whenever it exits (a deployed server
 // should stay up). Output for the whole boot goes to one log file; image env and
 // working dir are applied, and the image USER if set (else root, what most app
@@ -136,6 +142,7 @@ func superviseApp(spec appspec.Spec) {
 		}
 		fmt.Fprintf(os.Stderr, "fletcher-guest: started app pid %d: %v\n", cmd.Process.Pid, argv)
 		_ = cmd.Wait()
+		appRestarts.Add(1)
 		fmt.Fprintf(os.Stderr, "fletcher-guest: app exited; restarting\n")
 		// Pace restarts only when the app dies almost immediately (crash loop); a
 		// long-lived app that just died restarts without delay.
@@ -380,7 +387,7 @@ func serveControl(conn net.Conn) {
 	case guestproto.RequestShell:
 		runShell(conn, req.Shell)
 	case guestproto.RequestStat:
-		if err := guestproto.WriteStat(conn, guestproto.Stat{Load1: loadAvg1()}); err != nil {
+		if err := guestproto.WriteStat(conn, guestproto.Stat{Load1: loadAvg1(), AppRestarts: appRestarts.Load()}); err != nil {
 			fmt.Fprintf(os.Stderr, "fletcher-guest: write stat: %v\n", err)
 		}
 	case guestproto.RequestShutdown:
@@ -590,8 +597,20 @@ func run() int {
 // runExec runs spec and frames its stdout/stderr and exit code back over conn.
 // Shared by the ephemeral path and the session control loop.
 func runExec(conn net.Conn, spec guestproto.Spec) int {
+	// Cancel the command when the host disconnects. For exec the host sends only
+	// the request, so a read returning (EOF on close) means it went away - which
+	// is how a long-running command like `tail -f` (the follow-log stream) gets
+	// killed instead of leaking when the client closes the stream.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		var b [1]byte
+		_, _ = conn.Read(b[:])
+		cancel()
+	}()
+
 	fc := &frameConn{w: conn}
-	code := runCommand(spec, fc)
+	code := runCommand(ctx, spec, fc)
 	if err := fc.write(guestproto.KindExit, guestproto.EncodeExit(int32(code))); err != nil { //nolint:gosec // exit codes are 0-255
 		fmt.Fprintf(os.Stderr, "fletcher-guest: send exit: %v\n", err)
 	}
@@ -599,7 +618,7 @@ func runExec(conn net.Conn, spec guestproto.Spec) int {
 }
 
 // runCommand runs the job command with its stdout/stderr framed back over fc.
-func runCommand(spec guestproto.Spec, fc *frameConn) int {
+func runCommand(ctx context.Context, spec guestproto.Spec, fc *frameConn) int {
 	workDir := spec.WorkDir
 	if workDir == "" {
 		workDir = "/"
@@ -609,10 +628,10 @@ func runCommand(spec guestproto.Spec, fc *frameConn) int {
 	if err := os.MkdirAll(workDir, 0o755); err != nil { //nolint:gosec // standard rootfs dir perms inside the VM
 		workDir = "/"
 	}
-	// The host tears down the whole VM to cancel, so an in-guest context adds
-	// nothing; Background satisfies the lint that wants a context-aware call.
+	// ctx is cancelled when the host disconnects, so a long-running command is
+	// killed rather than left writing to a dead connection.
 	lu := lookupLoginUser()
-	cmd := exec.CommandContext(context.Background(), "/bin/sh", "-c", spec.Command) //nolint:gosec // running the job is the entire purpose
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", spec.Command) //nolint:gosec // running the job is the entire purpose
 	cmd.Dir = workDir
 	cmd.Env = withDefaults(spec.Env, lu)
 	applyLoginUser(cmd, lu)

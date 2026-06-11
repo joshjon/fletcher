@@ -33,6 +33,8 @@ type SessionsBackend interface {
 	Restart(ctx context.Context, ref string) (session.Session, error)
 	Redeploy(ctx context.Context, ref string) (session.Session, error)
 	Logs(ctx context.Context, ref string, tailLines int) (string, error)
+	StreamLogs(ctx context.Context, ref string, tailLines int, follow bool, w io.Writer) error
+	AppRestartCount(ctx context.Context, ref string) (int64, bool)
 }
 
 // DeployInfoResolver returns the image-derived deploy detail for a run_app
@@ -122,10 +124,16 @@ func (s *SessionsService) GetSession(ctx context.Context, req *connect.Request[f
 			if port > 0 && port <= 65535 {
 				exposed = uint32(port)
 			}
-			p.Deploy = &fletcherv1.DeployInfo{
+			di := &fletcherv1.DeployInfo{
 				Entrypoint:  entrypoint,
 				ExposedPort: exposed,
 			}
+			// restart_count is runtime state from the guest, only for a running
+			// app session; absent (0) when stopped.
+			if n, ok := s.backend.AppRestartCount(ctx, req.Msg.GetRef()); ok && n > 0 && n <= 1<<32-1 {
+				di.RestartCount = uint32(n)
+			}
+			p.Deploy = di
 		}
 	}
 	return connect.NewResponse(&fletcherv1.GetSessionResponse{Session: p}), nil
@@ -213,6 +221,19 @@ func (s *SessionsService) GetSessionLogs(ctx context.Context, req *connect.Reque
 		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.GetSessionLogsResponse{Content: content}), nil
+}
+
+// StreamSessionLogs streams a run_app session's app log to the client, with an
+// optional live follow that ends when the client disconnects.
+func (s *SessionsService) StreamSessionLogs(ctx context.Context, req *connect.Request[fletcherv1.StreamSessionLogsRequest], stream *connect.ServerStream[fletcherv1.StreamSessionLogsResponse]) error {
+	w := writerFunc(func(p []byte) (int, error) {
+		// Copy: the runtime's frame payload may be reused after Write returns.
+		if err := stream.Send(&fletcherv1.StreamSessionLogsResponse{Data: append([]byte(nil), p...)}); err != nil {
+			return 0, err
+		}
+		return len(p), nil
+	})
+	return s.backend.StreamLogs(ctx, req.Msg.GetRef(), int(req.Msg.GetTailLines()), req.Msg.GetFollow(), w)
 }
 
 // ExecSession runs a command in a running session and returns its output.

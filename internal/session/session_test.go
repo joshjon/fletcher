@@ -79,9 +79,10 @@ func (r *fakeRuntime) DiscardSession(_ context.Context, _ string) error {
 
 // fakeHandle echoes the command back on stdout and counts Stop calls.
 type fakeHandle struct {
-	execs   []string
-	stopped int
-	load    float64
+	execs    []string
+	stopped  int
+	load     float64
+	restarts int64
 }
 
 func (h *fakeHandle) Exec(_ context.Context, spec runtime.Spec, stdout, _ io.Writer) (runtime.Result, error) {
@@ -107,6 +108,10 @@ func (h *fakeHandle) DialPort(_ context.Context, _ uint16) (net.Conn, error) {
 
 func (h *fakeHandle) Load(_ context.Context) (float64, error) {
 	return h.load, nil
+}
+
+func (h *fakeHandle) AppRestarts(_ context.Context) (int64, error) {
+	return h.restarts, nil
 }
 
 func (h *fakeHandle) Stop(_ context.Context) error {

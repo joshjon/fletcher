@@ -66,6 +66,9 @@ type SessionHandle interface {
 	// Load returns the guest's 1-minute load average, a proxy for in-guest work
 	// in flight. Used to avoid auto-stopping a session whose task is running.
 	Load(ctx context.Context) (float64, error)
+	// AppRestarts returns how many times the guest's app supervisor has
+	// restarted a run_app session's app since the VM booted (0 otherwise).
+	AppRestarts(ctx context.Context) (int64, error)
 	// Stop shuts the VM down cleanly. The fork on disk is untouched.
 	Stop(ctx context.Context) error
 }

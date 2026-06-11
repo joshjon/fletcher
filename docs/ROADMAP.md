@@ -694,11 +694,13 @@ services:
     `tls_expires_at`; `RedeploySession` (re-fork from the current template +
     restart, with a best-effort registry re-pull first - works for registry and
     local-tagged images; the daemon does not rebuild a Dockerfile).
-  - **Still open (guest-side batch, needs the guest rebuilt + images
-    re-imported):** `restart_count` (the in-guest supervisor must report it; the
-    `DeployInfo.restart_count` field is wired but reports 0 until then) and the
-    live-follow log stream `StreamSessionLogs` (needs the guest to kill `tail`
-    on client disconnect; today exec runs under `context.Background()`).
+  - **Guest-side batch DONE 2026-06-11 (needs the guest rebuilt + images
+    re-imported to take effect):** `restart_count` - the in-guest supervisor
+    counts restarts and reports them in `Stat`; surfaced on `DeployInfo` via the
+    runtime `AppRestarts`. Live-follow log stream `StreamSessionLogs` - guest
+    exec now runs under a context cancelled when the host disconnects (so
+    `tail -F` is killed instead of leaking), and the daemon streams it through a
+    server-streaming RPC (`session logs --follow` on the CLI). **M6 complete.**
 - **M7 (next) - live settings.** `SettingsService` Set/Delete/List is complete;
   `AdminService.Health` is remote with rich fields (public_endpoint, runtime,
   base-image flags, pairing_endpoint), so the doctor-warnings row is derivable.

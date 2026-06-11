@@ -78,6 +78,9 @@ const (
 	// SessionServiceGetSessionLogsProcedure is the fully-qualified name of the SessionService's
 	// GetSessionLogs RPC.
 	SessionServiceGetSessionLogsProcedure = "/fletcher.v1.SessionService/GetSessionLogs"
+	// SessionServiceStreamSessionLogsProcedure is the fully-qualified name of the SessionService's
+	// StreamSessionLogs RPC.
+	SessionServiceStreamSessionLogsProcedure = "/fletcher.v1.SessionService/StreamSessionLogs"
 )
 
 // SessionServiceClient is a client for the fletcher.v1.SessionService service.
@@ -126,10 +129,13 @@ type SessionServiceClient interface {
 	// best-effort re-pull to the latest; a local image is re-forked as-is.
 	RedeploySession(context.Context, *connect.Request[v1.RedeploySessionRequest]) (*connect.Response[v1.RedeploySessionResponse], error)
 	// GetSessionLogs returns the tail of a run_app session's app log
-	// (/var/log/fletcher-app.log), captured from the running VM. A live-follow
-	// stream (StreamSessionLogs) lands with the guest-side change that lets the
-	// VM kill the tail when the client disconnects.
+	// (/var/log/fletcher-app.log), captured from the running VM.
 	GetSessionLogs(context.Context, *connect.Request[v1.GetSessionLogsRequest]) (*connect.Response[v1.GetSessionLogsResponse], error)
+	// StreamSessionLogs streams a run_app session's app log; with follow set it
+	// keeps streaming new lines (like `tail -f`) until the client disconnects.
+	// Server-streaming, so it needs HTTP/2 (the same NIOHTTPClient path the shell
+	// uses on iOS).
+	StreamSessionLogs(context.Context, *connect.Request[v1.StreamSessionLogsRequest]) (*connect.ServerStreamForClient[v1.StreamSessionLogsResponse], error)
 }
 
 // NewSessionServiceClient constructs a client for the fletcher.v1.SessionService service. By
@@ -233,26 +239,33 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("GetSessionLogs")),
 			connect.WithClientOptions(opts...),
 		),
+		streamSessionLogs: connect.NewClient[v1.StreamSessionLogsRequest, v1.StreamSessionLogsResponse](
+			httpClient,
+			baseURL+SessionServiceStreamSessionLogsProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("StreamSessionLogs")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // sessionServiceClient implements SessionServiceClient.
 type sessionServiceClient struct {
-	createSession   *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
-	getSession      *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
-	listSessions    *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
-	startSession    *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
-	stopSession     *connect.Client[v1.StopSessionRequest, v1.StopSessionResponse]
-	deleteSession   *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
-	execSession     *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
-	shellSession    *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
-	proxySession    *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
-	publishPort     *connect.Client[v1.PublishPortRequest, v1.PublishPortResponse]
-	unpublishPort   *connect.Client[v1.UnpublishPortRequest, v1.UnpublishPortResponse]
-	listPorts       *connect.Client[v1.ListPortsRequest, v1.ListPortsResponse]
-	restartSession  *connect.Client[v1.RestartSessionRequest, v1.RestartSessionResponse]
-	redeploySession *connect.Client[v1.RedeploySessionRequest, v1.RedeploySessionResponse]
-	getSessionLogs  *connect.Client[v1.GetSessionLogsRequest, v1.GetSessionLogsResponse]
+	createSession     *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
+	getSession        *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
+	listSessions      *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
+	startSession      *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
+	stopSession       *connect.Client[v1.StopSessionRequest, v1.StopSessionResponse]
+	deleteSession     *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
+	execSession       *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
+	shellSession      *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
+	proxySession      *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
+	publishPort       *connect.Client[v1.PublishPortRequest, v1.PublishPortResponse]
+	unpublishPort     *connect.Client[v1.UnpublishPortRequest, v1.UnpublishPortResponse]
+	listPorts         *connect.Client[v1.ListPortsRequest, v1.ListPortsResponse]
+	restartSession    *connect.Client[v1.RestartSessionRequest, v1.RestartSessionResponse]
+	redeploySession   *connect.Client[v1.RedeploySessionRequest, v1.RedeploySessionResponse]
+	getSessionLogs    *connect.Client[v1.GetSessionLogsRequest, v1.GetSessionLogsResponse]
+	streamSessionLogs *connect.Client[v1.StreamSessionLogsRequest, v1.StreamSessionLogsResponse]
 }
 
 // CreateSession calls fletcher.v1.SessionService.CreateSession.
@@ -330,6 +343,11 @@ func (c *sessionServiceClient) GetSessionLogs(ctx context.Context, req *connect.
 	return c.getSessionLogs.CallUnary(ctx, req)
 }
 
+// StreamSessionLogs calls fletcher.v1.SessionService.StreamSessionLogs.
+func (c *sessionServiceClient) StreamSessionLogs(ctx context.Context, req *connect.Request[v1.StreamSessionLogsRequest]) (*connect.ServerStreamForClient[v1.StreamSessionLogsResponse], error) {
+	return c.streamSessionLogs.CallServerStream(ctx, req)
+}
+
 // SessionServiceHandler is an implementation of the fletcher.v1.SessionService service.
 type SessionServiceHandler interface {
 	// CreateSession provisions a session's persistent fork and boots its VM. The
@@ -376,10 +394,13 @@ type SessionServiceHandler interface {
 	// best-effort re-pull to the latest; a local image is re-forked as-is.
 	RedeploySession(context.Context, *connect.Request[v1.RedeploySessionRequest]) (*connect.Response[v1.RedeploySessionResponse], error)
 	// GetSessionLogs returns the tail of a run_app session's app log
-	// (/var/log/fletcher-app.log), captured from the running VM. A live-follow
-	// stream (StreamSessionLogs) lands with the guest-side change that lets the
-	// VM kill the tail when the client disconnects.
+	// (/var/log/fletcher-app.log), captured from the running VM.
 	GetSessionLogs(context.Context, *connect.Request[v1.GetSessionLogsRequest]) (*connect.Response[v1.GetSessionLogsResponse], error)
+	// StreamSessionLogs streams a run_app session's app log; with follow set it
+	// keeps streaming new lines (like `tail -f`) until the client disconnects.
+	// Server-streaming, so it needs HTTP/2 (the same NIOHTTPClient path the shell
+	// uses on iOS).
+	StreamSessionLogs(context.Context, *connect.Request[v1.StreamSessionLogsRequest], *connect.ServerStream[v1.StreamSessionLogsResponse]) error
 }
 
 // NewSessionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -479,6 +500,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("GetSessionLogs")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceStreamSessionLogsHandler := connect.NewServerStreamHandler(
+		SessionServiceStreamSessionLogsProcedure,
+		svc.StreamSessionLogs,
+		connect.WithSchema(sessionServiceMethods.ByName("StreamSessionLogs")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
@@ -511,6 +538,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceRedeploySessionHandler.ServeHTTP(w, r)
 		case SessionServiceGetSessionLogsProcedure:
 			sessionServiceGetSessionLogsHandler.ServeHTTP(w, r)
+		case SessionServiceStreamSessionLogsProcedure:
+			sessionServiceStreamSessionLogsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -578,4 +607,8 @@ func (UnimplementedSessionServiceHandler) RedeploySession(context.Context, *conn
 
 func (UnimplementedSessionServiceHandler) GetSessionLogs(context.Context, *connect.Request[v1.GetSessionLogsRequest]) (*connect.Response[v1.GetSessionLogsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.GetSessionLogs is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) StreamSessionLogs(context.Context, *connect.Request[v1.StreamSessionLogsRequest], *connect.ServerStream[v1.StreamSessionLogsResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.StreamSessionLogs is not implemented"))
 }

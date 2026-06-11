@@ -53,10 +53,13 @@ service SessionService {
   // best-effort re-pull to the latest; a local image is re-forked as-is.
   rpc RedeploySession(RedeploySessionRequest) returns (RedeploySessionResponse) {}
   // GetSessionLogs returns the tail of a run_app session's app log
-  // (/var/log/fletcher-app.log), captured from the running VM. A live-follow
-  // stream (StreamSessionLogs) lands with the guest-side change that lets the
-  // VM kill the tail when the client disconnects.
+  // (/var/log/fletcher-app.log), captured from the running VM.
   rpc GetSessionLogs(GetSessionLogsRequest) returns (GetSessionLogsResponse) {}
+  // StreamSessionLogs streams a run_app session's app log; with follow set it
+  // keeps streaming new lines (like `tail -f`) until the client disconnects.
+  // Server-streaming, so it needs HTTP/2 (the same NIOHTTPClient path the shell
+  // uses on iOS).
+  rpc StreamSessionLogs(StreamSessionLogsRequest) returns (stream StreamSessionLogsResponse) {}
 }
 
 enum SessionState {
@@ -202,6 +205,22 @@ message GetSessionLogsRequest {
 message GetSessionLogsResponse {
   // content is the captured tail of the app log.
   string content = 1;
+}
+
+message StreamSessionLogsRequest {
+  // ref is a session ID or name.
+  string ref = 1;
+  // tail_lines is how many trailing lines to send before live output; 0 uses a
+  // default.
+  uint32 tail_lines = 2;
+  // follow keeps the stream open and sends new lines as they are written, like
+  // `tail -f`, until the client disconnects.
+  bool follow = 3;
+}
+
+message StreamSessionLogsResponse {
+  // data is raw bytes from the app log.
+  bytes data = 1;
 }
 
 message ShellSessionRequest {
