@@ -259,6 +259,13 @@ message PublishedPort {
   string host = 7;
   // Unix epoch seconds.
   int64 created_at = 8;
+  // tls_status is the public cert state for `host`: "valid", "renewing",
+  // "expired", or "pending" (no cert yet - certmagic issues on the first HTTPS
+  // request). Empty for a tunnel-only port (no public TLS).
+  string tls_status = 9;
+  // tls_expires_at is the public cert's NotAfter as Unix epoch seconds, so a
+  // client can show "valid for N days" / "renews soon". 0 when there is no cert.
+  int64 tls_expires_at = 10;
 }
 
 message PublishPortRequest {

@@ -674,9 +674,11 @@ services:
   design call: a `SetEgressPolicy`/`SetGateway` (or `UpdateSession`) that
   re-applies env + proxy rules; most likely "takes effect on next start", since
   a running fork cannot change its egress live.*
-- **M5 (shipped) - TLS status chip.** `PublishedPort` has no `tls_status`;
-  certmagic state is internal. *Small-medium: surface per-host cert state
-  (issuing/valid/renew/failed). Shared with M6.*
+- **M5 (shipped) - TLS status chip. DONE 2026-06-11.** `PublishedPort` now
+  carries `tls_status` (pending/valid/renewing/expired) and `tls_expires_at`,
+  populated in `ListPorts` for public ports from certmagic's managed-cert store
+  (read-only, no issuance). "failed" is not reliably detectable from certmagic
+  so it is folded into "pending". Shared with M6.
 - **M6 (the named blocker) - deploys.** The daemon persists only `run_app`
   (bool); it does not track entrypoint, exposed port, restart count, or app
   health, and there is no logs RPC or restart/redeploy RPC. Per the iOS M6

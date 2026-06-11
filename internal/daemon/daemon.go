@@ -510,6 +510,10 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	// just without public serving.
 	publicWeb := buildPublicWeb(ctx, cfg, sessionMgr, portMapper, logger)
 
+	var certStatus api.CertStatusResolver
+	if publicWeb != nil {
+		certStatus = publicWeb.pub
+	}
 	jobSvc := job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg), defaultGateway(cfg))
 	reloader := &settingsReloader{
 		flagCfg:       flagCfg,
@@ -535,6 +539,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		settings:         settings.NewStore(queries),
 		settingsDefaults: settingsDefaults(cfg),
 		settingsReloader: reloader,
+		certStatus:       certStatus,
 		runtimeStatus: api.RuntimeStatus{
 			Runtime:            driverKind(cfg.RuntimeKind),
 			Snapshot:           driverKind(cfg.SnapshotKind),
@@ -625,6 +630,9 @@ type connectDeps struct {
 	settingsDefaults map[string]string
 	// settingsReloader live-applies the reloadable settings (ReloadSettings).
 	settingsReloader api.SettingsReloader
+	// certStatus reports public-port TLS cert state for ListPorts; nil when
+	// public web is off.
+	certStatus api.CertStatusResolver
 	// runtimeStatus is the effective runtime config surfaced via Health for
 	// `fletcher doctor`.
 	runtimeStatus api.RuntimeStatus
@@ -777,6 +785,9 @@ type publicWebServers struct {
 	httpSrv  *http.Server
 	httpsLn  net.Listener
 	httpLn   net.Listener
+	// pub backs the listeners; held so the sessions service can read per-host
+	// TLS cert status for ListPorts.
+	pub *session.PublicServer
 }
 
 // buildPublicWeb constructs the public web servers when public_web is enabled.
@@ -818,6 +829,7 @@ func buildPublicWeb(ctx context.Context, cfg Config, mgr *session.Manager, mappe
 		httpSrv:  &http.Server{Handler: pub.HTTPHandler(), ReadHeaderTimeout: 10 * time.Second},
 		httpsLn:  httpsLn,
 		httpLn:   httpLn,
+		pub:      pub,
 	}
 }
 
@@ -921,7 +933,7 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	mux.Handle(jobsPath, jobsHandler)
 
 	sessionsPath, sessionsHandler := fletcherv1connect.NewSessionServiceHandler(
-		api.NewSessionsService(deps.sessions, deps.publicIP, imageDeployResolver{imagesDir: deps.imagesDir}), interceptors,
+		api.NewSessionsService(deps.sessions, deps.publicIP, imageDeployResolver{imagesDir: deps.imagesDir}, deps.certStatus), interceptors,
 	)
 	mux.Handle(sessionsPath, sessionsHandler)
 

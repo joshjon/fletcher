@@ -41,6 +41,13 @@ type DeployInfoResolver interface {
 	DeployInfo(image string) (entrypoint []string, exposedPort int, ok bool)
 }
 
+// CertStatusResolver reports the public TLS cert state for a published public
+// hostname (status string + NotAfter Unix seconds). Backed by the public web
+// server; nil when public web is off.
+type CertStatusResolver interface {
+	CertStatus(ctx context.Context, host string) (status string, expiresAt int64)
+}
+
 // SessionsService implements fletcherv1connect.SessionServiceHandler.
 type SessionsService struct {
 	fletcherv1connect.UnimplementedSessionServiceHandler
@@ -51,13 +58,16 @@ type SessionsService struct {
 	publicIP string
 	// deploy resolves image-derived deploy detail for GetSession; nil disables it.
 	deploy DeployInfoResolver
+	// certs resolves public TLS cert state for ListPorts; nil disables it.
+	certs CertStatusResolver
 }
 
 // NewSessionsService wires a SessionsService to a backend. publicIP is the
 // daemon's public IP for --public DNS guidance ("" if unknown); deploy resolves
-// run_app deploy detail for GetSession (nil disables it).
-func NewSessionsService(backend SessionsBackend, publicIP string, deploy DeployInfoResolver) *SessionsService {
-	return &SessionsService{backend: backend, publicIP: publicIP, deploy: deploy}
+// run_app deploy detail for GetSession; certs resolves public-port TLS status
+// for ListPorts (each nil disables its feature).
+func NewSessionsService(backend SessionsBackend, publicIP string, deploy DeployInfoResolver, certs CertStatusResolver) *SessionsService {
+	return &SessionsService{backend: backend, publicIP: publicIP, deploy: deploy, certs: certs}
 }
 
 // CreateSession provisions a session and boots its VM. Categorised errors
@@ -312,7 +322,13 @@ func (s *SessionsService) ListPorts(ctx context.Context, req *connect.Request[fl
 	}
 	out := make([]*fletcherv1.PublishedPort, len(ports))
 	for i, pp := range ports {
-		out[i] = publishedToProto(pp)
+		p := publishedToProto(pp)
+		// TLS status applies only to a public port with a hostname, and only
+		// when public web (the certmagic terminator) is up.
+		if pp.Public && pp.Host != "" && s.certs != nil {
+			p.TlsStatus, p.TlsExpiresAt = s.certs.CertStatus(ctx, pp.Host)
+		}
+		out[i] = p
 	}
 	return connect.NewResponse(&fletcherv1.ListPortsResponse{Ports: out, PublicIp: s.publicIP}), nil
 }

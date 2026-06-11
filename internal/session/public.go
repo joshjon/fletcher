@@ -163,6 +163,43 @@ func (s *PublicServer) TLSConfig() *tls.Config {
 	return tc
 }
 
+// Public certificate states reported by CertStatus (the wire values clients
+// read for the per-port TLS chip).
+const (
+	// CertPending: no managed cert yet; certmagic issues on the first HTTPS
+	// request to the host.
+	CertPending = "pending"
+	// CertValid: a current cert is cached/stored and not yet due for renewal.
+	CertValid = "valid"
+	// CertRenewing: a cert exists but is within its renewal window.
+	CertRenewing = "renewing"
+	// CertExpired: a cert exists but has passed its NotAfter.
+	CertExpired = "expired"
+)
+
+// CertStatus reports the public TLS certificate state for a published public
+// hostname, plus the cert's expiry (NotAfter, Unix seconds; 0 when there is no
+// cert). It reads certmagic's managed-cert storage without issuing anything, so
+// a host with no cert yet reads as CertPending (issuance happens on the first
+// real HTTPS request).
+func (s *PublicServer) CertStatus(ctx context.Context, host string) (status string, expiresAt int64) {
+	cert, err := s.magic.CacheManagedCertificate(ctx, host)
+	if err != nil || cert.Empty() {
+		return CertPending, 0
+	}
+	if cert.Leaf != nil {
+		expiresAt = cert.Leaf.NotAfter.Unix()
+	}
+	switch {
+	case cert.Expired():
+		return CertExpired, expiresAt
+	case cert.NeedsRenewal(s.magic):
+		return CertRenewing, expiresAt
+	default:
+		return CertValid, expiresAt
+	}
+}
+
 // hostOnly strips any port from a request Host header.
 func hostOnly(h string) string {
 	if host, _, err := net.SplitHostPort(h); err == nil {

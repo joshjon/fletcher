@@ -1638,7 +1638,14 @@ type PublishedPort struct {
 	// host is the public hostname routed to this port when public (Phase 2).
 	Host string `protobuf:"bytes,7,opt,name=host,proto3" json:"host,omitempty"`
 	// Unix epoch seconds.
-	CreatedAt     int64 `protobuf:"varint,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	CreatedAt int64 `protobuf:"varint,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// tls_status is the public cert state for `host`: "valid", "renewing",
+	// "expired", or "pending" (no cert yet - certmagic issues on the first HTTPS
+	// request). Empty for a tunnel-only port (no public TLS).
+	TlsStatus string `protobuf:"bytes,9,opt,name=tls_status,json=tlsStatus,proto3" json:"tls_status,omitempty"`
+	// tls_expires_at is the public cert's NotAfter as Unix epoch seconds, so a
+	// client can show "valid for N days" / "renews soon". 0 when there is no cert.
+	TlsExpiresAt  int64 `protobuf:"varint,10,opt,name=tls_expires_at,json=tlsExpiresAt,proto3" json:"tls_expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1725,6 +1732,20 @@ func (x *PublishedPort) GetHost() string {
 func (x *PublishedPort) GetCreatedAt() int64 {
 	if x != nil {
 		return x.CreatedAt
+	}
+	return 0
+}
+
+func (x *PublishedPort) GetTlsStatus() string {
+	if x != nil {
+		return x.TlsStatus
+	}
+	return ""
+}
+
+func (x *PublishedPort) GetTlsExpiresAt() int64 {
+	if x != nil {
+		return x.TlsExpiresAt
 	}
 	return 0
 }
@@ -2152,7 +2173,7 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\tProxyOpen\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\"*\n" +
 	"\x14ProxySessionResponse\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\fR\x04data\"\xdd\x01\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\"\xa2\x02\n" +
 	"\rPublishedPort\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -2165,7 +2186,11 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\x06public\x18\x06 \x01(\bR\x06public\x12\x12\n" +
 	"\x04host\x18\a \x01(\tR\x04host\x12\x1d\n" +
 	"\n" +
-	"created_at\x18\b \x01(\x03R\tcreatedAt\"\x85\x01\n" +
+	"created_at\x18\b \x01(\x03R\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"tls_status\x18\t \x01(\tR\ttlsStatus\x12$\n" +
+	"\x0etls_expires_at\x18\n" +
+	" \x01(\x03R\ftlsExpiresAt\"\x85\x01\n" +
 	"\x12PublishPortRequest\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x1d\n" +
 	"\n" +
