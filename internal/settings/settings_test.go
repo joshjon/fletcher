@@ -78,7 +78,7 @@ func TestDescribeCoversAllKeysAndReflectsSet(t *testing.T) {
 // the daemon's ReloadSettings and the iOS settings UI both depend on.
 func TestClassification(t *testing.T) {
 	for _, k := range []string{
-		KeyDefaultImage, KeyDefaultEgressPolicy, KeyDefaultGateway,
+		KeyDefaultImage, KeyDefaultAgent, KeyDefaultEgressPolicy, KeyDefaultGateway,
 		KeySessionIdleTimeout, KeySessionMaxCount, KeySessionMaxDiskGB,
 	} {
 		require.False(t, RequiresRestart(k), "%s should be live-reloadable", k)
@@ -92,7 +92,7 @@ func TestClassification(t *testing.T) {
 	require.True(t, RequiresRestart("nonexistent_key"), "unknown keys default to restart-required")
 
 	require.Equal(t, []string{
-		KeyDefaultEgressPolicy, KeyDefaultGateway, KeyDefaultImage,
+		KeyDefaultAgent, KeyDefaultEgressPolicy, KeyDefaultGateway, KeyDefaultImage,
 		KeySessionIdleTimeout, KeySessionMaxCount, KeySessionMaxDiskGB,
 	}, LiveKeys())
 }

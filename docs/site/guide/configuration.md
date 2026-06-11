@@ -26,6 +26,7 @@ fletcher settings unset log_level     # revert to the flag/env default
 | `snapshot` | Snapshot backend (`reflink` for Firecracker, `btrfs` for runc) |
 | `btrfs_root` | Root directory for btrfs snapshots |
 | `default_image` | Base image `job` / `session create` use when `--image` is omitted (`fletcher-base` out of the box, set empty to make `--image` required) |
+| `default_agent` | Agent the app's create form suggests by default: `pi` / `claude` / `codex` (a hint for clients; the agent itself is baked into the image) |
 | `public_endpoint` | Your public `host:port` for WireGuard (overrides UPnP discovery) |
 | `wireguard_port` | UDP port for the built-in tunnel (default 51820) |
 | `pairing_port` | Public TCP port the iOS app dials to complete pairing over TLS (default 51821; see [Pair a device](/guide/pairing)) |

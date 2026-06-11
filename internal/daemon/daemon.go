@@ -215,6 +215,7 @@ const (
 	defaultSessionMaxCount    = 10
 	defaultSessionMaxDiskGB   = 50
 	defaultDefaultImage       = "fletcher-base"
+	defaultDefaultAgent       = "pi"
 	defaultEgressPolicy       = egress.PolicyAllowlist
 	// defaultVMMemoryMB is the per-microVM guest memory. An interactive agent
 	// (Claude Code, Opus, large context) needs well above the old 512 MB - that
@@ -1377,6 +1378,7 @@ func settingsDefaults(cfg Config) map[string]string {
 		settings.KeySessionMaxCount:     strconv.Itoa(cfg.SessionMaxCount),
 		settings.KeySessionMaxDiskGB:    strconv.Itoa(cfg.SessionMaxDiskGB),
 		settings.KeyDefaultImage:        cfg.DefaultImage,
+		settings.KeyDefaultAgent:        defaultDefaultAgent,
 		settings.KeyDefaultEgressPolicy: egressDefaultPolicy(cfg),
 		settings.KeyVMMemoryMB:          strconv.Itoa(cfg.VMMemoryMB),
 		settings.KeyDefaultGateway:      defaultGateway(cfg),

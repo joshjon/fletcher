@@ -40,6 +40,7 @@ const (
 	KeySessionMaxDiskGB   = "session_max_disk_gb"
 
 	KeyDefaultImage = "default_image"
+	KeyDefaultAgent = "default_agent"
 
 	KeyDefaultEgressPolicy = "default_egress_policy"
 
@@ -76,6 +77,7 @@ var registry = []definition{
 	{KeySessionMaxCount, "maximum number of sessions; 0 disables the cap", nonNegInt},
 	{KeySessionMaxDiskGB, "maximum total session disk in GB; 0 disables the cap", nonNegInt},
 	{KeyDefaultImage, "base image used by `job`/`session create` when --image is omitted; empty makes --image required", nil},
+	{KeyDefaultAgent, "agent the app's create form suggests by default: pi | claude | codex (a hint for clients; the agent itself is baked into the image)", nil},
 	{KeyDefaultEgressPolicy, "default fork egress policy when --egress is omitted: none | allowlist | open", oneOf("none", "allowlist", "open")},
 	{KeyVMMemoryMB, "per-VM guest memory in MB for job/session microVMs (default 2048); an interactive agent needs well over 512", nonNegInt},
 	{KeyDefaultGateway, "default model-gateway wiring when --gateway is omitted: on (inject gateway env) | off (agent uses its own auth)", oneOf("on", "off")},
@@ -90,6 +92,7 @@ var registry = []definition{
 // effect only on the next start.
 var liveKeys = map[string]bool{
 	KeyDefaultImage:        true,
+	KeyDefaultAgent:        true, // app-facing hint, no daemon component to restart
 	KeyDefaultEgressPolicy: true,
 	KeyDefaultGateway:      true,
 	KeySessionIdleTimeout:  true,
