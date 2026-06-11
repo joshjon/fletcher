@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// ReportService reads the structured results agents post via the report MCP
+// tool. A report becomes push-notification content when created; this service
+// is how clients fetch the detail behind a notification (and any history).
+service ReportService {
+  // GetReport fetches one report by id.
+  rpc GetReport(GetReportRequest) returns (GetReportResponse) {}
+  // ListReports returns reports, newest first.
+  rpc ListReports(ListReportsRequest) returns (ListReportsResponse) {}
+}
+
+message Report {
+  string id = 1;
+  // source_type/source_id/source_name tie a report to what produced it
+  // ("session" | "job"; may be empty when unattributed).
+  string source_type = 2;
+  string source_id = 3;
+  string source_name = 4;
+  string title = 5;
+  string summary = 6;
+  // status is the report's tone: "info" | "success" | "warning" | "error".
+  string status = 7;
+  // link is an optional URL the report points at.
+  string link = 8;
+  // Unix epoch seconds.
+  int64 created_at = 9;
+}
+
+message GetReportRequest {
+  string id = 1;
+}
+
+message GetReportResponse {
+  Report report = 1;
+}
+
+message ListReportsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message ListReportsResponse {
+  repeated Report reports = 1;
+}

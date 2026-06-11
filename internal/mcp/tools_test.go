@@ -200,3 +200,46 @@ func TestPublishImageRejectsEntrypointForRegistry(t *testing.T) {
 	require.True(t, res.IsError)
 	require.Empty(t, appr.created)
 }
+
+// stubReports records posted reports.
+type stubReports struct {
+	posted []Report
+}
+
+func (s *stubReports) CreateReport(_ context.Context, r Report) (string, error) {
+	s.posted = append(s.posted, r)
+	return "report_test", nil
+}
+
+func TestReportToolPostsReport(t *testing.T) {
+	sink := &stubReports{}
+	tool := reportTool(sink)
+	res, err := tool.Handler(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{Name: "report", Arguments: map[string]any{
+			"title":   "Web app ready",
+			"summary": "Live at the published port.",
+			"status":  "success",
+			"link":    "https://app.example.com",
+			"session": "dev-1",
+		}},
+	})
+	require.NoError(t, err)
+	require.False(t, res.IsError)
+	require.Contains(t, resultText(t, res), "reported (report_test)")
+	require.Equal(t, []Report{{
+		SessionRef: "dev-1",
+		Title:      "Web app ready",
+		Summary:    "Live at the published port.",
+		Status:     "success",
+		Link:       "https://app.example.com",
+	}}, sink.posted)
+}
+
+func TestReportToolRequiresTitle(t *testing.T) {
+	tool := reportTool(&stubReports{})
+	res, err := tool.Handler(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{Name: "report", Arguments: map[string]any{}},
+	})
+	require.NoError(t, err)
+	require.True(t, res.IsError)
+}

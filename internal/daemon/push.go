@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/joshjon/fletcher/internal/push"
+	"github.com/joshjon/fletcher/internal/settings"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
 )
 
@@ -41,10 +42,12 @@ type apnsSender interface {
 
 // approvalNotifier pushes a content-light APNs notification to every registered
 // device when a pending approval is created, dropping tokens APNs reports dead.
+// Gated by the notify_approvals setting (read per push, so the toggle is live).
 type approvalNotifier struct {
-	store  deviceTokenStore
-	sender apnsSender
-	logger *slog.Logger
+	store    deviceTokenStore
+	sender   apnsSender
+	settings *settings.Store
+	logger   *slog.Logger
 }
 
 // NotifyApprovalCreated fires the push asynchronously so it never blocks the
@@ -54,38 +57,24 @@ func (n approvalNotifier) NotifyApprovalCreated(_ context.Context, approvalID st
 		return
 	}
 	// Deliberately detached from the request context: the push must outlive the
-	// approval write (whose ctx is about to be cancelled). push uses its own
-	// bounded context.
+	// approval write (whose ctx is about to be cancelled). pushToAll uses its
+	// own bounded context.
 	go n.push(approvalID) //nolint:gosec,contextcheck // intentionally request-context-independent; see comment
 }
 
 func (n approvalNotifier) push(approvalID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	tokens, err := n.store.list(ctx)
-	if err != nil {
-		n.logger.Warn("approval push: list device tokens", slog.String("err", err.Error()))
-		return
+	if n.settings != nil {
+		if values, err := n.settings.Values(ctx); err == nil && values[settings.KeyNotifyApprovals] == "false" {
+			return
+		}
 	}
-	notif := push.Notification{
+	pushToAll(ctx, n.store, n.sender, n.logger, push.Notification{
 		Title: "Fletcher",
 		Body:  "An action needs your approval.",
 		Data:  map[string]string{"approval_id": approvalID},
-	}
-	for _, t := range tokens {
-		res, serr := n.sender.Send(ctx, t, notif)
-		if serr != nil {
-			n.logger.Warn("approval push: send", slog.String("err", serr.Error()))
-			continue
-		}
-		if res.Gone {
-			if derr := n.store.delete(ctx, t); derr != nil {
-				n.logger.Warn("approval push: drop dead token", slog.String("err", derr.Error()))
-			} else {
-				n.logger.Info("approval push: dropped a dead device token")
-			}
-		}
-	}
+	})
 }
 
 // buildAPNSSender builds an APNs sender from cfg, or nil (logged) when APNs is

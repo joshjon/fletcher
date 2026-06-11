@@ -63,6 +63,18 @@ type PublishedPort struct {
 	CreatedAt  int64
 }
 
+type Report struct {
+	ID         string
+	SourceType string
+	SourceID   string
+	SourceName string
+	Title      string
+	Summary    string
+	Status     string
+	Link       string
+	CreatedAt  int64
+}
+
 type Secret struct {
 	Name       string
 	Ciphertext []byte

@@ -1296,23 +1296,34 @@ job running/succeeded transitions live while another client drives them.
   type/action/id/name/at) on the same h2c surface as the shell, and
   `fletcher event watch` for operators.
 
-### Milestone 14 - notification breadth + fletcher.report - PLANNED
+### Milestone 14 - notification breadth + fletcher.report - DONE (verified on hardware 2026-06-12; push itself needs the operator's APNs key)
 
-**Goal.** The phone hears about everything that matters, not just approvals.
+**Goal (met).** The phone hears about everything that matters, not just
+approvals. Verified on hardware: the `report` MCP tool posted a report
+attributed to its session, queryable via `fletcher report list`; the notify_*
+settings registered as live keys. The APNs push leg is wired but needs the
+operator's `.p8` key + a device to observe.
 
-- **`fletcher.report` MCP tool** (the surviving half of the inbox idea): an
-  agent posts `{title, summary, status, link?}`; the daemon stores a `reports`
-  row tied to the source session/job and fires a push with that content. The
-  hero use: Claude finishes a long task in a durable session and the phone says
-  what was done instead of a generic "session idle".
-- **Push events:** job finished (with exit status), deploy went live, deploy
-  crash-looping (restart_count is already tracked), session went idle after
-  work (the reaper's work-based idle signal repurposed as "the agent is done /
-  waiting for you").
-- **Per-type opt-outs** as settings keys so the iOS Notifications group has
-  real dials.
-- Reports are queryable (RPC + CLI + shown on session/job detail) so nothing
-  depends on a feed UI.
+**Shipped.**
+
+- **`report` MCP tool** (the surviving half of the inbox idea): an agent posts
+  `{title, summary, status, link?, session}`; the daemon stores a `reports`
+  row (migration 0018, `internal/report`), publishes a bus event, and pushes
+  the title/summary to registered devices. Queryable via `ReportService`
+  (Get/List) and `fletcher report list|get` - nothing depends on a feed UI.
+- **Notify router:** a daemon actor subscribed to the event bus turns events
+  into pushes - report created, job succeeded/failed, session
+  **idle-stopped** (a new distinct event from the reaper: "the agent's work
+  finished and the VM hibernated"), and deploy **crash-looping** (a new
+  deploy-health sweep on the reaper's tick: >= 3 app restarts between sweeps,
+  rate-limited to one warning per session per hour).
+- **Per-type opt-outs:** `notify_approvals` / `notify_reports` /
+  `notify_jobs` / `notify_session_idle` / `notify_deploy_health` settings
+  (default on), read per push so toggles apply live. The approval push moved
+  onto the shared send path and gained its gate.
+- Cut from the sketch: a "deploy went live" push - deploys are
+  operator-initiated from the phone, so the operator is already looking at
+  the result; crash-looping is the signal that matters.
 
 ## Toward v1 - hardening (in progress)
 

@@ -125,6 +125,11 @@ type Manager struct {
 	mu      sync.Mutex
 	handles map[string]runtime.SessionHandle
 	busy    map[string]int // sessions with an in-flight host op (exec/shell/ssh)
+	// lastAppRestarts/crashLoopWarned drive the deploy-health sweep: the app
+	// restart count seen at the last sweep, and when a crash-loop event was
+	// last published per session.
+	lastAppRestarts map[string]int64
+	crashLoopWarned map[string]time.Time
 
 	// startLocks serialises Start per session id so concurrent wakes (e.g.
 	// several inbound connections to a published port at once) boot at most one
@@ -201,6 +206,9 @@ func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRunti
 		logger:     logger,
 		handles:    make(map[string]runtime.SessionHandle),
 		busy:       make(map[string]int),
+
+		lastAppRestarts: make(map[string]int64),
+		crashLoopWarned: make(map[string]time.Time),
 	}
 	m.opts.Store(&opts)
 	return m
@@ -1428,9 +1436,56 @@ func (m *Manager) ReapIdle(ctx context.Context) (int, error) {
 			continue
 		}
 		m.logger.Info("auto-stopped idle session", slog.String("session_id", r.ID), slog.String("name", r.Name))
+		// Distinct from the plain "stopped" state event: this is the "the
+		// agent's work finished and nothing needs the VM" signal clients turn
+		// into a notification.
+		m.publishEvent("idle-stopped", r.ID, r.Name)
 		stopped++
 	}
 	return stopped, nil
+}
+
+// crashLoopThreshold is how many app restarts between two health sweeps mark
+// a deploy as crash-looping.
+const crashLoopThreshold = 3
+
+// crashLoopWarnInterval rate-limits crash-loop events per session.
+const crashLoopWarnInterval = time.Hour
+
+// SweepDeployHealth checks running run_app sessions' app restart counters and
+// publishes a "crash-looping" event when one is restarting rapidly. Called on
+// the reaper's cadence; rate-limited per session.
+func (m *Manager) SweepDeployHealth(ctx context.Context) {
+	rows, err := m.q.ListSessions(ctx)
+	if err != nil {
+		return
+	}
+	for _, r := range rows {
+		if r.RunApp == 0 || State(r.State) != StateRunning {
+			continue
+		}
+		handle := m.getHandle(r.ID)
+		if handle == nil {
+			continue
+		}
+		n, err := handle.AppRestarts(ctx)
+		if err != nil {
+			continue
+		}
+		m.mu.Lock()
+		last := m.lastAppRestarts[r.ID]
+		m.lastAppRestarts[r.ID] = n
+		warnedAt := m.crashLoopWarned[r.ID]
+		m.mu.Unlock()
+		if n-last >= crashLoopThreshold && time.Since(warnedAt) >= crashLoopWarnInterval {
+			m.mu.Lock()
+			m.crashLoopWarned[r.ID] = time.Now()
+			m.mu.Unlock()
+			m.logger.Warn("deploy is crash-looping",
+				slog.String("session_id", r.ID), slog.String("name", r.Name), slog.Int64("restarts", n))
+			m.publishEvent("crash-looping", r.ID, r.Name)
+		}
+	}
 }
 
 // checkCaps refuses a new session when a configured count or disk cap is hit,

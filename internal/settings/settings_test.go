@@ -93,6 +93,8 @@ func TestClassification(t *testing.T) {
 
 	require.Equal(t, []string{
 		KeyDefaultAgent, KeyDefaultEgressPolicy, KeyDefaultGateway, KeyDefaultImage,
+		KeyNotifyApprovals, KeyNotifyDeployHealth, KeyNotifyJobs, KeyNotifyReports,
+		KeyNotifySessionIdle,
 		KeySessionIdleTimeout, KeySessionMaxCount, KeySessionMaxDiskGB,
 	}, LiveKeys())
 }

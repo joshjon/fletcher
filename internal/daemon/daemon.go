@@ -39,6 +39,7 @@ import (
 	"github.com/joshjon/fletcher/internal/network/portmap"
 	"github.com/joshjon/fletcher/internal/network/wireguard"
 	"github.com/joshjon/fletcher/internal/peer"
+	"github.com/joshjon/fletcher/internal/report"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/vmm"
@@ -298,6 +299,7 @@ type services struct {
 	cfg             Config
 	supervisor      *job.Supervisor
 	sessions        *session.Manager
+	notify          notifyRouter
 	portBroker      *session.Broker
 	portMapper      *portmap.Mapper
 	publicWeb       *publicWebServers
@@ -411,11 +413,13 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	eventBus := events.NewBus()
 
 	deviceTokens := deviceTokenStore{q: queries}
+	apnsSender := buildAPNSSender(cfg, logger)
 	approvalSvc := approval.NewService(queries, approval.ServiceOptions{
 		Notifier: approvalNotifier{
-			store:  deviceTokens,
-			sender: buildAPNSSender(cfg, logger),
-			logger: logger,
+			store:    deviceTokens,
+			sender:   apnsSender,
+			settings: settings.NewStore(queries),
+			logger:   logger,
 		},
 		Events: eventBus,
 	})
@@ -527,7 +531,11 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 			format:    driverKind(cfg.SnapshotKind),
 		}
 	}
-	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, fletchermcp.NewEgressHTTPClient(30*time.Second), approvalSvc, publisher)
+	// Reports: structured results agents post; stored, event-published, and
+	// pushed (the surviving half of the inbox idea).
+	reportSvc := report.NewService(queries, eventBus)
+	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, fletchermcp.NewEgressHTTPClient(30*time.Second), approvalSvc, publisher,
+		&reportPublisher{reports: reportSvc, sessions: sessionMgr})
 
 	// Published-port broker: forwards a session's published port to the service
 	// inside its VM, dialing in via the session manager over vsock so the VM
@@ -576,6 +584,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		sessions:         sessionMgr,
 		volumes:          volumeMgr,
 		events:           eventBus,
+		reports:          reportSvc,
 		publicIP:         publicEndpointHost(netSetup.EffectivePublicEndpoint),
 		imagesDir:        filepath.Join(snapshotRootDir(cfg), "images"),
 		snapshotKind:     driverKind(cfg.SnapshotKind),
@@ -619,9 +628,17 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	pairingSrv, pairingLn, pairingAddr := buildPairingListener(ctx, cfg, netSetup, peerSvc, connectDeps, portMapper, logger)
 
 	return &services{
-		cfg:             cfg,
-		supervisor:      supervisor,
-		sessions:        sessionMgr,
+		cfg:        cfg,
+		supervisor: supervisor,
+		sessions:   sessionMgr,
+		notify: notifyRouter{
+			bus:      eventBus,
+			store:    deviceTokens,
+			sender:   apnsSender,
+			settings: settings.NewStore(queries),
+			reports:  reportSvc,
+			logger:   logger,
+		},
 		portBroker:      portBroker,
 		portMapper:      portMapper,
 		publicWeb:       publicWeb,
@@ -663,6 +680,7 @@ type connectDeps struct {
 	sessions  api.SessionsBackend
 	volumes   api.VolumesBackend
 	events    *events.Bus
+	reports   api.ReportsBackend
 	secrets   api.SecretsBackend
 	approvals api.ApprovalsBackend
 	push      api.PushBackend
@@ -757,9 +775,10 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 		g.Add(tlsServeActor(logger, "pairing", s.pairingSrv, s.pairingLn, "https://"+s.pairingAddr))
 	}
 	g.Add(supervisorActor(ctx, s.supervisor))
-	if s.cfg.SessionIdleTimeout > 0 {
-		g.Add(sessionReaperActor(ctx, logger, s.sessions, s.cfg.SessionIdleTimeout))
-	}
+	// Always on: ReapIdle no-ops when the idle timeout is 0, and the same tick
+	// drives the deploy-health sweep.
+	g.Add(sessionReaperActor(ctx, logger, s.sessions, s.cfg.SessionIdleTimeout))
+	g.Add(notifyRouterActor(ctx, s.notify))
 	if s.tunnel != nil {
 		g.Add(tunnelActor(ctx, logger, s.tunnel))
 	}
@@ -779,9 +798,21 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 	return g.Run()
 }
 
+// notifyRouterActor runs the push-notification router until shutdown.
+func notifyRouterActor(ctx context.Context, r notifyRouter) (func() error, func(error)) {
+	runCtx, cancel := context.WithCancel(ctx)
+	return func() error {
+			r.run(runCtx)
+			return nil
+		}, func(error) {
+			cancel()
+		}
+}
+
 // sessionReaperActor periodically hibernates idle sessions (no work in flight)
-// to reclaim host RAM. The tick is the idle timeout capped to a sane range, so
-// a session is stopped within roughly one timeout of going idle.
+// to reclaim host RAM and sweeps deploy health on the same tick. The tick is
+// half the idle timeout capped to a sane range, so a session is stopped within
+// roughly one timeout of going idle.
 func sessionReaperActor(ctx context.Context, logger *slog.Logger, mgr *session.Manager, idleTimeout time.Duration) (func() error, func(error)) {
 	interval := idleTimeout / 2
 	if interval < time.Minute {
@@ -802,6 +833,9 @@ func sessionReaperActor(ctx context.Context, logger *slog.Logger, mgr *session.M
 					if _, err := mgr.ReapIdle(reapCtx); err != nil {
 						logger.Warn("session idle reaper", slog.String("err", err.Error()))
 					}
+					// Same cadence: spot crash-looping deploys (publishes a
+					// "crash-looping" event the notify router pushes).
+					mgr.SweepDeployHealth(reapCtx)
 				}
 			}
 		}, func(error) {
@@ -1039,6 +1073,11 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		api.NewEventsService(deps.events), interceptors,
 	)
 	mux.Handle(eventsPath, eventsHandler)
+
+	reportsPath, reportsHandler := fletcherv1connect.NewReportServiceHandler(
+		api.NewReportsService(deps.reports), interceptors,
+	)
+	mux.Handle(reportsPath, reportsHandler)
 
 	// Serve cleartext HTTP/2 (h2c) alongside HTTP/1.1 so Connect bidi streams -
 	// the interactive shell (SessionService.ShellSession) - work over the unix
@@ -1517,6 +1556,11 @@ func settingsDefaults(cfg Config) map[string]string {
 		settings.KeyPublicWeb:           strconv.FormatBool(cfg.PublicWeb),
 		settings.KeyACMEStaging:         strconv.FormatBool(cfg.ACMEStaging),
 		settings.KeyACMEEmail:           cfg.ACMEEmail,
+		settings.KeyNotifyApprovals:     "true",
+		settings.KeyNotifyReports:       "true",
+		settings.KeyNotifyJobs:          "true",
+		settings.KeyNotifySessionIdle:   "true",
+		settings.KeyNotifyDeployHealth:  "true",
 		settings.KeyAPNSKeyPath:         cfg.APNSKeyPath,
 		settings.KeyAPNSKeyID:           cfg.APNSKeyID,
 		settings.KeyAPNSTeamID:          cfg.APNSTeamID,

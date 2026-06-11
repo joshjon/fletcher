@@ -19,6 +19,7 @@ const (
 	TypeApproval = "approval"
 	TypeImage    = "image"
 	TypeVolume   = "volume"
+	TypeReport   = "report"
 )
 
 // Event is one lifecycle change. Content-light on purpose: subscribers fetch

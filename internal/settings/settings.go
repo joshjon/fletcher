@@ -52,6 +52,12 @@ const (
 	KeyACMEStaging = "acme_staging"
 	KeyACMEEmail   = "acme_email"
 
+	KeyNotifyApprovals    = "notify_approvals"
+	KeyNotifyReports      = "notify_reports"
+	KeyNotifyJobs         = "notify_jobs"
+	KeyNotifySessionIdle  = "notify_session_idle"
+	KeyNotifyDeployHealth = "notify_deploy_health"
+
 	KeyAPNSKeyPath     = "apns_key_path"
 	KeyAPNSKeyID       = "apns_key_id"
 	KeyAPNSTeamID      = "apns_team_id"
@@ -90,6 +96,11 @@ var registry = []definition{
 	{KeyPublicWeb, "expose `session publish --public` ports on the public internet over HTTPS (binds 443/80): true | false", oneOf("true", "false")},
 	{KeyACMEStaging, "use Let's Encrypt's staging CA for public TLS certs (untrusted, but no rate limits - for testing): true | false", oneOf("true", "false")},
 	{KeyACMEEmail, "contact email for the ACME account used to issue public TLS certs (optional)", nil},
+	{KeyNotifyApprovals, "push a notification when an approval is created: true | false", oneOf("true", "false")},
+	{KeyNotifyReports, "push a notification when an agent posts a report: true | false", oneOf("true", "false")},
+	{KeyNotifyJobs, "push a notification when a job finishes: true | false", oneOf("true", "false")},
+	{KeyNotifySessionIdle, "push a notification when a session finishes its work and hibernates: true | false", oneOf("true", "false")},
+	{KeyNotifyDeployHealth, "push a notification when a deploy is crash-looping: true | false", oneOf("true", "false")},
 	{KeyAPNSKeyPath, "path to the APNs auth key (.p8) on the box, for pushing approval notifications to the iOS app (empty disables push)", nil},
 	{KeyAPNSKeyID, "the APNs auth key's ID (Apple Developer)", nil},
 	{KeyAPNSTeamID, "the Apple Developer team ID", nil},
@@ -102,6 +113,11 @@ var registry = []definition{
 // (listeners, drivers, the tunnel, certs, log level, VM memory) and takes
 // effect only on the next start.
 var liveKeys = map[string]bool{
+	KeyNotifyApprovals:     true, // consulted per push, no component to bounce
+	KeyNotifyReports:       true,
+	KeyNotifyJobs:          true,
+	KeyNotifySessionIdle:   true,
+	KeyNotifyDeployHealth:  true,
 	KeyDefaultImage:        true,
 	KeyDefaultAgent:        true, // app-facing hint, no daemon component to restart
 	KeyDefaultEgressPolicy: true,

@@ -70,6 +70,7 @@ func newApp() *cli.Command {
 			client(sessionCmd()),
 			client(volumeCmd()),
 			client(eventCmd()),
+			client(reportCmd()),
 			client(modelCmd()),
 			client(secretCmd()),
 			client(settingsCmd()),

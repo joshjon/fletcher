@@ -239,6 +239,69 @@ type CommitImage struct {
 	Force       bool
 }
 
+// ReportSink stores agent-posted reports (implemented by the daemon's report
+// service plus session attribution).
+type ReportSink interface {
+	// CreateReport stores the report and returns its id.
+	CreateReport(ctx context.Context, r Report) (string, error)
+}
+
+// Report is what an agent posts via the report tool.
+type Report struct {
+	// SessionRef is the agent-claimed source session (from
+	// $FLETCHER_SESSION_NAME); empty leaves the report unattributed.
+	SessionRef string
+	Title      string
+	Summary    string
+	Status     string
+	Link       string
+}
+
+// reportTool lets an agent post a structured result the operator's devices
+// are notified about ("web app ready", "scrape finished - 3 price drops").
+// Reports are informational, so no approval gate; they are stored and
+// queryable (fletcher report list) beyond the push.
+func reportTool(reports ReportSink) Tool {
+	return Tool{
+		Spec: mcpgo.NewTool("report",
+			mcpgo.WithDescription("Post a result report to the operator. It is pushed to their devices and kept on the daemon. Use when finishing a meaningful unit of work (e.g. the task the operator asked for) - not for routine progress."),
+			mcpgo.WithString("title",
+				mcpgo.Required(),
+				mcpgo.Description("Short result headline (e.g. 'Web app ready')."),
+			),
+			mcpgo.WithString("summary",
+				mcpgo.Description("One or two sentences of detail."),
+			),
+			mcpgo.WithString("status",
+				mcpgo.Description("Tone: info | success | warning | error. Defaults to info."),
+			),
+			mcpgo.WithString("link",
+				mcpgo.Description("Optional URL the report points at (e.g. the app's published address)."),
+			),
+			mcpgo.WithString("session",
+				mcpgo.Description("The posting session - pass the value of $FLETCHER_SESSION_NAME so the report links back to it."),
+			),
+		),
+		Handler: func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+			title, err := req.RequireString("title")
+			if err != nil {
+				return mcpgo.NewToolResultError(err.Error()), nil
+			}
+			id, err := reports.CreateReport(ctx, Report{
+				SessionRef: strings.TrimSpace(req.GetString("session", "")),
+				Title:      title,
+				Summary:    req.GetString("summary", ""),
+				Status:     req.GetString("status", ""),
+				Link:       req.GetString("link", ""),
+			})
+			if err != nil {
+				return mcpgo.NewToolResultError(err.Error()), nil
+			}
+			return mcpgo.NewToolResultText(fmt.Sprintf("reported (%s). The operator has been notified.", id)), nil
+		},
+	}
+}
+
 // publishWaitDefault and publishWaitMax bound how long publish_image blocks on
 // the operator's decision.
 const (
@@ -494,8 +557,9 @@ func formatApproval(a approval.Approval) string {
 
 // RegisterBuiltinTools wires Fletcher's standard tool set onto srv. Future
 // phases extend this list (egress allowlists, secrets-bound tools, ...).
-// publisher may be nil (no session-capable runtime), which skips publish_image.
-func RegisterBuiltinTools(srv *Server, startedAt time.Time, httpClient *http.Client, approvals ApprovalBackend, publisher ImagePublisher) {
+// publisher may be nil (no session-capable runtime), which skips
+// publish_image; reports may be nil, which skips the report tool.
+func RegisterBuiltinTools(srv *Server, startedAt time.Time, httpClient *http.Client, approvals ApprovalBackend, publisher ImagePublisher, reports ReportSink) {
 	if httpClient == nil {
 		httpClient = NewEgressHTTPClient(30 * time.Second)
 	}
@@ -507,5 +571,8 @@ func RegisterBuiltinTools(srv *Server, startedAt time.Time, httpClient *http.Cli
 		if publisher != nil {
 			srv.RegisterTool(publishImageTool(publisher, approvals))
 		}
+	}
+	if reports != nil {
+		srv.RegisterTool(reportTool(reports))
 	}
 }
