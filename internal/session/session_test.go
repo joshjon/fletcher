@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/joshjon/fletcher/internal/errs"
+	"github.com/joshjon/fletcher/internal/image"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/session"
 	"github.com/joshjon/fletcher/internal/snapshot"
@@ -24,10 +25,13 @@ import (
 // fakeSnapshot records forks in memory so the manager's create/delete plumbing
 // can be exercised without a real filesystem.
 type fakeSnapshot struct {
-	mu      sync.Mutex
-	n       int
-	live    map[string]string // id -> path
-	deleted []string
+	mu        sync.Mutex
+	n         int
+	live      map[string]string // id -> path
+	deleted   []string
+	templates map[string]string // committed template name -> snapshot id
+	// committedFiles are the extraFiles of the most recent CommitTemplate.
+	committedFiles map[string][]byte
 }
 
 func newFakeSnapshot() *fakeSnapshot { return &fakeSnapshot{live: map[string]string{}} }
@@ -50,11 +54,43 @@ func (f *fakeSnapshot) Delete(_ context.Context, id string) error {
 	return nil
 }
 
+// CommitTemplate records committed templates so CommitImage can be exercised
+// (satisfies snapshot.TemplateCommitter).
+func (f *fakeSnapshot) CommitTemplate(_ context.Context, id, name string, force bool, extraFiles map[string][]byte) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.live[id]; !ok {
+		return fmt.Errorf("snapshot %s not found", id)
+	}
+	if f.templates == nil {
+		f.templates = map[string]string{}
+	}
+	if _, exists := f.templates[name]; exists && !force {
+		return fmt.Errorf("template %q already exists", name)
+	}
+	f.templates[name] = id
+	f.committedFiles = extraFiles
+	return nil
+}
+
+// nonCommittingSnapshot hides fakeSnapshot's CommitTemplate so the
+// missing-capability path can be tested.
+type nonCommittingSnapshot struct{ inner *fakeSnapshot }
+
+func (s nonCommittingSnapshot) Create(ctx context.Context, image string) (snapshot.Snapshot, error) {
+	return s.inner.Create(ctx, image)
+}
+
+func (s nonCommittingSnapshot) Delete(ctx context.Context, id string) error {
+	return s.inner.Delete(ctx, id)
+}
+
 // fakeRuntime hands out fakeHandles and records the forks it was asked to boot.
 type fakeRuntime struct {
 	mu        sync.Mutex
-	started   []string // rootfs paths, in order
-	runApps   []bool   // spec.RunApp per StartSession, in order
+	started   []string   // rootfs paths, in order
+	runApps   []bool     // spec.RunApp per StartSession, in order
+	envs      [][]string // spec.Env per StartSession, in order
 	handles   []*fakeHandle
 	discarded int
 	nextLoad  float64 // load stamped on handles the next StartSession hands out
@@ -65,6 +101,7 @@ func (r *fakeRuntime) StartSession(_ context.Context, spec runtime.SessionSpec) 
 	defer r.mu.Unlock()
 	r.started = append(r.started, spec.RootfsPath)
 	r.runApps = append(r.runApps, spec.RunApp)
+	r.envs = append(r.envs, spec.Env)
 	h := &fakeHandle{load: r.nextLoad}
 	r.handles = append(r.handles, h)
 	return h, nil
@@ -534,4 +571,142 @@ func TestUpdateSession(t *testing.T) {
 	_, restart, err = mgr.UpdateSession(ctx, "dev", "none", "off")
 	require.NoError(t, err)
 	require.False(t, restart)
+}
+
+func TestCommitImageCommitsRunningSession(t *testing.T) {
+	rt := &fakeRuntime{}
+	snap := newFakeSnapshot()
+	imagesDir := t.TempDir()
+	mgr := newManagerWithOpts(t, rt, snap, session.Options{ImagesDir: imagesDir})
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev-1", "fletcher-base", "", "", false)
+	require.NoError(t, err)
+
+	img, err := mgr.CommitImage(ctx, "dev-1", session.CommitImageParams{
+		Name:        "webapp",
+		Entrypoint:  []string{"node", "/workspace/server.js"},
+		ExposedPort: 3000,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "webapp", img)
+
+	// The running guest was synced before the commit.
+	require.Len(t, rt.handles, 1)
+	require.Equal(t, []string{"sync"}, rt.handles[0].execs)
+
+	// The fork was committed under the requested template name, with the app
+	// launch spec injected into the image.
+	require.NotEmpty(t, snap.templates["webapp"])
+	require.Contains(t, snap.committedFiles, "/etc/fletcher/app.json")
+	require.Contains(t, string(snap.committedFiles["/etc/fletcher/app.json"]), "node")
+
+	// Sidecar metadata records the entrypoint, port, and source session.
+	meta, found, err := image.ReadMeta(imagesDir, "webapp")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "session:dev-1", meta.Source)
+	require.Equal(t, []string{"node", "/workspace/server.js"}, meta.Entrypoint)
+	require.Equal(t, 3000, meta.ExposedPort)
+}
+
+func TestCommitImageStoppedSessionCommitsWithoutExec(t *testing.T) {
+	rt := &fakeRuntime{}
+	snap := newFakeSnapshot()
+	mgr := newManager(t, rt, snap)
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "base", "", "", false)
+	require.NoError(t, err)
+	_, err = mgr.Stop(ctx, "dev")
+	require.NoError(t, err)
+
+	img, err := mgr.CommitImage(ctx, "dev", session.CommitImageParams{Name: "frozen"})
+	require.NoError(t, err)
+	require.Equal(t, "frozen", img)
+	require.Empty(t, rt.handles[0].execs)
+	require.NotEmpty(t, snap.templates["frozen"])
+}
+
+func TestCommitImageStoppedSessionAcceptsEntrypoint(t *testing.T) {
+	rt := &fakeRuntime{}
+	snap := newFakeSnapshot()
+	mgr := newManager(t, rt, snap)
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "base", "", "", false)
+	require.NoError(t, err)
+	_, err = mgr.Stop(ctx, "dev")
+	require.NoError(t, err)
+
+	_, err = mgr.CommitImage(ctx, "dev", session.CommitImageParams{
+		Name:       "frozen2",
+		Entrypoint: []string{"node"},
+	})
+	require.NoError(t, err)
+	require.Empty(t, rt.handles[0].execs, "a stopped session needs no guest sync")
+	require.Contains(t, snap.committedFiles, "/etc/fletcher/app.json")
+}
+
+func TestCommitImageConflictWithoutForce(t *testing.T) {
+	rt := &fakeRuntime{}
+	snap := newFakeSnapshot()
+	mgr := newManager(t, rt, snap)
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "base", "", "", false)
+	require.NoError(t, err)
+
+	_, err = mgr.CommitImage(ctx, "dev", session.CommitImageParams{Name: "snap1"})
+	require.NoError(t, err)
+	_, err = mgr.CommitImage(ctx, "dev", session.CommitImageParams{Name: "snap1"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already exists")
+	_, err = mgr.CommitImage(ctx, "dev", session.CommitImageParams{Name: "snap1", Force: true})
+	require.NoError(t, err)
+}
+
+func TestCommitImageRejectsInvalidName(t *testing.T) {
+	rt := &fakeRuntime{}
+	mgr := newManager(t, rt, newFakeSnapshot())
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "base", "", "", false)
+	require.NoError(t, err)
+
+	for _, bad := range []string{"", "Has Caps", "../escape", ".hidden", "-flag", "a/b"} {
+		_, err = mgr.CommitImage(ctx, "dev", session.CommitImageParams{Name: bad})
+		require.Error(t, err, "name %q", bad)
+	}
+}
+
+func TestCommitImageRequiresCommittingDriver(t *testing.T) {
+	rt := &fakeRuntime{}
+	mgr := newManager(t, rt, nonCommittingSnapshot{inner: newFakeSnapshot()})
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "base", "", "", false)
+	require.NoError(t, err)
+
+	_, err = mgr.CommitImage(ctx, "dev", session.CommitImageParams{Name: "x"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot commit")
+}
+
+func TestSessionEnvCarriesIdentity(t *testing.T) {
+	rt := &fakeRuntime{}
+	mgr := newManager(t, rt, newFakeSnapshot())
+	ctx := context.Background()
+
+	created, err := mgr.Create(ctx, "dev", "base", "", "", false)
+	require.NoError(t, err)
+	require.Contains(t, rt.envs[0], "FLETCHER_SESSION_ID="+created.ID)
+	require.Contains(t, rt.envs[0], "FLETCHER_SESSION_NAME=dev")
+
+	// Identity survives stop/start (rebuilt from the row).
+	_, err = mgr.Stop(ctx, "dev")
+	require.NoError(t, err)
+	_, err = mgr.Start(ctx, "dev")
+	require.NoError(t, err)
+	require.Contains(t, rt.envs[1], "FLETCHER_SESSION_NAME=dev")
 }

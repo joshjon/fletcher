@@ -1167,31 +1167,47 @@ Decisions recorded so drift is visible:
   tab.
 - Release tagging stays manual and operator-driven (deliberately not scheduled).
 
-### Milestone 10 - publish_image: agents publish images to the daemon - NEXT
+### Milestone 10 - publish_image: agents publish images to the daemon - DONE (verified on hardware 2026-06-11)
 
-**Goal.** An agent inside a session turns its work into an image template the
-daemon can deploy - nothing leaves the network, and nothing happens silently.
-This is the missing link in the hero scenario; today the only path is pushing to
-an external registry and pulling back, which contradicts the local-first thesis
-for code that never needed to leave the LAN.
+**Goal (met).** An agent inside a session turns its work into an image template
+the daemon can deploy - nothing leaves the network, and nothing happens
+silently. Verified end to end on real microVMs: a session's disk was committed
+(while running) into a template carrying a custom entrypoint, a fresh `--app`
+session booted it and the app ran; the MCP path blocked on a pending approval
+("publish image X by committing session Y", requester `agent:<session>`),
+unblocked on `fletcher approval approve`, and published.
 
-**Shape.** A `publish_image` MCP tool on the daemon (capability gate, DESIGN §5)
-with two modes:
+**Shipped.**
 
-- **Commit mode** - snapshot the calling session's fork as a new template (the
-  docker-commit analogue; CoW makes it cheap). The agent supplies
-  entrypoint/cmd/workdir/exposed-port as tool args, captured into the existing
-  `TemplateMeta` sidecar so the result deploys like any imported image. Exact
-  consistency semantics (live snapshot vs brief pause-sync) decided at build
-  time by what the snapshot driver guarantees.
-- **Registry mode** - a thin wrapper over the existing in-process pull/flatten
-  (`ImageService.Import` path) for images an agent built and pushed in CI.
-
-**Approval-gated daemon-side:** the tool call blocks on a `pending_approval`
-row (the existing flow), so the operator's phone buzzes "agent wants to publish
-image X from session Y" and the agent proceeds on approve. Identifying the
-calling session uses the fork's MCP connection (the daemon already knows which
-session a vsock forward belongs to).
+- `snapshot.TemplateCommitter` (optional capability on the snapshot seam). The
+  ext4 driver commits by reflink-cloning the fork to a temp file and renaming,
+  so a failed commit never clobbers an existing template.
+- **Offline file injection** instead of writing inside the guest: a custom
+  entrypoint becomes `/etc/fletcher/app.json` *in the committed template* via
+  e2fsck journal replay + debugfs (both root-free, from e2fsprogs - already a
+  dependency via mkfs.ext4). Found on hardware: guest exec runs as the
+  unprivileged login user, so the in-guest write was a dead end; offline
+  injection also means a *stopped* session can be committed with an entrypoint.
+- `session.Manager.CommitImage`: syncs a running guest first (the clone is then
+  at worst crash-consistent + journal-replayed), validates names, busy-marks
+  the session against the idle reaper, and writes the `TemplateMeta` sidecar
+  (inheriting the parent template's entrypoint/port when not overridden).
+- `SessionService.CommitSessionImage` RPC + `fletcher session commit` CLI (the
+  operator-initiated path, also what the iOS app will call).
+- `publish_image` MCP tool: approval-gated (blocks on the pending approval,
+  default 10 min, capped at 1 h), commit mode + registry mode (server-side
+  pull). *Correction to the sketch:* session identity is **agent-claimed** via
+  the new `FLETCHER_SESSION_ID`/`FLETCHER_SESSION_NAME` env the daemon injects
+  per session - the vsock forwards splice raw bytes into one shared MCP socket,
+  so connection-based identity needs per-session listeners (a follow-up if it
+  ever matters). The approval card carries the resolved ground truth (which
+  session would be committed, as what name), which is the actual gate.
+- Drive-by guest fix: PID 1 boots with an empty environment, so a *relative*
+  entrypoint (`cat` vs `/bin/cat`) never resolved in app mode - masked until
+  now because Docker entrypoints are usually absolute. The guest now sets the
+  standard PATH. **Takes effect on image re-import** (the guest is injected at
+  import); the operator's existing `fletcher-base` template carries a
+  pre-app-mode guest and should be re-imported anyway.
 
 ### Milestone 11 - redeploy to a ref + rollback - PLANNED
 

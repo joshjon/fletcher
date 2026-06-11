@@ -7,6 +7,7 @@ package session
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,8 +21,10 @@ import (
 
 	"go.jetify.com/typeid"
 
+	"github.com/joshjon/fletcher/internal/appspec"
 	"github.com/joshjon/fletcher/internal/egress"
 	"github.com/joshjon/fletcher/internal/errs"
+	"github.com/joshjon/fletcher/internal/image"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/snapshot"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
@@ -83,6 +86,10 @@ type Options struct {
 	// PublicWeb gates `Publish` with public=true: when false, publishing a port
 	// publicly is refused (the public HTTPS listener is off).
 	PublicWeb bool
+	// ImagesDir is the daemon's images directory (<snapshot-root>/images). When
+	// set, committing a session image records its TemplateMeta sidecar there so
+	// pickers and deploys see the entrypoint and port.
+	ImagesDir string
 }
 
 // idleLoadThreshold is the guest 1-minute load average below which a session
@@ -207,6 +214,15 @@ func (m *Manager) envFor(gateway string) []string {
 	return env
 }
 
+// sessionEnv is envFor plus the session's own identity, so an agent inside the
+// fork can name itself to daemon tools (e.g. publish_image's session arg).
+func (m *Manager) sessionEnv(gateway, id, name string) []string {
+	return append(m.envFor(gateway),
+		"FLETCHER_SESSION_ID="+id,
+		"FLETCHER_SESSION_NAME="+name,
+	)
+}
+
 // resolveGateway canonicalises a gateway value to "on"/"off"; empty uses the
 // configured default, and anything other than "off" is "on".
 func resolveGateway(v, def string) string {
@@ -273,7 +289,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 	handle, err := m.runtime.StartSession(ctx, runtime.SessionSpec{
 		SessionID:    sessionID,
 		RootfsPath:   fork.Path,
-		Env:          m.envFor(gateway),
+		Env:          m.sessionEnv(gateway, sessionID, name),
 		EgressPolicy: egressPolicy,
 		RunApp:       runApp,
 	})
@@ -360,7 +376,7 @@ func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 	handle, err := m.runtime.StartSession(ctx, runtime.SessionSpec{
 		SessionID:    row.ID,
 		RootfsPath:   row.ForkPath,
-		Env:          m.envFor(row.Gateway),
+		Env:          m.sessionEnv(row.Gateway, row.ID, row.Name),
 		EgressPolicy: row.EgressPolicy,
 		RunApp:       row.RunApp != 0,
 	})
@@ -584,6 +600,145 @@ func (m *Manager) UpdateSession(ctx context.Context, ref, egressPolicy, gateway 
 	row.EgressPolicy = newEgress
 	row.Gateway = newGateway
 	return sessionFromRow(row), State(row.State) == StateRunning, nil
+}
+
+// CommitImageParams parameterise committing a session's fork as an image
+// template (the docker-commit analogue).
+type CommitImageParams struct {
+	// Name is the template name jobs/sessions/deploys reference via --image.
+	Name string
+	// Entrypoint and Cmd describe how a deploy launches the committed image's
+	// app. When either is set it is written into the committed image's app
+	// launch spec (offline, so a stopped session works too). Empty keeps the
+	// image's existing app spec.
+	Entrypoint []string
+	Cmd        []string
+	// WorkingDir is the app's working directory (with Entrypoint/Cmd).
+	WorkingDir string
+	// ExposedPort is the port a deploy of this image publishes by default
+	// (0 keeps the source template's, if known).
+	ExposedPort int
+	// Force replaces an existing template of the same name.
+	Force bool
+}
+
+// CommitImage commits a session's fork as a new image template so jobs,
+// sessions, and deploys can boot from it. A running session's guest page cache
+// is flushed (sync) first, so the cloned disk is at worst crash-consistent: the
+// ext4 journal replays on first boot. Returns the committed template name.
+func (m *Manager) CommitImage(ctx context.Context, ref string, p CommitImageParams) (string, error) {
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		return "", errs.New(errs.CategoryInvalidArgument, "image name is required")
+	}
+	if !validImageName(name) {
+		return "", errs.Newf(errs.CategoryInvalidArgument,
+			"invalid image name %q (use lowercase letters, digits, '.', '_', '-')", name)
+	}
+	committer, ok := m.snapshot.(snapshot.TemplateCommitter)
+	if !ok {
+		return "", errs.New(errs.CategoryFailedPrecondition,
+			"the configured snapshot driver cannot commit session images (requires the firecracker runtime's ext4 snapshots)")
+	}
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+
+	// Keep the session safe from the idle reaper for the duration.
+	m.markBusy(row.ID)
+	defer m.unmarkBusy(row.ID)
+
+	// Flush a running guest's page cache so the cloned disk holds current
+	// bytes; the result is at worst crash-consistent and the committer replays
+	// the journal when it needs to edit the clone.
+	if handle := m.getHandle(row.ID); handle != nil && State(row.State) == StateRunning {
+		if res, xerr := m.execIn(ctx, handle, "sync"); xerr != nil {
+			return "", fmt.Errorf("sync session disk before commit: %w", xerr)
+		} else if res.ExitCode != 0 {
+			return "", fmt.Errorf("sync session disk before commit: exit %d: %s", res.ExitCode, res.Stderr)
+		}
+	}
+
+	// A new entrypoint is written into the committed image as its app launch
+	// spec (the same /etc/fletcher/app.json a registry import bakes in).
+	var extraFiles map[string][]byte
+	if len(p.Entrypoint) > 0 || len(p.Cmd) > 0 {
+		specJSON, jerr := json.Marshal(appspec.Spec{
+			Entrypoint: p.Entrypoint,
+			Cmd:        p.Cmd,
+			WorkingDir: p.WorkingDir,
+		})
+		if jerr != nil {
+			return "", fmt.Errorf("marshal app spec: %w", jerr)
+		}
+		extraFiles = map[string][]byte{appspec.Path: specJSON}
+	}
+
+	if err := committer.CommitTemplate(ctx, row.ForkID, name, p.Force, extraFiles); err != nil {
+		if strings.Contains(err.Error(), "already exists") {
+			return "", errs.Newf(errs.CategoryConflict, "image %q already exists (use force to replace it)", name)
+		}
+		return "", fmt.Errorf("commit session fork: %w", err)
+	}
+	m.writeCommittedMeta(row, p, name)
+	m.touch(ctx, row.ID)
+	return name, nil
+}
+
+// writeCommittedMeta records the committed template's sidecar metadata,
+// inheriting the source template's entrypoint/port when the commit does not
+// override them. Best-effort: the template is usable without it.
+func (m *Manager) writeCommittedMeta(row sqliteq.Session, p CommitImageParams, name string) {
+	imagesDir := m.opt().ImagesDir
+	if imagesDir == "" {
+		return
+	}
+	entrypoint := append(append([]string(nil), p.Entrypoint...), p.Cmd...)
+	exposedPort := p.ExposedPort
+	if parent, found, err := image.ReadMeta(imagesDir, row.Image); err == nil && found {
+		if len(entrypoint) == 0 {
+			entrypoint = parent.Entrypoint
+		}
+		if exposedPort == 0 {
+			exposedPort = parent.ExposedPort
+		}
+	}
+	meta := image.TemplateMeta{
+		Source:      "session:" + row.Name,
+		Format:      "ext4",
+		ImportedAt:  time.Now().Unix(),
+		Entrypoint:  entrypoint,
+		ExposedPort: exposedPort,
+	}
+	if err := image.WriteMeta(imagesDir, name, meta); err != nil {
+		m.logger.Warn("write committed image metadata",
+			slog.String("session_id", row.ID), slog.String("image", name), slog.String("err", err.Error()))
+	}
+}
+
+// execIn runs cmd in the session VM behind handle, capturing its output.
+func (m *Manager) execIn(ctx context.Context, handle runtime.SessionHandle, cmd string) (ExecResult, error) {
+	var stdout, stderr strings.Builder
+	res, err := handle.Exec(ctx, runtime.Spec{Command: cmd}, &stdout, &stderr)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	return ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: res.ExitCode}, nil
+}
+
+// validImageName reports whether name is safe as a template file name.
+func validImageName(name string) bool {
+	if name == "" || len(name) > 64 || name[0] == '.' || name[0] == '-' {
+		return false
+	}
+	for _, r := range name {
+		ok := r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-'
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // Redeploy replaces a session's disk with a fresh fork of its current template

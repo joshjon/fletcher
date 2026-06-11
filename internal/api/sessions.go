@@ -36,6 +36,7 @@ type SessionsBackend interface {
 	Logs(ctx context.Context, ref string, tailLines int) (string, error)
 	StreamLogs(ctx context.Context, ref string, tailLines int, follow bool, w io.Writer) error
 	AppRestartCount(ctx context.Context, ref string) (int64, bool)
+	CommitImage(ctx context.Context, ref string, p session.CommitImageParams) (string, error)
 }
 
 // DeployInfoResolver returns the image-derived deploy detail for a run_app
@@ -227,6 +228,22 @@ func (s *SessionsService) RedeploySession(ctx context.Context, req *connect.Requ
 		Session:        sessionToProto(sess),
 		ImageRefreshed: refreshed,
 	}), nil
+}
+
+// CommitSessionImage commits a session's fork as a new image template.
+func (s *SessionsService) CommitSessionImage(ctx context.Context, req *connect.Request[fletcherv1.CommitSessionImageRequest]) (*connect.Response[fletcherv1.CommitSessionImageResponse], error) {
+	img, err := s.backend.CommitImage(ctx, req.Msg.GetRef(), session.CommitImageParams{
+		Name:        req.Msg.GetName(),
+		Entrypoint:  req.Msg.GetEntrypoint(),
+		Cmd:         req.Msg.GetCmd(),
+		WorkingDir:  req.Msg.GetWorkingDir(),
+		ExposedPort: int(req.Msg.GetExposedPort()),
+		Force:       req.Msg.GetForce(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.CommitSessionImageResponse{Image: img}), nil
 }
 
 // GetSessionLogs returns the tail of a run_app session's app log.

@@ -85,6 +85,12 @@ const appLogPath = "/var/log/fletcher-app.log"
 // under a supervisor that restarts it if it exits, logging to appLogPath. The
 // control server keeps running alongside it so the session is still shell-able.
 func startApp() {
+	// PID 1 boots with an empty environment, so a relative entrypoint (e.g.
+	// "cat") would never resolve: exec.Command looks argv[0] up in the parent
+	// process's PATH, not the child env. Give init the standard PATH once.
+	if os.Getenv("PATH") == "" {
+		_ = os.Setenv("PATH", defaultGuestPath)
+	}
 	spec, err := appspec.Read(appspec.Path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fletcher-guest: app mode on but no app spec (%v); nothing to run\n", err)
@@ -694,6 +700,9 @@ func (s streamWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// defaultGuestPath is the PATH commands get when the image's spec sets none.
+const defaultGuestPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 // withDefaults ensures the command has a usable PATH, HOME, and USER even if the
 // spec did not set them. HOME/USER track the login user (root when unresolved)
 // so an agent finds its config in the same home it uses over SSH.
@@ -704,7 +713,7 @@ func withDefaults(env []string, lu loginUser) []string {
 	}
 	out := append([]string(nil), env...)
 	if !hasKey(out, "PATH") {
-		out = append(out, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+		out = append(out, "PATH="+defaultGuestPath)
 	}
 	if !hasKey(out, "HOME") {
 		out = append(out, "HOME="+home)

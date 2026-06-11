@@ -64,6 +64,11 @@ service SessionService {
   // Server-streaming, so it needs HTTP/2 (the same NIOHTTPClient path the shell
   // uses on iOS).
   rpc StreamSessionLogs(StreamSessionLogsRequest) returns (stream StreamSessionLogsResponse) {}
+  // CommitSessionImage commits a session's fork as a new image template (the
+  // docker-commit analogue), so jobs, sessions, and deploys can boot from it.
+  // A running session's disk is synced first; the result is at worst
+  // crash-consistent. Requires a snapshot driver that can commit (ext4).
+  rpc CommitSessionImage(CommitSessionImageRequest) returns (CommitSessionImageResponse) {}
 }
 
 enum SessionState {
@@ -213,6 +218,32 @@ message RedeploySessionResponse {
   // the re-fork; false for a local image, or when the pull was skipped or could
   // not run (e.g. the image is private and needs credentials).
   bool image_refreshed = 2;
+}
+
+message CommitSessionImageRequest {
+  // ref is a session ID or name.
+  string ref = 1;
+  // name is the template name for the committed image (lowercase letters,
+  // digits, '.', '_', '-').
+  string name = 2;
+  // entrypoint, with cmd appended, is the command a deploy of the committed
+  // image runs. Setting either requires the session to be running (the spec is
+  // written inside the guest before the commit). Empty keeps the image's
+  // existing app spec.
+  repeated string entrypoint = 3;
+  repeated string cmd = 4;
+  // working_dir is the directory the deploy's app starts in.
+  string working_dir = 5;
+  // exposed_port is the port a deploy of the image publishes by default
+  // (0 keeps the source template's, if known).
+  uint32 exposed_port = 6;
+  // force replaces an existing template of the same name.
+  bool force = 7;
+}
+
+message CommitSessionImageResponse {
+  // image is the committed template name.
+  string image = 1;
 }
 
 message GetSessionLogsRequest {

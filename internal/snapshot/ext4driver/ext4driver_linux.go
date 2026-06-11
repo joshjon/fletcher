@@ -14,12 +14,16 @@
 package ext4driver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -90,6 +94,119 @@ func (d *Driver) Create(ctx context.Context, image string) (snapshot.Snapshot, e
 		return snapshot.Snapshot{}, fmt.Errorf("ext4: clone rootfs: %w", err)
 	}
 	return snapshot.Snapshot{ID: id, Path: dst}, nil
+}
+
+// CommitTemplate clones the snapshot's rootfs back into <imagesDir>/<name>.ext4
+// so future jobs/sessions can boot from it (snapshot.TemplateCommitter). The
+// clone goes via a temp file + rename, so a failed or cancelled commit never
+// clobbers an existing template; on a reflink-capable filesystem committing a
+// large fork is instant. extraFiles are injected into the cloned image offline
+// (journal replay + debugfs), so no privileges and no running guest are needed.
+func (d *Driver) CommitTemplate(ctx context.Context, id, name string, force bool, extraFiles map[string][]byte) error {
+	if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
+		return fmt.Errorf("ext4: invalid template name %q", name)
+	}
+	if id != filepath.Base(id) || id == "." || id == ".." {
+		return fmt.Errorf("ext4: invalid snapshot id %q", id)
+	}
+	src := filepath.Join(d.rootDir, id+templateExt)
+	if _, err := os.Stat(src); err != nil {
+		return fmt.Errorf("ext4: snapshot rootfs %s: %w", src, err)
+	}
+	if err := os.MkdirAll(d.imagesDir, 0o750); err != nil {
+		return fmt.Errorf("ext4: create images dir: %w", err)
+	}
+	dst := filepath.Join(d.imagesDir, name+templateExt)
+	if _, err := os.Stat(dst); err == nil && !force {
+		return fmt.Errorf("ext4: template %q already exists", name)
+	}
+	tmp := dst + ".partial"
+	if err := cloneFile(ctx, src, tmp); err != nil {
+		return fmt.Errorf("ext4: commit rootfs to template: %w", err)
+	}
+	if len(extraFiles) > 0 {
+		if err := injectFiles(ctx, tmp, extraFiles); err != nil {
+			_ = os.Remove(tmp)
+			return err
+		}
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("ext4: finalise template: %w", err)
+	}
+	return nil
+}
+
+// injectFiles writes files into an unmounted ext4 image. The journal is
+// replayed first (e2fsck): debugfs writes bypass it, so a pending transaction
+// from a just-synced live disk could otherwise clobber the edit on first mount.
+func injectFiles(ctx context.Context, img string, files map[string][]byte) error {
+	if out, err := exec.CommandContext(ctx, "e2fsck", "-fp", img).CombinedOutput(); err != nil { //nolint:gosec // img is a daemon-owned template path
+		// Exit 1/2 mean preen fixed issues - fine for a crash-consistent clone.
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) || ee.ExitCode() >= 4 {
+			return fmt.Errorf("ext4: fsck template before file injection: %w: %s", err, out)
+		}
+	}
+	for guestPath, data := range files {
+		if err := injectFile(ctx, img, guestPath, data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// injectFile writes one file into the image via debugfs, creating parent
+// directories and replacing any existing file. debugfs exits 0 even when a
+// command fails, so the write is verified by reading the content back.
+func injectFile(ctx context.Context, img, guestPath string, data []byte) error {
+	if !path.IsAbs(guestPath) || strings.ContainsAny(guestPath, " \t\n\"") {
+		return fmt.Errorf("ext4: invalid template file path %q", guestPath)
+	}
+	tmpf, err := os.CreateTemp("", "fletcher-inject-*")
+	if err != nil {
+		return fmt.Errorf("ext4: stage template file: %w", err)
+	}
+	defer func() {
+		_ = tmpf.Close()
+		_ = os.Remove(tmpf.Name())
+	}()
+	if _, err := tmpf.Write(data); err != nil {
+		return fmt.Errorf("ext4: stage template file: %w", err)
+	}
+	if err := tmpf.Close(); err != nil {
+		return fmt.Errorf("ext4: stage template file: %w", err)
+	}
+
+	// One stdin-driven debugfs run: `write` only creates a file in the current
+	// directory, so cd to the parent first. mkdir/rm fail harmlessly when the
+	// directory exists / the file is absent.
+	var script strings.Builder
+	for _, dir := range ancestorDirs(guestPath) {
+		fmt.Fprintf(&script, "mkdir %s\n", dir)
+	}
+	fmt.Fprintf(&script, "cd %s\n", path.Dir(guestPath))
+	fmt.Fprintf(&script, "rm %s\n", path.Base(guestPath))
+	fmt.Fprintf(&script, "write %s %s\n", tmpf.Name(), path.Base(guestPath))
+	cmd := exec.CommandContext(ctx, "debugfs", "-w", img) //nolint:gosec // img is a daemon-owned template path
+	cmd.Stdin = strings.NewReader(script.String())
+	_ = cmd.Run()
+
+	got, err := exec.CommandContext(ctx, "debugfs", "-R", "cat "+guestPath, img).Output() //nolint:gosec // validated path
+	if err != nil || !bytes.Equal(got, data) {
+		return fmt.Errorf("ext4: inject %s into template: write could not be verified (is debugfs from e2fsprogs installed?)", guestPath)
+	}
+	return nil
+}
+
+// ancestorDirs lists the parent directories of an absolute path, shallowest
+// first (e.g. /etc/fletcher/app.json -> /etc, /etc/fletcher).
+func ancestorDirs(p string) []string {
+	var dirs []string
+	for dir := path.Dir(p); dir != "/" && dir != "."; dir = path.Dir(dir) {
+		dirs = append([]string{dir}, dirs...)
+	}
+	return dirs
 }
 
 // Delete removes the per-job rootfs clone. A missing file is not an error.

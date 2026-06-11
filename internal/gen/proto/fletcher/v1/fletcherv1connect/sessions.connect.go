@@ -84,6 +84,9 @@ const (
 	// SessionServiceStreamSessionLogsProcedure is the fully-qualified name of the SessionService's
 	// StreamSessionLogs RPC.
 	SessionServiceStreamSessionLogsProcedure = "/fletcher.v1.SessionService/StreamSessionLogs"
+	// SessionServiceCommitSessionImageProcedure is the fully-qualified name of the SessionService's
+	// CommitSessionImage RPC.
+	SessionServiceCommitSessionImageProcedure = "/fletcher.v1.SessionService/CommitSessionImage"
 )
 
 // SessionServiceClient is a client for the fletcher.v1.SessionService service.
@@ -143,6 +146,11 @@ type SessionServiceClient interface {
 	// Server-streaming, so it needs HTTP/2 (the same NIOHTTPClient path the shell
 	// uses on iOS).
 	StreamSessionLogs(context.Context, *connect.Request[v1.StreamSessionLogsRequest]) (*connect.ServerStreamForClient[v1.StreamSessionLogsResponse], error)
+	// CommitSessionImage commits a session's fork as a new image template (the
+	// docker-commit analogue), so jobs, sessions, and deploys can boot from it.
+	// A running session's disk is synced first; the result is at worst
+	// crash-consistent. Requires a snapshot driver that can commit (ext4).
+	CommitSessionImage(context.Context, *connect.Request[v1.CommitSessionImageRequest]) (*connect.Response[v1.CommitSessionImageResponse], error)
 }
 
 // NewSessionServiceClient constructs a client for the fletcher.v1.SessionService service. By
@@ -258,28 +266,35 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("StreamSessionLogs")),
 			connect.WithClientOptions(opts...),
 		),
+		commitSessionImage: connect.NewClient[v1.CommitSessionImageRequest, v1.CommitSessionImageResponse](
+			httpClient,
+			baseURL+SessionServiceCommitSessionImageProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("CommitSessionImage")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // sessionServiceClient implements SessionServiceClient.
 type sessionServiceClient struct {
-	createSession     *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
-	getSession        *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
-	listSessions      *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
-	startSession      *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
-	stopSession       *connect.Client[v1.StopSessionRequest, v1.StopSessionResponse]
-	deleteSession     *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
-	updateSession     *connect.Client[v1.UpdateSessionRequest, v1.UpdateSessionResponse]
-	execSession       *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
-	shellSession      *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
-	proxySession      *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
-	publishPort       *connect.Client[v1.PublishPortRequest, v1.PublishPortResponse]
-	unpublishPort     *connect.Client[v1.UnpublishPortRequest, v1.UnpublishPortResponse]
-	listPorts         *connect.Client[v1.ListPortsRequest, v1.ListPortsResponse]
-	restartSession    *connect.Client[v1.RestartSessionRequest, v1.RestartSessionResponse]
-	redeploySession   *connect.Client[v1.RedeploySessionRequest, v1.RedeploySessionResponse]
-	getSessionLogs    *connect.Client[v1.GetSessionLogsRequest, v1.GetSessionLogsResponse]
-	streamSessionLogs *connect.Client[v1.StreamSessionLogsRequest, v1.StreamSessionLogsResponse]
+	createSession      *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
+	getSession         *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
+	listSessions       *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
+	startSession       *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
+	stopSession        *connect.Client[v1.StopSessionRequest, v1.StopSessionResponse]
+	deleteSession      *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
+	updateSession      *connect.Client[v1.UpdateSessionRequest, v1.UpdateSessionResponse]
+	execSession        *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
+	shellSession       *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
+	proxySession       *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
+	publishPort        *connect.Client[v1.PublishPortRequest, v1.PublishPortResponse]
+	unpublishPort      *connect.Client[v1.UnpublishPortRequest, v1.UnpublishPortResponse]
+	listPorts          *connect.Client[v1.ListPortsRequest, v1.ListPortsResponse]
+	restartSession     *connect.Client[v1.RestartSessionRequest, v1.RestartSessionResponse]
+	redeploySession    *connect.Client[v1.RedeploySessionRequest, v1.RedeploySessionResponse]
+	getSessionLogs     *connect.Client[v1.GetSessionLogsRequest, v1.GetSessionLogsResponse]
+	streamSessionLogs  *connect.Client[v1.StreamSessionLogsRequest, v1.StreamSessionLogsResponse]
+	commitSessionImage *connect.Client[v1.CommitSessionImageRequest, v1.CommitSessionImageResponse]
 }
 
 // CreateSession calls fletcher.v1.SessionService.CreateSession.
@@ -367,6 +382,11 @@ func (c *sessionServiceClient) StreamSessionLogs(ctx context.Context, req *conne
 	return c.streamSessionLogs.CallServerStream(ctx, req)
 }
 
+// CommitSessionImage calls fletcher.v1.SessionService.CommitSessionImage.
+func (c *sessionServiceClient) CommitSessionImage(ctx context.Context, req *connect.Request[v1.CommitSessionImageRequest]) (*connect.Response[v1.CommitSessionImageResponse], error) {
+	return c.commitSessionImage.CallUnary(ctx, req)
+}
+
 // SessionServiceHandler is an implementation of the fletcher.v1.SessionService service.
 type SessionServiceHandler interface {
 	// CreateSession provisions a session's persistent fork and boots its VM. The
@@ -424,6 +444,11 @@ type SessionServiceHandler interface {
 	// Server-streaming, so it needs HTTP/2 (the same NIOHTTPClient path the shell
 	// uses on iOS).
 	StreamSessionLogs(context.Context, *connect.Request[v1.StreamSessionLogsRequest], *connect.ServerStream[v1.StreamSessionLogsResponse]) error
+	// CommitSessionImage commits a session's fork as a new image template (the
+	// docker-commit analogue), so jobs, sessions, and deploys can boot from it.
+	// A running session's disk is synced first; the result is at worst
+	// crash-consistent. Requires a snapshot driver that can commit (ext4).
+	CommitSessionImage(context.Context, *connect.Request[v1.CommitSessionImageRequest]) (*connect.Response[v1.CommitSessionImageResponse], error)
 }
 
 // NewSessionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -535,6 +560,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("StreamSessionLogs")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceCommitSessionImageHandler := connect.NewUnaryHandler(
+		SessionServiceCommitSessionImageProcedure,
+		svc.CommitSessionImage,
+		connect.WithSchema(sessionServiceMethods.ByName("CommitSessionImage")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
@@ -571,6 +602,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceGetSessionLogsHandler.ServeHTTP(w, r)
 		case SessionServiceStreamSessionLogsProcedure:
 			sessionServiceStreamSessionLogsHandler.ServeHTTP(w, r)
+		case SessionServiceCommitSessionImageProcedure:
+			sessionServiceCommitSessionImageHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -646,4 +679,8 @@ func (UnimplementedSessionServiceHandler) GetSessionLogs(context.Context, *conne
 
 func (UnimplementedSessionServiceHandler) StreamSessionLogs(context.Context, *connect.Request[v1.StreamSessionLogsRequest], *connect.ServerStream[v1.StreamSessionLogsResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.StreamSessionLogs is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) CommitSessionImage(context.Context, *connect.Request[v1.CommitSessionImageRequest]) (*connect.Response[v1.CommitSessionImageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.CommitSessionImage is not implemented"))
 }

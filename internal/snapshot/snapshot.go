@@ -22,3 +22,18 @@ type Driver interface {
 	// snapshot is a no-op (not an error).
 	Delete(ctx context.Context, id string) error
 }
+
+// TemplateCommitter is the optional capability a Driver advertises when it can
+// commit an existing snapshot back into a named image template - the
+// docker-commit analogue for forks. The caller is responsible for quiescing
+// whatever is writing to the snapshot (e.g. syncing a running guest) before
+// committing; the result is at worst crash-consistent.
+type TemplateCommitter interface {
+	// CommitTemplate clones the snapshot referenced by id into a template named
+	// name, so future jobs/sessions can boot from it. force replaces an
+	// existing template of the same name; without it an existing template is a
+	// conflict. extraFiles (absolute in-template path -> content) are written
+	// into the template's filesystem before it is published (e.g. the app
+	// launch spec a deploy boots with); nil writes nothing.
+	CommitTemplate(ctx context.Context, id, name string, force bool, extraFiles map[string][]byte) error
+}

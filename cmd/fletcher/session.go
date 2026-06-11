@@ -40,6 +40,45 @@ func sessionCmd() *cli.Command {
 			sessionRestartCmd(),
 			sessionRedeployCmd(),
 			sessionUpdateCmd(),
+			sessionCommitCmd(),
+		},
+	}
+}
+
+func sessionCommitCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "commit",
+		Usage:     "commit a session's disk as a new image template (jobs, sessions, and deploys can boot from it)",
+		ArgsUsage: "<ref>",
+		Flags: []cli.Flag{
+			socketFlag(),
+			&cli.StringFlag{Name: "name", Usage: "template name for the committed image", Required: true},
+			&cli.StringSliceFlag{Name: "entrypoint", Usage: "command a deploy of the image runs (repeat per argv element)"},
+			&cli.StringSliceFlag{Name: "cmd", Usage: "arguments appended to --entrypoint (repeat per element)"},
+			&cli.StringFlag{Name: "workdir", Usage: "working directory the deploy's app starts in"},
+			&cli.IntFlag{Name: "port", Usage: "port a deploy of the image publishes by default"},
+			&cli.BoolFlag{Name: "force", Usage: "replace an existing template of the same name"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ref := cmd.Args().First()
+			if ref == "" {
+				return errors.New("session ref (id or name) is required")
+			}
+			client := newSessionsClient(cmd)
+			resp, err := client.CommitSessionImage(ctx, connect.NewRequest(&fletcherv1.CommitSessionImageRequest{
+				Ref:         ref,
+				Name:        cmd.String("name"),
+				Entrypoint:  cmd.StringSlice("entrypoint"),
+				Cmd:         cmd.StringSlice("cmd"),
+				WorkingDir:  cmd.String("workdir"),
+				ExposedPort: clampUint32(cmd.Int("port")),
+				Force:       cmd.Bool("force"),
+			}))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("committed image %s\n", resp.Msg.GetImage())
+			return nil
 		},
 	}
 }

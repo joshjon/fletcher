@@ -435,8 +435,9 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	// local + auth-free). Best-effort: nil when the tunnel is not up.
 	remoteLn := listenRemoteAPI(ctx, netSetup, apiEndpoint, logger)
 
+	// Tool registration happens once the session manager exists below (the
+	// publish_image tool commits session forks); the server starts serving later.
 	mcpServer := fletchermcp.NewServer("fletcher", buildinfo.Version, auditRecorder, logger)
-	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, fletchermcp.NewEgressHTTPClient(30*time.Second), approvalSvc)
 	logger.Info("mcp server ready", slog.String("base_url", mcpURL))
 
 	// Env every agent inherits, split so a fork can opt out of the model gateway
@@ -493,10 +494,24 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		DefaultEgressPolicy: egressDefaultPolicy(cfg),
 		DefaultGateway:      defaultGateway(cfg),
 		PublicWeb:           cfg.PublicWeb,
+		ImagesDir:           filepath.Join(snapshotRootDir(cfg), "images"),
 	})
 	if err := sessionMgr.ReconcileOnBoot(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile sessions: %w", err)
 	}
+
+	// publish_image backend: agents commit their session's fork (or import a
+	// registry ref) as a template, behind an approval. Only meaningful on a
+	// session-capable runtime; elsewhere the tool is not registered.
+	var publisher fletchermcp.ImagePublisher
+	if sessionRuntime != nil {
+		publisher = &imagePublisher{
+			sessions:  sessionMgr,
+			imagesDir: filepath.Join(snapshotRootDir(cfg), "images"),
+			format:    driverKind(cfg.SnapshotKind),
+		}
+	}
+	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, fletchermcp.NewEgressHTTPClient(30*time.Second), approvalSvc, publisher)
 
 	// Published-port broker: forwards a session's published port to the service
 	// inside its VM, dialing in via the session manager over vsock so the VM
@@ -1290,6 +1305,45 @@ func (r imageDeployResolver) DeployInfo(imageName string) (entrypoint []string, 
 		return nil, 0, false
 	}
 	return meta.Entrypoint, meta.ExposedPort, true
+}
+
+// imagePublisher adapts the session manager and the server-side registry
+// import to the mcp.ImagePublisher the publish_image tool needs. Approval
+// gating happens in the tool; this is just the do-it backend.
+type imagePublisher struct {
+	sessions  *session.Manager
+	imagesDir string
+	format    string
+}
+
+func (p *imagePublisher) CommitSessionImage(ctx context.Context, c fletchermcp.CommitImage) (string, error) {
+	return p.sessions.CommitImage(ctx, c.SessionRef, session.CommitImageParams{
+		Name:        c.Name,
+		Entrypoint:  c.Entrypoint,
+		Cmd:         c.Cmd,
+		WorkingDir:  c.WorkingDir,
+		ExposedPort: c.ExposedPort,
+		Force:       c.Force,
+	})
+}
+
+func (p *imagePublisher) ImportRegistryImage(ctx context.Context, ref, name string, force bool) (string, error) {
+	if p.format != "ext4" {
+		return "", fmt.Errorf("registry image publishing requires the firecracker runtime (ext4 snapshots), not %q", p.format)
+	}
+	if name == "" {
+		name = image.DefaultName(ref)
+	}
+	res, err := image.ImportRegistry(ctx, image.ImportOptions{
+		Ref:       ref,
+		Name:      name,
+		ImagesDir: p.imagesDir,
+		Force:     force,
+	})
+	if err != nil {
+		return "", err
+	}
+	return res.Name, nil
 }
 
 // imageRefresher re-pulls a registry-sourced template before a redeploy so the
