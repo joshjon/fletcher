@@ -731,8 +731,10 @@ services:
   (client-side filter by trigger/parent_id). *Gap: no `UpdateJob`/`SetSchedule`
   to edit a schedule (Create+Cancel only); a `parent_id`/`trigger` filter on
   `ListJobs` would beat client-side filtering. Low priority.*
-- **M10 - inbox.** Needs the proposed `fletcher.report` MCP tool for structured
-  cards; the generic fallback works from existing job data. *Future.*
+- **M10 - inbox.** Superseded 2026-06-11: the `fletcher.report` MCP tool ships
+  with daemon Milestone 14 as push-notification content; the inbox feed/tab is
+  parked until a cron/jobs usage signal exists (see the mobile-first wave
+  below).
 
 Recommended order: (1) **M6** (named blocker, the largest), folding in
 `tls_status` (also closes M5's chip); (2) cheap upgrades to shipped milestones -
@@ -1136,6 +1138,120 @@ the default runtime.
   logs` shows output; `session stop`/`start` and a daemon restart bring the app
   back on its own.
 
+### Mobile-first wave (Milestones 10-14) - PLANNED (decided 2026-06-11)
+
+Decided with the operator 2026-06-11 after walking the hero mobile scenario end
+to end: create a dev session from the phone, drive Claude in it, have Claude
+publish the result as an image, deploy that image, and watch it live in a
+browser - without opening a laptop. The walk surfaced one hard gap (an agent has
+no way to publish an image to the daemon - its MCP surface is health, http_get,
+http_request, request_approval only), one sharp edge (redeploy cannot change the
+image ref and loses runtime data), and one experience gap (the app is a polling
+client - no push beyond approvals, no live state). Milestones below are in
+priority order; the iOS counterparts live in the fletcher-ios ROADMAP.
+
+Decisions recorded so drift is visible:
+
+- **Inbox split (supersedes the iOS-M10 inbox sketch in the audit above).** The
+  `fletcher.report` MCP tool ships as the structured *content* source for push
+  notifications (Milestone 14); the dedicated inbox feed/tab is **parked** until
+  a cron/jobs usage signal exists. The feed's audience (monitoring +
+  non-technical users, DESIGN §7) is not today's user, and reports stay
+  queryable via RPC/CLI without it.
+- **Persistent volumes promoted from the backlog** (operator call, 2026-06-11):
+  redeploy re-forks from the template, so anything the app wrote at runtime dies
+  with the old fork. Volumes fix that and also unlock session rebase onto a
+  newer base image.
+- **Parked iOS-side (operator call):** Live Activities, App Intents / widgets,
+  iPad / landscape, Face ID / passcode app lock (explicitly unwanted), the inbox
+  tab.
+- Release tagging stays manual and operator-driven (deliberately not scheduled).
+
+### Milestone 10 - publish_image: agents publish images to the daemon - NEXT
+
+**Goal.** An agent inside a session turns its work into an image template the
+daemon can deploy - nothing leaves the network, and nothing happens silently.
+This is the missing link in the hero scenario; today the only path is pushing to
+an external registry and pulling back, which contradicts the local-first thesis
+for code that never needed to leave the LAN.
+
+**Shape.** A `publish_image` MCP tool on the daemon (capability gate, DESIGN §5)
+with two modes:
+
+- **Commit mode** - snapshot the calling session's fork as a new template (the
+  docker-commit analogue; CoW makes it cheap). The agent supplies
+  entrypoint/cmd/workdir/exposed-port as tool args, captured into the existing
+  `TemplateMeta` sidecar so the result deploys like any imported image. Exact
+  consistency semantics (live snapshot vs brief pause-sync) decided at build
+  time by what the snapshot driver guarantees.
+- **Registry mode** - a thin wrapper over the existing in-process pull/flatten
+  (`ImageService.Import` path) for images an agent built and pushed in CI.
+
+**Approval-gated daemon-side:** the tool call blocks on a `pending_approval`
+row (the existing flow), so the operator's phone buzzes "agent wants to publish
+image X from session Y" and the agent proceeds on approve. Identifying the
+calling session uses the fork's MCP connection (the daemon already knows which
+session a vsock forward belongs to).
+
+### Milestone 11 - redeploy to a ref + rollback - PLANNED
+
+**Goal.** The day-2 flow: the operator deployed `app:v1`; the next day Claude
+pushes `app:v2` (to the daemon via M10, or to a registry); the operator
+redeploys to it from the phone, and can roll back if it breaks.
+
+**Today:** `RedeploySession` re-pulls the *same* source ref (so a moved tag like
+`:latest` works) but cannot point a deployment at a different ref - the only
+path is delete + recreate.
+
+**Shape.** `RedeploySession` gains an optional `image_ref`: re-import from that
+ref (or re-resolve a daemon-local template name), refresh
+entrypoint/EXPOSE/env from the new image's meta, re-fork, restart. Keep the
+previous template digest in meta so redeploy-to-previous is a one-step rollback.
+CLI: `session redeploy --image <ref>` / `--rollback`.
+
+### Milestone 12 - persistent volumes - PLANNED (promoted from backlog)
+
+**Goal.** A first-class volume object that survives session/deploy lifecycle:
+its own SQLite row and its own ext4 image / btrfs subvolume (a new lineage on
+the snapshot interface - "create/open volume", distinct from "clone template"),
+mounted into the VM at a known path. `session delete` detaches rather than
+destroys; `session create --volume <ref>` / deploy reattach it to a fresh fork;
+redeploy keeps it. Single-writer semantics (one running session per volume),
+disk accounting separated from fork accounting, surfaced through
+create/list/get/delete RPCs + CLI verbs and the session/deploy create paths.
+The full sketch (including the base-image convention questions for what lands
+on the volume) is in the backlog entry this milestone absorbs - resolve the
+mount-path convention at build time; agent-session-state-on-volume can follow
+later.
+
+### Milestone 13 - WatchEvents: a live client - PLANNED
+
+**Goal.** Kill polling as the app's only source of truth. A server-streaming
+`WatchEvents` RPC over the existing h2c remote surface: session state changes,
+deploy restarts/crash-loops, approval created/resolved, image
+imported/published, job state changes. Backed by the embedded NATS bus or an
+in-process broadcaster - decided at build time (NATS is already in the stack
+for exactly this, DESIGN §9). The iOS list/detail screens and approvals badge
+update live; reconnect-with-backoff on stream drop.
+
+### Milestone 14 - notification breadth + fletcher.report - PLANNED
+
+**Goal.** The phone hears about everything that matters, not just approvals.
+
+- **`fletcher.report` MCP tool** (the surviving half of the inbox idea): an
+  agent posts `{title, summary, status, link?}`; the daemon stores a `reports`
+  row tied to the source session/job and fires a push with that content. The
+  hero use: Claude finishes a long task in a durable session and the phone says
+  what was done instead of a generic "session idle".
+- **Push events:** job finished (with exit status), deploy went live, deploy
+  crash-looping (restart_count is already tracked), session went idle after
+  work (the reaper's work-based idle signal repurposed as "the agent is done /
+  waiting for you").
+- **Per-type opt-outs** as settings keys so the iOS Notifications group has
+  real dials.
+- Reports are queryable (RPC + CLI + shown on session/job detail) so nothing
+  depends on a feed UI.
+
 ## Toward v1 - hardening (in progress)
 
 With M1-M6 done, the daemon is feature-complete on the thesis (ephemeral jobs +
@@ -1329,7 +1445,9 @@ Listed so they are visible, not lost. Items that became milestones are above.
 
 **Sessions + storage**
 
-- **Persistent volumes decoupled from session lifecycle** - today a session is a
+- **Persistent volumes decoupled from session lifecycle - PROMOTED to
+  Milestone 12 (2026-06-11);** the sketch below is its source material - today a
+  session is a
   single CoW fork where the base rootfs and `/workspace` are intermingled (M6:
   the durable unit is the fork on disk), so data lives and dies with the session
   and cannot be carried onto a newer base image. The pattern (Docker named
