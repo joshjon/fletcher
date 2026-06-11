@@ -1581,7 +1581,30 @@ Listed so they are visible, not lost. Items that became milestones are above.
 
 **Agents + gateway**
 
-- **APNs push** - replace approval polling with push (phase 7).
+- **APNs push** - the machinery is DONE (M8 + the M14 notify router), but see
+  the deployment decision below.
+- **Push deployment model (decided 2026-06-12).** The bring-your-own-key path
+  (the operator's `.p8` on their box, daemon pushes straight to Apple) is
+  fully on-thesis but only works for operators who build and sign the iOS
+  app under their own Apple team - Apple only accepts pushes to an app from
+  the team that signs it, so it can never serve App Store users. The
+  operator's decision: Fletcher is headed at a public audience, so the
+  per-operator key is **not** the deployment model, and the operator is not
+  configuring one on his own box either. Status quo for the dev phase:
+  **push stays unconfigured and polling carries the load** (the app's bell
+  badge and approvals sheet already poll; the daemon's APNs sender is a
+  clean no-op without a key). The eventual public answer is a
+  **Fletcher-operated stateless push relay** holding the app's key - the
+  compromise Home Assistant / Nextcloud / Bitwarden all make because APNs
+  permits no alternative; a deliberate, loudly-documented exception to "the
+  developer hosts nothing", deferred as overkill until public distribution
+  is real. The daemon's send path is already behind the apnsSender seam and
+  the payloads are content-light (ids only, detail fetched over the tunnel),
+  so the relay slots in as a different endpoint + no local key, not a
+  redesign. A possible keyless interim if background notification is wanted
+  sooner: BGAppRefreshTask polling + local notifications in the app
+  (unreliable timing by design - iOS decides when - but zero infrastructure
+  and it works for every user); not scheduled.
 - **Gateway breadth** - streaming in the translation path; a second provider
   (phase 5).
 - **pi-extension `registerProvider`** - once the `pi` extension API is pinned
