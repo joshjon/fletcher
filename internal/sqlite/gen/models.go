@@ -85,10 +85,20 @@ type Session struct {
 	RunApp       int64
 	PrevForkID   *string
 	PrevForkPath *string
+	VolumeID     *string
 }
 
 type Setting struct {
 	Key       string
 	Value     string
+	UpdatedAt int64
+}
+
+type Volume struct {
+	ID        string
+	Name      string
+	Path      string
+	SizeBytes int64
+	CreatedAt int64
 	UpdatedAt int64
 }

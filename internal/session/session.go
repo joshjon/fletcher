@@ -63,6 +63,10 @@ type Session struct {
 	// HasRollback is whether a redeploy retired a fork this session can roll
 	// back to.
 	HasRollback bool
+	// VolumeID and VolumeName identify the persistent volume attached to this
+	// session (empty when none). The volume outlives forks and the session.
+	VolumeID   string
+	VolumeName string
 }
 
 // ErrNotFound is returned when a session ref matches nothing.
@@ -130,6 +134,24 @@ type Manager struct {
 	// the tunnel is down (published ports are recorded but unreachable until it
 	// comes up). Set once at startup via SetBroker, before serving.
 	broker PortBroker
+
+	// volumes resolves persistent volumes for attachment and boot. nil when the
+	// snapshot driver cannot provision volumes; sessions then refuse --volume.
+	// Set once at startup via SetVolumes, before serving.
+	volumes VolumeResolver
+}
+
+// VolumeResolver resolves persistent volumes for attachment and boot
+// (implemented by volume.Manager; kept narrow per "consumers define
+// interfaces").
+type VolumeResolver interface {
+	// ResolveAttachable resolves ref to a volume free to attach, refusing one
+	// already attached to another session.
+	ResolveAttachable(ctx context.Context, ref string) (id, path string, err error)
+	// PathFor returns the backing path for an attached volume id.
+	PathFor(ctx context.Context, id string) (string, error)
+	// NameFor returns the display name for an attached volume id.
+	NameFor(ctx context.Context, id string) (string, error)
 }
 
 // PortBroker opens and closes the host-side forwarders that make a session's
@@ -255,8 +277,9 @@ func (m *Manager) requireRuntime() error {
 
 // Create provisions a session's persistent fork, boots its VM, and records it.
 // egressPolicy is "none"|"allowlist"|"open"; empty resolves to the manager's
-// configured default.
-func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool) (Session, error) {
+// configured default. volumeRef, when non-empty, attaches that persistent
+// volume (mounted at /volume in the guest) for the session's lifetime.
+func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool, volumeRef string) (Session, error) {
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
@@ -278,6 +301,19 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		return Session{}, err
 	}
 
+	var volumeID, volumePath string
+	if strings.TrimSpace(volumeRef) != "" {
+		if m.volumes == nil {
+			return Session{}, errs.New(errs.CategoryFailedPrecondition,
+				"this daemon cannot attach volumes (requires the firecracker runtime's ext4 snapshots)")
+		}
+		var err error
+		volumeID, volumePath, err = m.volumes.ResolveAttachable(ctx, volumeRef)
+		if err != nil {
+			return Session{}, err
+		}
+	}
+
 	id, err := typeid.WithPrefix(idPrefix)
 	if err != nil {
 		return Session{}, fmt.Errorf("generate session id: %w", err)
@@ -295,6 +331,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		Env:          m.sessionEnv(gateway, sessionID, name),
 		EgressPolicy: egressPolicy,
 		RunApp:       runApp,
+		VolumePath:   volumePath,
 	})
 	if err != nil {
 		_ = m.snapshot.Delete(context.WithoutCancel(ctx), fork.ID)
@@ -314,6 +351,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		EgressPolicy: egressPolicy,
 		Gateway:      gateway,
 		RunApp:       boolToInt(runApp),
+		VolumeID:     nilIfEmptyStr(volumeID),
 	})
 	if err != nil {
 		_ = handle.Stop(context.WithoutCancel(ctx))
@@ -325,7 +363,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 	}
 
 	m.putHandle(sessionID, handle)
-	return sessionFromRow(row), nil
+	return m.enrich(ctx, sessionFromRow(row)), nil
 }
 
 // Get returns the session matching ref (an ID or name).
@@ -334,7 +372,7 @@ func (m *Manager) Get(ctx context.Context, ref string) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	return sessionFromRow(row), nil
+	return m.enrich(ctx, sessionFromRow(row)), nil
 }
 
 // List returns all sessions, newest first.
@@ -345,9 +383,20 @@ func (m *Manager) List(ctx context.Context) ([]Session, error) {
 	}
 	out := make([]Session, len(rows))
 	for i, r := range rows {
-		out[i] = sessionFromRow(r)
+		out[i] = m.enrich(ctx, sessionFromRow(r))
 	}
 	return out, nil
+}
+
+// enrich fills display-only derived fields (the attached volume's name).
+// Best-effort: a failed lookup leaves the id, which is still actionable.
+func (m *Manager) enrich(ctx context.Context, s Session) Session {
+	if s.VolumeID != "" && m.volumes != nil {
+		if name, err := m.volumes.NameFor(ctx, s.VolumeID); err == nil {
+			s.VolumeName = name
+		}
+	}
+	return s
 }
 
 // Start boots a stopped session's VM against its persisted fork. It is safe to
@@ -376,12 +425,17 @@ func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 		return sessionFromRow(row), nil // already running
 	}
 
+	volumePath, err := m.volumePathFor(ctx, row)
+	if err != nil {
+		return Session{}, err
+	}
 	handle, err := m.runtime.StartSession(ctx, runtime.SessionSpec{
 		SessionID:    row.ID,
 		RootfsPath:   row.ForkPath,
 		Env:          m.sessionEnv(row.Gateway, row.ID, row.Name),
 		EgressPolicy: row.EgressPolicy,
 		RunApp:       row.RunApp != 0,
+		VolumePath:   volumePath,
 	})
 	if err != nil {
 		return Session{}, fmt.Errorf("start session vm: %w", err)
@@ -392,7 +446,33 @@ func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 		return Session{}, err
 	}
 	row.State = string(StateRunning)
-	return sessionFromRow(row), nil
+	return m.enrich(ctx, sessionFromRow(row)), nil
+}
+
+// volumePathFor resolves the backing path of a session's attached volume
+// ("" when none). A missing volume row is an error: booting without the disk
+// the session's app expects would look like silent data loss.
+func (m *Manager) volumePathFor(ctx context.Context, row sqliteq.Session) (string, error) {
+	if row.VolumeID == nil || *row.VolumeID == "" {
+		return "", nil
+	}
+	if m.volumes == nil {
+		return "", errs.New(errs.CategoryFailedPrecondition,
+			"session has a volume attached but this daemon cannot mount volumes")
+	}
+	path, err := m.volumes.PathFor(ctx, *row.VolumeID)
+	if err != nil {
+		return "", fmt.Errorf("resolve session volume: %w", err)
+	}
+	return path, nil
+}
+
+// nilIfEmptyStr maps "" to a NULL-able column value.
+func nilIfEmptyStr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // Stop stops a running session's VM, keeping its fork on disk.
@@ -932,6 +1012,10 @@ func (m *Manager) DialSSH(ctx context.Context, ref string) (net.Conn, error) {
 // forwarders. Called once at startup before serving.
 func (m *Manager) SetBroker(b PortBroker) { m.broker = b }
 
+// SetVolumes wires the volume resolver used to attach and boot persistent
+// volumes. Called once at startup before serving.
+func (m *Manager) SetVolumes(v VolumeResolver) { m.volumes = v }
+
 // DialPort opens a raw byte stream to a TCP port inside a session's VM for the
 // daemon's port broker to proxy a published-port connection through. A stopped
 // session is woken first (so a published port keeps serving across idle
@@ -1422,7 +1506,7 @@ func (c *busyConn) Close() error {
 }
 
 func sessionFromRow(r sqliteq.Session) Session {
-	return Session{
+	s := Session{
 		ID:           r.ID,
 		Name:         r.Name,
 		Image:        r.Image,
@@ -1436,6 +1520,10 @@ func sessionFromRow(r sqliteq.Session) Session {
 		Gateway:      r.Gateway,
 		HasRollback:  r.PrevForkID != nil,
 	}
+	if r.VolumeID != nil {
+		s.VolumeID = *r.VolumeID
+	}
+	return s
 }
 
 func publishedFromRow(r sqliteq.PublishedPort) PublishedPort {

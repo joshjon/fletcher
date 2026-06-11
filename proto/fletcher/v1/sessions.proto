@@ -110,6 +110,9 @@ message Session {
   // has_rollback is whether a redeploy retired a fork this session can roll
   // back to (RollbackSession).
   bool has_rollback = 13;
+  // volume is the name of the persistent volume attached to this session
+  // (mounted at /volume in the guest), empty when none.
+  string volume = 14;
 }
 
 // DeployInfo is the image-derived detail shown on a deploy's detail screen.
@@ -133,6 +136,9 @@ message CreateSessionRequest {
   string egress_policy = 3;
   // run_app makes the session run the image's own app (its entrypoint) on boot.
   bool run_app = 5;
+  // volume attaches the named persistent volume (an ID or name), mounted at
+  // /volume in the guest for the session's lifetime. Empty attaches none.
+  string volume = 6;
 }
 
 message CreateSessionResponse {

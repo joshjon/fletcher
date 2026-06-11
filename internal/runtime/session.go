@@ -24,6 +24,9 @@ type SessionSpec struct {
 	// boot, instead of waiting for exec/shell. Set for a session created --app
 	// (Milestone 9). The driver signals it via the guest kernel cmdline.
 	RunApp bool
+	// VolumePath is the host path of the session's persistent volume, attached
+	// as a second disk (the guest mounts it at /volume). Empty means none.
+	VolumePath string
 }
 
 // ShellSpec parameterises an interactive PTY in a session VM.

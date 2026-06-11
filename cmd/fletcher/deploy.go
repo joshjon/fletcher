@@ -50,6 +50,7 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 			&cli.StringFlag{Name: "registry-auth", Usage: "private registry credentials as user:token (for a registry ref)"},
 			&cli.StringFlag{Name: "egress", Usage: "fork network egress: none | allowlist | open (default: the daemon's setting)"},
 			&cli.StringFlag{Name: "gateway", Usage: "model gateway: on | off (default: the daemon's setting)"},
+			&cli.StringFlag{Name: "volume", Usage: "persistent volume (id or name) to attach, mounted at /volume in the guest; survives redeploys"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			src := cmd.Args().First()
@@ -72,6 +73,7 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 				EgressPolicy: cmd.String("egress"),
 				Gateway:      cmd.String("gateway"),
 				RunApp:       true,
+				Volume:       cmd.String("volume"),
 			})); err != nil {
 				return fmt.Errorf("create session %q (delete an existing one with `fletcher session delete %s`, or pass --name): %w", name, name, err)
 			}

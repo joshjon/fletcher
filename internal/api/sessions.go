@@ -19,7 +19,7 @@ import (
 // SessionsBackend is what the SessionService handler needs from the session
 // manager.
 type SessionsBackend interface {
-	Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool) (session.Session, error)
+	Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool, volumeRef string) (session.Session, error)
 	Get(ctx context.Context, ref string) (session.Session, error)
 	List(ctx context.Context) ([]session.Session, error)
 	Start(ctx context.Context, ref string) (session.Session, error)
@@ -112,7 +112,7 @@ func NewSessionsService(backend SessionsBackend, deps SessionsDeps) *SessionsSer
 // CreateSession provisions a session and boots its VM. Categorised errors
 // (e.g. a duplicate name) map to the wire code via the ErrorInterceptor.
 func (s *SessionsService) CreateSession(ctx context.Context, req *connect.Request[fletcherv1.CreateSessionRequest]) (*connect.Response[fletcherv1.CreateSessionResponse], error) {
-	sess, err := s.backend.Create(ctx, req.Msg.GetName(), req.Msg.GetImage(), req.Msg.GetEgressPolicy(), req.Msg.GetGateway(), req.Msg.GetRunApp())
+	sess, err := s.backend.Create(ctx, req.Msg.GetName(), req.Msg.GetImage(), req.Msg.GetEgressPolicy(), req.Msg.GetGateway(), req.Msg.GetRunApp(), req.Msg.GetVolume())
 	if err != nil {
 		return nil, err
 	}
@@ -521,6 +521,11 @@ func sessionToProto(s session.Session) *fletcherv1.Session {
 		Gateway:      s.Gateway,
 		RunApp:       s.RunApp,
 		HasRollback:  s.HasRollback,
+		Volume:       s.VolumeName,
+	}
+	if p.Volume == "" {
+		// Name lookup is best-effort; the id is still actionable.
+		p.Volume = s.VolumeID
 	}
 	if s.LastUsedAt != nil {
 		v := s.LastUsedAt.Unix()

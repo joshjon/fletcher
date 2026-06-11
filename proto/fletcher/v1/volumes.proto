@@ -1,0 +1,68 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// VolumeService manages persistent volumes: first-class disks attached to a
+// session as a second drive (mounted at /volume in the guest). A session's
+// fork dies with redeploy/delete; its volume does not - repos, databases, and
+// uploads live there and reattach to fresh forks.
+service VolumeService {
+  // CreateVolume provisions a new blank volume. The backing file is sparse,
+  // so real disk use grows with data up to the provisioned capacity.
+  rpc CreateVolume(CreateVolumeRequest) returns (CreateVolumeResponse) {}
+  // GetVolume fetches a volume by ID or name.
+  rpc GetVolume(GetVolumeRequest) returns (GetVolumeResponse) {}
+  // ListVolumes returns all volumes, newest first.
+  rpc ListVolumes(ListVolumesRequest) returns (ListVolumesResponse) {}
+  // DeleteVolume destroys a volume and its data. Refused while the volume is
+  // attached to a session (delete that session first).
+  rpc DeleteVolume(DeleteVolumeRequest) returns (DeleteVolumeResponse) {}
+}
+
+message Volume {
+  string id = 1;
+  string name = 2;
+  // size_bytes is the provisioned capacity.
+  int64 size_bytes = 3;
+  // used_bytes is the real disk the sparse backing file occupies.
+  int64 used_bytes = 4;
+  // attached_session is the name of the session this volume is attached to,
+  // empty when detached.
+  string attached_session = 5;
+  // Unix epoch seconds.
+  int64 created_at = 6;
+}
+
+message CreateVolumeRequest {
+  string name = 1;
+  // size_bytes of 0 uses the daemon default (10 GiB, sparse).
+  int64 size_bytes = 2;
+}
+
+message CreateVolumeResponse {
+  Volume volume = 1;
+}
+
+message GetVolumeRequest {
+  // ref is a volume ID or name.
+  string ref = 1;
+}
+
+message GetVolumeResponse {
+  Volume volume = 1;
+}
+
+message ListVolumesRequest {}
+
+message ListVolumesResponse {
+  repeated Volume volumes = 1;
+}
+
+message DeleteVolumeRequest {
+  // ref is a volume ID or name.
+  string ref = 1;
+}
+
+message DeleteVolumeResponse {}

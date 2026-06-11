@@ -244,7 +244,7 @@ func (d *Driver) Run(ctx context.Context, spec fcruntime.Spec, stdout, stderr io
 	}
 
 	console := &capWriter{max: 32 << 10}
-	cfg := d.machineConfig(apiSock, vsockUDS, rootfs, false, false)
+	cfg := d.machineConfig(apiSock, vsockUDS, rootfs, false, false, "")
 	fcCmd := firecracker.VMCommandBuilder{}.
 		WithBin(d.firecrackerBinary).
 		WithSocketPath(apiSock).
@@ -404,7 +404,7 @@ func readLine(r io.Reader) (string, error) {
 // ext4 rootfs as the root block device, a vsock device, and no NIC. When
 // sessionMode is set, the guest is told (via the kernel cmdline) to run as a
 // long-lived session server instead of the ephemeral run-one-command path.
-func (d *Driver) machineConfig(apiSock, vsockUDS, rootfs string, sessionMode, runApp bool) firecracker.Config {
+func (d *Driver) machineConfig(apiSock, vsockUDS, rootfs string, sessionMode, runApp bool, volumePath string) firecracker.Config {
 	// random.trust_cpu=on seeds the RNG from RDRAND at boot so the guest's
 	// getrandom() (Go runtime init) doesn't block for seconds on crng init.
 	kernelArgs := "console=ttyS0 reboot=k panic=1 pci=off random.trust_cpu=on"
@@ -415,16 +415,27 @@ func (d *Driver) machineConfig(apiSock, vsockUDS, rootfs string, sessionMode, ru
 		kernelArgs += " fletcher.app=1"
 	}
 	kernelArgs += " root=/dev/vda rw init=" + guestagent.InitPath
+	drives := []models.Drive{{
+		DriveID:      ptr("rootfs"),
+		PathOnHost:   &rootfs,
+		IsRootDevice: ptr(true),
+		IsReadOnly:   ptr(false),
+	}}
+	if volumePath != "" {
+		// The persistent volume rides as the second virtio disk (/dev/vdb);
+		// the guest mounts it at /volume on boot.
+		drives = append(drives, models.Drive{
+			DriveID:      ptr("volume"),
+			PathOnHost:   &volumePath,
+			IsRootDevice: ptr(false),
+			IsReadOnly:   ptr(false),
+		})
+	}
 	return firecracker.Config{
 		SocketPath:      apiSock,
 		KernelImagePath: d.kernelPath,
 		KernelArgs:      kernelArgs,
-		Drives: []models.Drive{{
-			DriveID:      ptr("rootfs"),
-			PathOnHost:   &rootfs,
-			IsRootDevice: ptr(true),
-			IsReadOnly:   ptr(false),
-		}},
+		Drives:          drives,
 		VsockDevices: []firecracker.VsockDevice{{
 			ID:   "vsock0",
 			CID:  guestproto.GuestCID,

@@ -209,6 +209,56 @@ func ancestorDirs(p string) []string {
 	return dirs
 }
 
+// CreateVolume provisions a blank ext4 volume (snapshot.VolumeProvisioner) at
+// <rootDir>/volumes/<id>.ext4. The backing file is sparse, so a generously
+// sized volume costs only the blocks data actually lands on.
+func (d *Driver) CreateVolume(ctx context.Context, id string, sizeBytes int64) (string, error) {
+	if id == "" || id != filepath.Base(id) || id == "." || id == ".." {
+		return "", fmt.Errorf("ext4: invalid volume id %q", id)
+	}
+	if sizeBytes < 64<<20 {
+		return "", fmt.Errorf("ext4: volume size %d is too small (minimum 64 MiB)", sizeBytes)
+	}
+	dir := filepath.Join(d.rootDir, "volumes")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", fmt.Errorf("ext4: create volumes dir: %w", err)
+	}
+	path := filepath.Join(dir, id+templateExt)
+	if _, err := os.Stat(path); err == nil {
+		return "", fmt.Errorf("ext4: volume %q already exists", id)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // path is a validated daemon-generated id under rootDir
+	if err != nil {
+		return "", fmt.Errorf("ext4: create volume file: %w", err)
+	}
+	truncErr := f.Truncate(sizeBytes) // sparse allocation
+	if cerr := f.Close(); truncErr == nil {
+		truncErr = cerr
+	}
+	if truncErr != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("ext4: allocate volume: %w", truncErr)
+	}
+	mkfs := exec.CommandContext(ctx, "mkfs.ext4", "-F", "-q", path) //nolint:gosec // fixed args + daemon path
+	if out, err := mkfs.CombinedOutput(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("ext4: format volume: %w: %s", err, out)
+	}
+	return path, nil
+}
+
+// DeleteVolume removes a volume's backing file. Missing is a no-op.
+func (d *Driver) DeleteVolume(_ context.Context, id string) error {
+	if id != filepath.Base(id) || id == "." || id == ".." {
+		return fmt.Errorf("ext4: invalid volume id %q", id)
+	}
+	path := filepath.Join(d.rootDir, "volumes", id+templateExt)
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("ext4: delete volume %s: %w", id, err)
+	}
+	return nil
+}
+
 // Delete removes the per-job rootfs clone. A missing file is not an error.
 func (d *Driver) Delete(_ context.Context, id string) error {
 	path := filepath.Join(d.rootDir, id+templateExt)

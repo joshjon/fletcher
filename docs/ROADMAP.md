@@ -1245,20 +1245,36 @@ redeploy (fresh fork) and comes back on rollback; a second rollback swaps
 forward; retarget to a local template updates the session's image; retarget to
 a registry ref re-imports under the session's template name.
 
-### Milestone 12 - persistent volumes - PLANNED (promoted from backlog)
+### Milestone 12 - persistent volumes - DONE (verified on hardware 2026-06-12)
 
-**Goal.** A first-class volume object that survives session/deploy lifecycle:
-its own SQLite row and its own ext4 image / btrfs subvolume (a new lineage on
-the snapshot interface - "create/open volume", distinct from "clone template"),
-mounted into the VM at a known path. `session delete` detaches rather than
-destroys; `session create --volume <ref>` / deploy reattach it to a fresh fork;
-redeploy keeps it. Single-writer semantics (one running session per volume),
-disk accounting separated from fork accounting, surfaced through
-create/list/get/delete RPCs + CLI verbs and the session/deploy create paths.
-The full sketch (including the base-image convention questions for what lands
-on the volume) is in the backlog entry this milestone absorbs - resolve the
-mount-path convention at build time; agent-session-state-on-volume can follow
-later.
+**Goal (met).** A first-class volume object that survives session/deploy
+lifecycle. Verified on real microVMs: a volume mounts at `/volume` (a real
+ext4 on /dev/vdb), data written there survives redeploy (fresh fork, same
+volume), hibernate/wake, and session delete + reattach to a new session;
+deleting an attached volume is refused with a clear message.
+
+**Shipped.**
+
+- `snapshot.VolumeProvisioner` (optional capability, ext4 driver): a volume is
+  a sparse ext4 image at `<root>/volumes/<id>.ext4` - provisioned capacity is
+  a cap, real disk use grows with data (the grow-on-demand ask, satisfied by
+  sparseness). A new lineage: never cloned from a template, never auto-deleted.
+- `internal/volume.Manager` + `volumes` table (migration 0017, with a foreign
+  key from `sessions.volume_id`): create/list/get/delete, name uniqueness,
+  attachment tracking. **Delete is refused while attached** and a session
+  delete detaches (never destroys) - the storage asymmetry, enforced.
+- **Single-writer:** a volume attaches to at most one session at a time
+  (`ResolveAttachable` conflicts on a second attach).
+- Runtime: `SessionSpec.VolumePath` rides as the second virtio drive; the
+  guest mounts `/dev/vdb` at `/volume` on boot (chowned to the login user).
+  **Guest change - takes effect on image re-import.**
+- Surfaced as `VolumeService` RPCs, `fletcher volume create|get|list|delete`,
+  `session create --volume`, `deploy --volume`, and `Session.volume` /
+  `CreateSessionRequest.volume` for clients. `volume list` shows provisioned
+  vs real (sparse) use and the attached session.
+- Deferred from the sketch: migrating the agent's on-disk session state onto
+  the volume (a base-image convention, revisit with usage), and
+  rootfs-vs-volume split accounting in the session disk caps.
 
 ### Milestone 13 - WatchEvents: a live client - PLANNED
 

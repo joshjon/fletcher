@@ -280,6 +280,7 @@ func sessionCreateCmd() *cli.Command {
 			&cli.StringFlag{Name: "egress", Usage: "fork network egress: none | allowlist | open (default: the daemon's default_egress_policy setting)"},
 			&cli.StringFlag{Name: "gateway", Usage: "model gateway: on (inject ANTHROPIC_/OPENAI_ env) | off (use the agent's own auth, e.g. a subscription login) (default: the daemon's default_gateway setting)"},
 			&cli.BoolFlag{Name: "app", Usage: "run the image's own app (its entrypoint) on boot, instead of a bare environment"},
+			&cli.StringFlag{Name: "volume", Usage: "persistent volume (id or name) to attach, mounted at /volume in the guest (create one with `fletcher volume create`)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			client := newSessionsClient(cmd)
@@ -289,6 +290,7 @@ func sessionCreateCmd() *cli.Command {
 				EgressPolicy: cmd.String("egress"),
 				Gateway:      cmd.String("gateway"),
 				RunApp:       cmd.Bool("app"),
+				Volume:       cmd.String("volume"),
 			}))
 			if err != nil {
 				return err

@@ -22,6 +22,7 @@ type Querier interface {
 	CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, error)
 	CreatePublishedPort(ctx context.Context, arg CreatePublishedPortParams) (PublishedPort, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	CreateVolume(ctx context.Context, arg CreateVolumeParams) (Volume, error)
 	DeleteDeviceToken(ctx context.Context, token string) (int64, error)
 	DeletePeer(ctx context.Context, id string) (int64, error)
 	DeletePublishedPort(ctx context.Context, id string) (int64, error)
@@ -29,6 +30,7 @@ type Querier interface {
 	DeleteSecret(ctx context.Context, name string) (int64, error)
 	DeleteSession(ctx context.Context, id string) (int64, error)
 	DeleteSetting(ctx context.Context, key string) (int64, error)
+	DeleteVolume(ctx context.Context, id string) (int64, error)
 	DenyApproval(ctx context.Context, arg DenyApprovalParams) (int64, error)
 	ExpirePendingApprovals(ctx context.Context, arg ExpirePendingApprovalsParams) (int64, error)
 	GetApproval(ctx context.Context, id string) (PendingApproval, error)
@@ -40,6 +42,7 @@ type Querier interface {
 	GetPublishedPublicPortByHost(ctx context.Context, host *string) (PublishedPort, error)
 	GetSecret(ctx context.Context, name string) ([]byte, error)
 	GetSessionByRef(ctx context.Context, ref string) (Session, error)
+	GetVolumeByRef(ctx context.Context, ref string) (Volume, error)
 	ListApprovals(ctx context.Context, arg ListApprovalsParams) ([]PendingApproval, error)
 	ListApprovalsByStatus(ctx context.Context, arg ListApprovalsByStatusParams) ([]PendingApproval, error)
 	ListDeviceTokens(ctx context.Context) ([]string, error)
@@ -51,7 +54,9 @@ type Querier interface {
 	ListPublishedPortsBySession(ctx context.Context, sessionID string) ([]PublishedPort, error)
 	ListSecretMetadata(ctx context.Context) ([]ListSecretMetadataRow, error)
 	ListSessions(ctx context.Context) ([]Session, error)
+	ListSessionsByVolume(ctx context.Context, volumeID *string) ([]Session, error)
 	ListSettings(ctx context.Context) ([]Setting, error)
+	ListVolumes(ctx context.Context) ([]Volume, error)
 	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) error
 	MarkJobStarted(ctx context.Context, arg MarkJobStartedParams) error
 	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) error

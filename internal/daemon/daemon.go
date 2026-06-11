@@ -53,6 +53,7 @@ import (
 	snapmock "github.com/joshjon/fletcher/internal/snapshot/mockdriver"
 	"github.com/joshjon/fletcher/internal/sqlite"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
+	"github.com/joshjon/fletcher/internal/volume"
 )
 
 // auditRecorder is the daemon's privileged-op audit sink. Phase 4 wires
@@ -500,6 +501,13 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		return nil, fmt.Errorf("reconcile sessions: %w", err)
 	}
 
+	// Persistent volumes (Milestone 12): first-class disks attached to sessions
+	// as a second drive, outliving forks and redeploys. The provisioner is the
+	// snapshot driver's optional capability (ext4 only today).
+	volumeProvisioner, _ := snapDriver.(snapshot.VolumeProvisioner)
+	volumeMgr := volume.NewManager(queries, volumeProvisioner, logger)
+	sessionMgr.SetVolumes(volumeMgr)
+
 	// publish_image backend: agents commit their session's fork (or import a
 	// registry ref) as a template, behind an approval. Only meaningful on a
 	// session-capable runtime; elsewhere the tool is not registered.
@@ -558,6 +566,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	connectDeps := connectDeps{
 		jobs:             jobSvc,
 		sessions:         sessionMgr,
+		volumes:          volumeMgr,
 		publicIP:         publicEndpointHost(netSetup.EffectivePublicEndpoint),
 		imagesDir:        filepath.Join(snapshotRootDir(cfg), "images"),
 		snapshotKind:     driverKind(cfg.SnapshotKind),
@@ -643,6 +652,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 type connectDeps struct {
 	jobs      api.JobsBackend
 	sessions  api.SessionsBackend
+	volumes   api.VolumesBackend
 	secrets   api.SecretsBackend
 	approvals api.ApprovalsBackend
 	push      api.PushBackend
@@ -1009,6 +1019,11 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		api.NewImagesService(deps.imagesDir, deps.snapshotKind), interceptors,
 	)
 	mux.Handle(imagesPath, imagesHandler)
+
+	volumesPath, volumesHandler := fletcherv1connect.NewVolumeServiceHandler(
+		api.NewVolumesService(deps.volumes), interceptors,
+	)
+	mux.Handle(volumesPath, volumesHandler)
 
 	// Serve cleartext HTTP/2 (h2c) alongside HTTP/1.1 so Connect bidi streams -
 	// the interactive shell (SessionService.ShellSession) - work over the unix

@@ -99,7 +99,10 @@ type Session struct {
 	Deploy *DeployInfo `protobuf:"bytes,12,opt,name=deploy,proto3" json:"deploy,omitempty"`
 	// has_rollback is whether a redeploy retired a fork this session can roll
 	// back to (RollbackSession).
-	HasRollback   bool `protobuf:"varint,13,opt,name=has_rollback,json=hasRollback,proto3" json:"has_rollback,omitempty"`
+	HasRollback bool `protobuf:"varint,13,opt,name=has_rollback,json=hasRollback,proto3" json:"has_rollback,omitempty"`
+	// volume is the name of the persistent volume attached to this session
+	// (mounted at /volume in the guest), empty when none.
+	Volume        string `protobuf:"bytes,14,opt,name=volume,proto3" json:"volume,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -225,6 +228,13 @@ func (x *Session) GetHasRollback() bool {
 	return false
 }
 
+func (x *Session) GetVolume() string {
+	if x != nil {
+		return x.Volume
+	}
+	return ""
+}
+
 // DeployInfo is the image-derived detail shown on a deploy's detail screen.
 type DeployInfo struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -300,7 +310,10 @@ type CreateSessionRequest struct {
 	// default_egress_policy setting.
 	EgressPolicy string `protobuf:"bytes,3,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
 	// run_app makes the session run the image's own app (its entrypoint) on boot.
-	RunApp        bool `protobuf:"varint,5,opt,name=run_app,json=runApp,proto3" json:"run_app,omitempty"`
+	RunApp bool `protobuf:"varint,5,opt,name=run_app,json=runApp,proto3" json:"run_app,omitempty"`
+	// volume attaches the named persistent volume (an ID or name), mounted at
+	// /volume in the guest for the session's lifetime. Empty attaches none.
+	Volume        string `protobuf:"bytes,6,opt,name=volume,proto3" json:"volume,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -368,6 +381,13 @@ func (x *CreateSessionRequest) GetRunApp() bool {
 		return x.RunApp
 	}
 	return false
+}
+
+func (x *CreateSessionRequest) GetVolume() string {
+	if x != nil {
+		return x.Volume
+	}
+	return ""
 }
 
 type CreateSessionResponse struct {
@@ -2663,7 +2683,7 @@ var File_fletcher_v1_sessions_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\n" +
-	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\xb5\x03\n" +
+	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\xcd\x03\n" +
 	"\aSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -2682,7 +2702,8 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	" \x01(\tR\agateway\x12\x17\n" +
 	"\arun_app\x18\v \x01(\bR\x06runApp\x12/\n" +
 	"\x06deploy\x18\f \x01(\v2\x17.fletcher.v1.DeployInfoR\x06deploy\x12!\n" +
-	"\fhas_rollback\x18\r \x01(\bR\vhasRollbackB\x0f\n" +
+	"\fhas_rollback\x18\r \x01(\bR\vhasRollback\x12\x16\n" +
+	"\x06volume\x18\x0e \x01(\tR\x06volumeB\x0f\n" +
 	"\r_last_used_at\"t\n" +
 	"\n" +
 	"DeployInfo\x12\x1e\n" +
@@ -2690,13 +2711,14 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"entrypoint\x18\x01 \x03(\tR\n" +
 	"entrypoint\x12!\n" +
 	"\fexposed_port\x18\x02 \x01(\rR\vexposedPort\x12#\n" +
-	"\rrestart_count\x18\x03 \x01(\rR\frestartCount\"\x98\x01\n" +
+	"\rrestart_count\x18\x03 \x01(\rR\frestartCount\"\xb0\x01\n" +
 	"\x14CreateSessionRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x12\x18\n" +
 	"\agateway\x18\x04 \x01(\tR\agateway\x12#\n" +
 	"\regress_policy\x18\x03 \x01(\tR\fegressPolicy\x12\x17\n" +
-	"\arun_app\x18\x05 \x01(\bR\x06runApp\"G\n" +
+	"\arun_app\x18\x05 \x01(\bR\x06runApp\x12\x16\n" +
+	"\x06volume\x18\x06 \x01(\tR\x06volume\"G\n" +
 	"\x15CreateSessionResponse\x12.\n" +
 	"\asession\x18\x01 \x01(\v2\x14.fletcher.v1.SessionR\asession\"%\n" +
 	"\x11GetSessionRequest\x12\x10\n" +

@@ -23,6 +23,20 @@ type Driver interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// VolumeProvisioner is the optional capability a Driver advertises when it can
+// provision persistent volumes: blank filesystems with their own lifecycle,
+// attached to a session as a second disk. A distinct lineage from the
+// template-clone forks - a volume is never cloned from anything and outlives
+// any session it is attached to.
+type VolumeProvisioner interface {
+	// CreateVolume provisions a blank volume with sizeBytes capacity and
+	// returns the host path of its backing storage. Backing files are sparse,
+	// so real disk use grows with data.
+	CreateVolume(ctx context.Context, id string, sizeBytes int64) (string, error)
+	// DeleteVolume removes the volume's backing storage. Missing is a no-op.
+	DeleteVolume(ctx context.Context, id string) error
+}
+
 // TemplateCommitter is the optional capability a Driver advertises when it can
 // commit an existing snapshot back into a named image template - the
 // docker-commit analogue for forks. The caller is responsible for quiescing

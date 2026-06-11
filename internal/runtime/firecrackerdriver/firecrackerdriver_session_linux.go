@@ -71,7 +71,7 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 	}
 
 	console := &capWriter{max: 32 << 10}
-	cfg := d.machineConfig(apiSock, vsockUDS, spec.RootfsPath, true, spec.RunApp)
+	cfg := d.machineConfig(apiSock, vsockUDS, spec.RootfsPath, true, spec.RunApp, spec.VolumePath)
 	fcCmd := firecracker.VMCommandBuilder{}.
 		WithBin(d.firecrackerBinary).
 		WithSocketPath(apiSock).

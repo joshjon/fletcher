@@ -877,6 +877,33 @@ func mountBasics() {
 			fmt.Fprintf(os.Stderr, "fletcher-guest: mount %s: %v\n", mt.target, err)
 		}
 	}
+	mountVolume()
+}
+
+// volumeMountPoint is where a session's persistent volume (the second virtio
+// disk, when the host attached one) appears in the guest.
+const volumeMountPoint = "/volume"
+
+// mountVolume mounts the persistent volume at /volume when the host attached
+// one. A session without a volume has no /dev/vdb and skips this.
+func mountVolume() {
+	const dev = "/dev/vdb"
+	if _, err := os.Stat(dev); err != nil {
+		return
+	}
+	if err := os.MkdirAll(volumeMountPoint, 0o755); err != nil { //nolint:gosec // standard mountpoint perms inside the VM
+		fmt.Fprintf(os.Stderr, "fletcher-guest: create %s: %v\n", volumeMountPoint, err)
+		return
+	}
+	if err := unix.Mount(dev, volumeMountPoint, "ext4", 0, ""); err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: mount volume: %v\n", err)
+		return
+	}
+	// Writable by the unprivileged login user: the volume exists to hold the
+	// workspace's durable data.
+	if lu := lookupLoginUser(); lu.ok {
+		_ = os.Chown(volumeMountPoint, int(lu.uid), int(lu.gid))
+	}
 }
 
 // shutdown flushes and resets the VM so Firecracker exits. As PID 1 we hold
