@@ -41,6 +41,9 @@ const (
 	JobServiceListJobsProcedure = "/fletcher.v1.JobService/ListJobs"
 	// JobServiceCancelJobProcedure is the fully-qualified name of the JobService's CancelJob RPC.
 	JobServiceCancelJobProcedure = "/fletcher.v1.JobService/CancelJob"
+	// JobServiceUpdateJobScheduleProcedure is the fully-qualified name of the JobService's
+	// UpdateJobSchedule RPC.
+	JobServiceUpdateJobScheduleProcedure = "/fletcher.v1.JobService/UpdateJobSchedule"
 )
 
 // JobServiceClient is a client for the fletcher.v1.JobService service.
@@ -55,6 +58,9 @@ type JobServiceClient interface {
 	// CancelJob transitions a queued or running job to CANCELLED. Returns
 	// cancelled=false (no error) if the job was already terminal.
 	CancelJob(context.Context, *connect.Request[v1.CancelJobRequest]) (*connect.Response[v1.CancelJobResponse], error)
+	// UpdateJobSchedule changes a cron job definition's schedule and recomputes
+	// its next run. Valid only for a cron job.
+	UpdateJobSchedule(context.Context, *connect.Request[v1.UpdateJobScheduleRequest]) (*connect.Response[v1.UpdateJobScheduleResponse], error)
 }
 
 // NewJobServiceClient constructs a client for the fletcher.v1.JobService service. By default, it
@@ -92,15 +98,22 @@ func NewJobServiceClient(httpClient connect.HTTPClient, baseURL string, opts ...
 			connect.WithSchema(jobServiceMethods.ByName("CancelJob")),
 			connect.WithClientOptions(opts...),
 		),
+		updateJobSchedule: connect.NewClient[v1.UpdateJobScheduleRequest, v1.UpdateJobScheduleResponse](
+			httpClient,
+			baseURL+JobServiceUpdateJobScheduleProcedure,
+			connect.WithSchema(jobServiceMethods.ByName("UpdateJobSchedule")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // jobServiceClient implements JobServiceClient.
 type jobServiceClient struct {
-	createJob *connect.Client[v1.CreateJobRequest, v1.CreateJobResponse]
-	getJob    *connect.Client[v1.GetJobRequest, v1.GetJobResponse]
-	listJobs  *connect.Client[v1.ListJobsRequest, v1.ListJobsResponse]
-	cancelJob *connect.Client[v1.CancelJobRequest, v1.CancelJobResponse]
+	createJob         *connect.Client[v1.CreateJobRequest, v1.CreateJobResponse]
+	getJob            *connect.Client[v1.GetJobRequest, v1.GetJobResponse]
+	listJobs          *connect.Client[v1.ListJobsRequest, v1.ListJobsResponse]
+	cancelJob         *connect.Client[v1.CancelJobRequest, v1.CancelJobResponse]
+	updateJobSchedule *connect.Client[v1.UpdateJobScheduleRequest, v1.UpdateJobScheduleResponse]
 }
 
 // CreateJob calls fletcher.v1.JobService.CreateJob.
@@ -123,6 +136,11 @@ func (c *jobServiceClient) CancelJob(ctx context.Context, req *connect.Request[v
 	return c.cancelJob.CallUnary(ctx, req)
 }
 
+// UpdateJobSchedule calls fletcher.v1.JobService.UpdateJobSchedule.
+func (c *jobServiceClient) UpdateJobSchedule(ctx context.Context, req *connect.Request[v1.UpdateJobScheduleRequest]) (*connect.Response[v1.UpdateJobScheduleResponse], error) {
+	return c.updateJobSchedule.CallUnary(ctx, req)
+}
+
 // JobServiceHandler is an implementation of the fletcher.v1.JobService service.
 type JobServiceHandler interface {
 	// CreateJob enqueues a new job. The returned job has status QUEUED.
@@ -135,6 +153,9 @@ type JobServiceHandler interface {
 	// CancelJob transitions a queued or running job to CANCELLED. Returns
 	// cancelled=false (no error) if the job was already terminal.
 	CancelJob(context.Context, *connect.Request[v1.CancelJobRequest]) (*connect.Response[v1.CancelJobResponse], error)
+	// UpdateJobSchedule changes a cron job definition's schedule and recomputes
+	// its next run. Valid only for a cron job.
+	UpdateJobSchedule(context.Context, *connect.Request[v1.UpdateJobScheduleRequest]) (*connect.Response[v1.UpdateJobScheduleResponse], error)
 }
 
 // NewJobServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -168,6 +189,12 @@ func NewJobServiceHandler(svc JobServiceHandler, opts ...connect.HandlerOption) 
 		connect.WithSchema(jobServiceMethods.ByName("CancelJob")),
 		connect.WithHandlerOptions(opts...),
 	)
+	jobServiceUpdateJobScheduleHandler := connect.NewUnaryHandler(
+		JobServiceUpdateJobScheduleProcedure,
+		svc.UpdateJobSchedule,
+		connect.WithSchema(jobServiceMethods.ByName("UpdateJobSchedule")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.JobService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case JobServiceCreateJobProcedure:
@@ -178,6 +205,8 @@ func NewJobServiceHandler(svc JobServiceHandler, opts ...connect.HandlerOption) 
 			jobServiceListJobsHandler.ServeHTTP(w, r)
 		case JobServiceCancelJobProcedure:
 			jobServiceCancelJobHandler.ServeHTTP(w, r)
+		case JobServiceUpdateJobScheduleProcedure:
+			jobServiceUpdateJobScheduleHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -201,4 +230,8 @@ func (UnimplementedJobServiceHandler) ListJobs(context.Context, *connect.Request
 
 func (UnimplementedJobServiceHandler) CancelJob(context.Context, *connect.Request[v1.CancelJobRequest]) (*connect.Response[v1.CancelJobResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.JobService.CancelJob is not implemented"))
+}
+
+func (UnimplementedJobServiceHandler) UpdateJobSchedule(context.Context, *connect.Request[v1.UpdateJobScheduleRequest]) (*connect.Response[v1.UpdateJobScheduleResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.JobService.UpdateJobSchedule is not implemented"))
 }

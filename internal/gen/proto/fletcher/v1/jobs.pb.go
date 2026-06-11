@@ -765,6 +765,104 @@ func (x *CancelJobResponse) GetCancelled() bool {
 	return false
 }
 
+type UpdateJobScheduleRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id is the cron job definition to reschedule.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// schedule is the new cron expression (e.g. "0 7 * * *").
+	Schedule      string `protobuf:"bytes,2,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateJobScheduleRequest) Reset() {
+	*x = UpdateJobScheduleRequest{}
+	mi := &file_fletcher_v1_jobs_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateJobScheduleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateJobScheduleRequest) ProtoMessage() {}
+
+func (x *UpdateJobScheduleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_jobs_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateJobScheduleRequest.ProtoReflect.Descriptor instead.
+func (*UpdateJobScheduleRequest) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_jobs_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *UpdateJobScheduleRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *UpdateJobScheduleRequest) GetSchedule() string {
+	if x != nil {
+		return x.Schedule
+	}
+	return ""
+}
+
+type UpdateJobScheduleResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Job           *Job                   `protobuf:"bytes,1,opt,name=job,proto3" json:"job,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateJobScheduleResponse) Reset() {
+	*x = UpdateJobScheduleResponse{}
+	mi := &file_fletcher_v1_jobs_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateJobScheduleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateJobScheduleResponse) ProtoMessage() {}
+
+func (x *UpdateJobScheduleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_jobs_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateJobScheduleResponse.ProtoReflect.Descriptor instead.
+func (*UpdateJobScheduleResponse) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_jobs_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *UpdateJobScheduleResponse) GetJob() *Job {
+	if x != nil {
+		return x.Job
+	}
+	return nil
+}
+
 var File_fletcher_v1_jobs_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_jobs_proto_rawDesc = "" +
@@ -825,7 +923,12 @@ const file_fletcher_v1_jobs_proto_rawDesc = "" +
 	"\x10CancelJobRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"1\n" +
 	"\x11CancelJobResponse\x12\x1c\n" +
-	"\tcancelled\x18\x01 \x01(\bR\tcancelled*\xbb\x01\n" +
+	"\tcancelled\x18\x01 \x01(\bR\tcancelled\"F\n" +
+	"\x18UpdateJobScheduleRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\bschedule\x18\x02 \x01(\tR\bschedule\"?\n" +
+	"\x19UpdateJobScheduleResponse\x12\"\n" +
+	"\x03job\x18\x01 \x01(\v2\x10.fletcher.v1.JobR\x03job*\xbb\x01\n" +
 	"\tJobStatus\x12\x1a\n" +
 	"\x16JOB_STATUS_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11JOB_STATUS_QUEUED\x10\x01\x12\x16\n" +
@@ -839,13 +942,14 @@ const file_fletcher_v1_jobs_proto_rawDesc = "" +
 	"\x17JOB_TRIGGER_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15JOB_TRIGGER_EPHEMERAL\x10\x01\x12\x14\n" +
 	"\x10JOB_TRIGGER_CRON\x10\x02\x12\x1c\n" +
-	"\x18JOB_TRIGGER_LONG_RUNNING\x10\x032\xb8\x02\n" +
+	"\x18JOB_TRIGGER_LONG_RUNNING\x10\x032\x9e\x03\n" +
 	"\n" +
 	"JobService\x12L\n" +
 	"\tCreateJob\x12\x1d.fletcher.v1.CreateJobRequest\x1a\x1e.fletcher.v1.CreateJobResponse\"\x00\x12C\n" +
 	"\x06GetJob\x12\x1a.fletcher.v1.GetJobRequest\x1a\x1b.fletcher.v1.GetJobResponse\"\x00\x12I\n" +
 	"\bListJobs\x12\x1c.fletcher.v1.ListJobsRequest\x1a\x1d.fletcher.v1.ListJobsResponse\"\x00\x12L\n" +
-	"\tCancelJob\x12\x1d.fletcher.v1.CancelJobRequest\x1a\x1e.fletcher.v1.CancelJobResponse\"\x00B\xb0\x01\n" +
+	"\tCancelJob\x12\x1d.fletcher.v1.CancelJobRequest\x1a\x1e.fletcher.v1.CancelJobResponse\"\x00\x12d\n" +
+	"\x11UpdateJobSchedule\x12%.fletcher.v1.UpdateJobScheduleRequest\x1a&.fletcher.v1.UpdateJobScheduleResponse\"\x00B\xb0\x01\n" +
 	"\x0fcom.fletcher.v1B\tJobsProtoP\x01ZEgithub.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1\xa2\x02\x03FXX\xaa\x02\vFletcher.V1\xca\x02\vFletcher\\V1\xe2\x02\x17Fletcher\\V1\\GPBMetadata\xea\x02\fFletcher::V1b\x06proto3"
 
 var (
@@ -861,19 +965,21 @@ func file_fletcher_v1_jobs_proto_rawDescGZIP() []byte {
 }
 
 var file_fletcher_v1_jobs_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_fletcher_v1_jobs_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_fletcher_v1_jobs_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_fletcher_v1_jobs_proto_goTypes = []any{
-	(JobStatus)(0),            // 0: fletcher.v1.JobStatus
-	(JobTrigger)(0),           // 1: fletcher.v1.JobTrigger
-	(*Job)(nil),               // 2: fletcher.v1.Job
-	(*CreateJobRequest)(nil),  // 3: fletcher.v1.CreateJobRequest
-	(*CreateJobResponse)(nil), // 4: fletcher.v1.CreateJobResponse
-	(*GetJobRequest)(nil),     // 5: fletcher.v1.GetJobRequest
-	(*GetJobResponse)(nil),    // 6: fletcher.v1.GetJobResponse
-	(*ListJobsRequest)(nil),   // 7: fletcher.v1.ListJobsRequest
-	(*ListJobsResponse)(nil),  // 8: fletcher.v1.ListJobsResponse
-	(*CancelJobRequest)(nil),  // 9: fletcher.v1.CancelJobRequest
-	(*CancelJobResponse)(nil), // 10: fletcher.v1.CancelJobResponse
+	(JobStatus)(0),                    // 0: fletcher.v1.JobStatus
+	(JobTrigger)(0),                   // 1: fletcher.v1.JobTrigger
+	(*Job)(nil),                       // 2: fletcher.v1.Job
+	(*CreateJobRequest)(nil),          // 3: fletcher.v1.CreateJobRequest
+	(*CreateJobResponse)(nil),         // 4: fletcher.v1.CreateJobResponse
+	(*GetJobRequest)(nil),             // 5: fletcher.v1.GetJobRequest
+	(*GetJobResponse)(nil),            // 6: fletcher.v1.GetJobResponse
+	(*ListJobsRequest)(nil),           // 7: fletcher.v1.ListJobsRequest
+	(*ListJobsResponse)(nil),          // 8: fletcher.v1.ListJobsResponse
+	(*CancelJobRequest)(nil),          // 9: fletcher.v1.CancelJobRequest
+	(*CancelJobResponse)(nil),         // 10: fletcher.v1.CancelJobResponse
+	(*UpdateJobScheduleRequest)(nil),  // 11: fletcher.v1.UpdateJobScheduleRequest
+	(*UpdateJobScheduleResponse)(nil), // 12: fletcher.v1.UpdateJobScheduleResponse
 }
 var file_fletcher_v1_jobs_proto_depIdxs = []int32{
 	0,  // 0: fletcher.v1.Job.status:type_name -> fletcher.v1.JobStatus
@@ -883,19 +989,22 @@ var file_fletcher_v1_jobs_proto_depIdxs = []int32{
 	2,  // 4: fletcher.v1.GetJobResponse.job:type_name -> fletcher.v1.Job
 	0,  // 5: fletcher.v1.ListJobsRequest.status_filter:type_name -> fletcher.v1.JobStatus
 	2,  // 6: fletcher.v1.ListJobsResponse.jobs:type_name -> fletcher.v1.Job
-	3,  // 7: fletcher.v1.JobService.CreateJob:input_type -> fletcher.v1.CreateJobRequest
-	5,  // 8: fletcher.v1.JobService.GetJob:input_type -> fletcher.v1.GetJobRequest
-	7,  // 9: fletcher.v1.JobService.ListJobs:input_type -> fletcher.v1.ListJobsRequest
-	9,  // 10: fletcher.v1.JobService.CancelJob:input_type -> fletcher.v1.CancelJobRequest
-	4,  // 11: fletcher.v1.JobService.CreateJob:output_type -> fletcher.v1.CreateJobResponse
-	6,  // 12: fletcher.v1.JobService.GetJob:output_type -> fletcher.v1.GetJobResponse
-	8,  // 13: fletcher.v1.JobService.ListJobs:output_type -> fletcher.v1.ListJobsResponse
-	10, // 14: fletcher.v1.JobService.CancelJob:output_type -> fletcher.v1.CancelJobResponse
-	11, // [11:15] is the sub-list for method output_type
-	7,  // [7:11] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	2,  // 7: fletcher.v1.UpdateJobScheduleResponse.job:type_name -> fletcher.v1.Job
+	3,  // 8: fletcher.v1.JobService.CreateJob:input_type -> fletcher.v1.CreateJobRequest
+	5,  // 9: fletcher.v1.JobService.GetJob:input_type -> fletcher.v1.GetJobRequest
+	7,  // 10: fletcher.v1.JobService.ListJobs:input_type -> fletcher.v1.ListJobsRequest
+	9,  // 11: fletcher.v1.JobService.CancelJob:input_type -> fletcher.v1.CancelJobRequest
+	11, // 12: fletcher.v1.JobService.UpdateJobSchedule:input_type -> fletcher.v1.UpdateJobScheduleRequest
+	4,  // 13: fletcher.v1.JobService.CreateJob:output_type -> fletcher.v1.CreateJobResponse
+	6,  // 14: fletcher.v1.JobService.GetJob:output_type -> fletcher.v1.GetJobResponse
+	8,  // 15: fletcher.v1.JobService.ListJobs:output_type -> fletcher.v1.ListJobsResponse
+	10, // 16: fletcher.v1.JobService.CancelJob:output_type -> fletcher.v1.CancelJobResponse
+	12, // 17: fletcher.v1.JobService.UpdateJobSchedule:output_type -> fletcher.v1.UpdateJobScheduleResponse
+	13, // [13:18] is the sub-list for method output_type
+	8,  // [8:13] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_fletcher_v1_jobs_proto_init() }
@@ -910,7 +1019,7 @@ func file_fletcher_v1_jobs_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fletcher_v1_jobs_proto_rawDesc), len(file_fletcher_v1_jobs_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

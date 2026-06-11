@@ -171,3 +171,33 @@ func TestCancelTransitionsQueuedJobAndIgnoresTerminal(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 }
+
+func TestUpdateSchedule(t *testing.T) {
+	svc := newService(t)
+	ctx := context.Background()
+
+	created, err := svc.Create(ctx, job.CreateParams{
+		Trigger: job.TriggerCron, Name: "nightly", Command: "echo hi", Image: "ubuntu", Schedule: "0 0 * * *",
+	})
+	require.NoError(t, err)
+
+	updated, err := svc.UpdateSchedule(ctx, created.ID, "0 7 * * *")
+	require.NoError(t, err)
+	require.Equal(t, "0 7 * * *", updated.Schedule)
+	require.NotNil(t, updated.NextRunAt, "next run recomputed")
+
+	// Persisted.
+	got, err := svc.Get(ctx, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "0 7 * * *", got.Schedule)
+
+	// Invalid schedule rejected.
+	_, err = svc.UpdateSchedule(ctx, created.ID, "not a cron")
+	require.Error(t, err)
+
+	// Non-cron job rejected.
+	eph, err := svc.Create(ctx, job.CreateParams{Trigger: job.TriggerEphemeral, Name: "once", Command: "echo", Image: "ubuntu"})
+	require.NoError(t, err)
+	_, err = svc.UpdateSchedule(ctx, eph.ID, "0 7 * * *")
+	require.Error(t, err)
+}

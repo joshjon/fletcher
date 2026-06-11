@@ -16,6 +16,9 @@ service JobService {
   // CancelJob transitions a queued or running job to CANCELLED. Returns
   // cancelled=false (no error) if the job was already terminal.
   rpc CancelJob(CancelJobRequest) returns (CancelJobResponse) {}
+  // UpdateJobSchedule changes a cron job definition's schedule and recomputes
+  // its next run. Valid only for a cron job.
+  rpc UpdateJobSchedule(UpdateJobScheduleRequest) returns (UpdateJobScheduleResponse) {}
 }
 
 enum JobStatus {
@@ -115,4 +118,14 @@ message CancelJobRequest {
 
 message CancelJobResponse {
   bool cancelled = 1;
+}
+
+message UpdateJobScheduleRequest {
+  // id is the cron job definition to reschedule.
+  string id = 1;
+  // schedule is the new cron expression (e.g. "0 7 * * *").
+  string schedule = 2;
+}
+message UpdateJobScheduleResponse {
+  Job job = 1;
 }

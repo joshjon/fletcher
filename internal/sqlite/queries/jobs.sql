@@ -63,3 +63,8 @@ ORDER BY next_run_at ASC;
 UPDATE jobs
 SET next_run_at = ?, updated_at = ?
 WHERE id = ?;
+
+-- name: UpdateJobSchedule :exec
+UPDATE jobs
+SET schedule = ?, next_run_at = ?, updated_at = ?
+WHERE id = ?;

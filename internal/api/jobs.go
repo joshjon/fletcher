@@ -19,6 +19,7 @@ type JobsBackend interface {
 	List(ctx context.Context, p job.ListParams) ([]job.Job, error)
 	Count(ctx context.Context, status job.Status) (int64, error)
 	Cancel(ctx context.Context, id string) (bool, error)
+	UpdateSchedule(ctx context.Context, id, schedule string) (job.Job, error)
 }
 
 // JobsService implements fletcherv1connect.JobServiceHandler.
@@ -92,6 +93,15 @@ func (s *JobsService) CancelJob(ctx context.Context, req *connect.Request[fletch
 		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.CancelJobResponse{Cancelled: ok}), nil
+}
+
+// UpdateJobSchedule reschedules a cron job definition.
+func (s *JobsService) UpdateJobSchedule(ctx context.Context, req *connect.Request[fletcherv1.UpdateJobScheduleRequest]) (*connect.Response[fletcherv1.UpdateJobScheduleResponse], error) {
+	j, err := s.svc.UpdateSchedule(ctx, req.Msg.GetId(), req.Msg.GetSchedule())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.UpdateJobScheduleResponse{Job: jobToProto(j)}), nil
 }
 
 // --- proto ⇄ domain mapping ---

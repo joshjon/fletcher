@@ -716,7 +716,10 @@ services:
   complete, so approve/deny works today over polling. *Gap: no APNs
   device-token registration RPC and no daemon-side APNs push - that is the real
   M8 daemon work.*
-- **M9 - scheduled jobs.** `JobService` + `Job{schedule, next_run_at,
+- **M9 - scheduled jobs. Schedule-edit DONE 2026-06-11** (`UpdateJobSchedule`
+  reschedules a cron definition and recomputes `next_run_at`; the poller picks
+  it up on its next tick). Listing/history were already covered.
+- **M9 (original note) - scheduled jobs.** `JobService` + `Job{schedule, next_run_at,
   parent_id, trigger}` already cover listing cron jobs and run history
   (client-side filter by trigger/parent_id). *Gap: no `UpdateJob`/`SetSchedule`
   to edit a schedule (Create+Cancel only); a `parent_id`/`trigger` filter on

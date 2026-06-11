@@ -389,6 +389,29 @@ func (q *Queries) SetJobNextRun(ctx context.Context, arg SetJobNextRunParams) er
 	return err
 }
 
+const updateJobSchedule = `-- name: UpdateJobSchedule :exec
+UPDATE jobs
+SET schedule = ?, next_run_at = ?, updated_at = ?
+WHERE id = ?
+`
+
+type UpdateJobScheduleParams struct {
+	Schedule  string
+	NextRunAt *int64
+	UpdatedAt int64
+	ID        string
+}
+
+func (q *Queries) UpdateJobSchedule(ctx context.Context, arg UpdateJobScheduleParams) error {
+	_, err := q.db.ExecContext(ctx, updateJobSchedule,
+		arg.Schedule,
+		arg.NextRunAt,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
 const updateJobStatus = `-- name: UpdateJobStatus :exec
 UPDATE jobs
 SET status = ?, updated_at = ?

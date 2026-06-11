@@ -27,6 +27,7 @@ func jobCmd() *cli.Command {
 			jobGetCmd(),
 			jobListCmd(),
 			jobCancelCmd(),
+			jobScheduleCmd(),
 		},
 	}
 }
@@ -159,6 +160,33 @@ func jobCancelCmd() *cli.Command {
 			} else {
 				fmt.Printf("%s was not in a cancellable state\n", id)
 			}
+			return nil
+		},
+	}
+}
+
+func jobScheduleCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "schedule",
+		Usage:     "change a cron job's schedule",
+		ArgsUsage: "<id> <cron-expression>",
+		Flags:     []cli.Flag{socketFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.Args().Len() != 2 {
+				return errors.New("usage: fletcher job schedule <id> <cron-expression>")
+			}
+			id := cmd.Args().Get(0)
+			schedule := cmd.Args().Get(1)
+			client := newJobsClient(cmd)
+			resp, err := client.UpdateJobSchedule(ctx, connect.NewRequest(&fletcherv1.UpdateJobScheduleRequest{
+				Id:       id,
+				Schedule: schedule,
+			}))
+			if err != nil {
+				return err
+			}
+			j := resp.Msg.GetJob()
+			fmt.Printf("rescheduled %s to %q (next run %s)\n", j.GetId(), j.GetSchedule(), formatUnix(j.GetNextRunAt()))
 			return nil
 		},
 	}

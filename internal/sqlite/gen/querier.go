@@ -55,6 +55,7 @@ type Querier interface {
 	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) error
 	SetJobNextRun(ctx context.Context, arg SetJobNextRunParams) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	UpdateJobSchedule(ctx context.Context, arg UpdateJobScheduleParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
 	UpdateSessionFork(ctx context.Context, arg UpdateSessionForkParams) error
 	UpdateSessionPolicy(ctx context.Context, arg UpdateSessionPolicyParams) error

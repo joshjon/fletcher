@@ -230,6 +230,34 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Job, error) {
 	return jobFromRow(row)
 }
 
+// UpdateSchedule changes a cron job definition's schedule and recomputes its
+// next run. Valid only for a cron job; the change is picked up on the
+// scheduler's next poll (it re-reads definitions from the database).
+func (s *Service) UpdateSchedule(ctx context.Context, id, schedule string) (Job, error) {
+	current, err := s.Get(ctx, id)
+	if err != nil {
+		return Job{}, err
+	}
+	if current.Trigger != TriggerCron {
+		return Job{}, errs.Newf(errs.CategoryFailedPrecondition,
+			"job %q is not a cron job; only cron jobs have a schedule", id)
+	}
+	sched, err := ParseSchedule(schedule)
+	if err != nil {
+		return Job{}, err
+	}
+	next := sched.Next(time.Now()).Unix()
+	if err := s.q.UpdateJobSchedule(ctx, sqliteq.UpdateJobScheduleParams{
+		Schedule:  schedule,
+		NextRunAt: &next,
+		UpdatedAt: time.Now().Unix(),
+		ID:        id,
+	}); err != nil {
+		return Job{}, fmt.Errorf("update job schedule: %w", err)
+	}
+	return s.Get(ctx, id)
+}
+
 // Get returns the job with the given ID. Returns ErrNotFound if missing.
 func (s *Service) Get(ctx context.Context, id string) (Job, error) {
 	row, err := s.q.GetJob(ctx, id)
