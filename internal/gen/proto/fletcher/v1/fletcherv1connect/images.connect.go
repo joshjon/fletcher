@@ -35,6 +35,8 @@ const (
 const (
 	// ImageServiceImportProcedure is the fully-qualified name of the ImageService's Import RPC.
 	ImageServiceImportProcedure = "/fletcher.v1.ImageService/Import"
+	// ImageServiceListImagesProcedure is the fully-qualified name of the ImageService's ListImages RPC.
+	ImageServiceListImagesProcedure = "/fletcher.v1.ImageService/ListImages"
 )
 
 // ImageServiceClient is a client for the fletcher.v1.ImageService service.
@@ -45,6 +47,9 @@ type ImageServiceClient interface {
 	// needs the working directory); this covers the "deploy a registry image"
 	// path that works from anywhere.
 	Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error)
+	// ListImages lists the imported templates, so a client can offer an image
+	// picker instead of a free-text field.
+	ListImages(context.Context, *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error)
 }
 
 // NewImageServiceClient constructs a client for the fletcher.v1.ImageService service. By default,
@@ -64,17 +69,29 @@ func NewImageServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(imageServiceMethods.ByName("Import")),
 			connect.WithClientOptions(opts...),
 		),
+		listImages: connect.NewClient[v1.ListImagesRequest, v1.ListImagesResponse](
+			httpClient,
+			baseURL+ImageServiceListImagesProcedure,
+			connect.WithSchema(imageServiceMethods.ByName("ListImages")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // imageServiceClient implements ImageServiceClient.
 type imageServiceClient struct {
-	_import *connect.Client[v1.ImportRequest, v1.ImportResponse]
+	_import    *connect.Client[v1.ImportRequest, v1.ImportResponse]
+	listImages *connect.Client[v1.ListImagesRequest, v1.ListImagesResponse]
 }
 
 // Import calls fletcher.v1.ImageService.Import.
 func (c *imageServiceClient) Import(ctx context.Context, req *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error) {
 	return c._import.CallUnary(ctx, req)
+}
+
+// ListImages calls fletcher.v1.ImageService.ListImages.
+func (c *imageServiceClient) ListImages(ctx context.Context, req *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error) {
+	return c.listImages.CallUnary(ctx, req)
 }
 
 // ImageServiceHandler is an implementation of the fletcher.v1.ImageService service.
@@ -85,6 +102,9 @@ type ImageServiceHandler interface {
 	// needs the working directory); this covers the "deploy a registry image"
 	// path that works from anywhere.
 	Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error)
+	// ListImages lists the imported templates, so a client can offer an image
+	// picker instead of a free-text field.
+	ListImages(context.Context, *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error)
 }
 
 // NewImageServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -100,10 +120,18 @@ func NewImageServiceHandler(svc ImageServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(imageServiceMethods.ByName("Import")),
 		connect.WithHandlerOptions(opts...),
 	)
+	imageServiceListImagesHandler := connect.NewUnaryHandler(
+		ImageServiceListImagesProcedure,
+		svc.ListImages,
+		connect.WithSchema(imageServiceMethods.ByName("ListImages")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.ImageService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ImageServiceImportProcedure:
 			imageServiceImportHandler.ServeHTTP(w, r)
+		case ImageServiceListImagesProcedure:
+			imageServiceListImagesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -115,4 +143,8 @@ type UnimplementedImageServiceHandler struct{}
 
 func (UnimplementedImageServiceHandler) Import(context.Context, *connect.Request[v1.ImportRequest]) (*connect.Response[v1.ImportResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.Import is not implemented"))
+}
+
+func (UnimplementedImageServiceHandler) ListImages(context.Context, *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.ListImages is not implemented"))
 }

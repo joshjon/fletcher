@@ -21,6 +21,185 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type ListImagesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListImagesRequest) Reset() {
+	*x = ListImagesRequest{}
+	mi := &file_fletcher_v1_images_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListImagesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListImagesRequest) ProtoMessage() {}
+
+func (x *ListImagesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_images_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListImagesRequest.ProtoReflect.Descriptor instead.
+func (*ListImagesRequest) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_images_proto_rawDescGZIP(), []int{0}
+}
+
+type ListImagesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Images        []*Image               `protobuf:"bytes,1,rep,name=images,proto3" json:"images,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListImagesResponse) Reset() {
+	*x = ListImagesResponse{}
+	mi := &file_fletcher_v1_images_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListImagesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListImagesResponse) ProtoMessage() {}
+
+func (x *ListImagesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_images_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListImagesResponse.ProtoReflect.Descriptor instead.
+func (*ListImagesResponse) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_images_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ListImagesResponse) GetImages() []*Image {
+	if x != nil {
+		return x.Images
+	}
+	return nil
+}
+
+type Image struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// name is the template name (jobs/sessions reference it via --image).
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// format is "ext4" or "subvolume".
+	Format string `protobuf:"bytes,2,opt,name=format,proto3" json:"format,omitempty"`
+	// source is the registry ref it was imported from (empty for older imports).
+	Source string `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
+	// digest is the image digest ("sha256:..."), empty for a local-only image.
+	Digest string `protobuf:"bytes,4,opt,name=digest,proto3" json:"digest,omitempty"`
+	// imported_at is when it was imported (Unix epoch seconds; 0 if unknown).
+	ImportedAt int64 `protobuf:"varint,5,opt,name=imported_at,json=importedAt,proto3" json:"imported_at,omitempty"`
+	// exposed_port is the image's lowest EXPOSE (0 if it declares none).
+	ExposedPort uint32 `protobuf:"varint,6,opt,name=exposed_port,json=exposedPort,proto3" json:"exposed_port,omitempty"`
+	// entrypoint is the image's effective launch command (ENTRYPOINT + CMD).
+	Entrypoint    []string `protobuf:"bytes,7,rep,name=entrypoint,proto3" json:"entrypoint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Image) Reset() {
+	*x = Image{}
+	mi := &file_fletcher_v1_images_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Image) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Image) ProtoMessage() {}
+
+func (x *Image) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_images_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Image.ProtoReflect.Descriptor instead.
+func (*Image) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_images_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Image) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Image) GetFormat() string {
+	if x != nil {
+		return x.Format
+	}
+	return ""
+}
+
+func (x *Image) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *Image) GetDigest() string {
+	if x != nil {
+		return x.Digest
+	}
+	return ""
+}
+
+func (x *Image) GetImportedAt() int64 {
+	if x != nil {
+		return x.ImportedAt
+	}
+	return 0
+}
+
+func (x *Image) GetExposedPort() uint32 {
+	if x != nil {
+		return x.ExposedPort
+	}
+	return 0
+}
+
+func (x *Image) GetEntrypoint() []string {
+	if x != nil {
+		return x.Entrypoint
+	}
+	return nil
+}
+
 type ImportRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ref is the Docker image reference to pull (e.g. ghcr.io/you/app:v1).
@@ -40,7 +219,7 @@ type ImportRequest struct {
 
 func (x *ImportRequest) Reset() {
 	*x = ImportRequest{}
-	mi := &file_fletcher_v1_images_proto_msgTypes[0]
+	mi := &file_fletcher_v1_images_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -52,7 +231,7 @@ func (x *ImportRequest) String() string {
 func (*ImportRequest) ProtoMessage() {}
 
 func (x *ImportRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_images_proto_msgTypes[0]
+	mi := &file_fletcher_v1_images_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -65,7 +244,7 @@ func (x *ImportRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportRequest.ProtoReflect.Descriptor instead.
 func (*ImportRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_images_proto_rawDescGZIP(), []int{0}
+	return file_fletcher_v1_images_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ImportRequest) GetRef() string {
@@ -117,7 +296,7 @@ type ImportResponse struct {
 
 func (x *ImportResponse) Reset() {
 	*x = ImportResponse{}
-	mi := &file_fletcher_v1_images_proto_msgTypes[1]
+	mi := &file_fletcher_v1_images_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -129,7 +308,7 @@ func (x *ImportResponse) String() string {
 func (*ImportResponse) ProtoMessage() {}
 
 func (x *ImportResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_images_proto_msgTypes[1]
+	mi := &file_fletcher_v1_images_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -142,7 +321,7 @@ func (x *ImportResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImportResponse.ProtoReflect.Descriptor instead.
 func (*ImportResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_images_proto_rawDescGZIP(), []int{1}
+	return file_fletcher_v1_images_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ImportResponse) GetName() string {
@@ -170,7 +349,21 @@ var File_fletcher_v1_images_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_images_proto_rawDesc = "" +
 	"\n" +
-	"\x18fletcher/v1/images.proto\x12\vfletcher.v1\"\xa5\x01\n" +
+	"\x18fletcher/v1/images.proto\x12\vfletcher.v1\"\x13\n" +
+	"\x11ListImagesRequest\"@\n" +
+	"\x12ListImagesResponse\x12*\n" +
+	"\x06images\x18\x01 \x03(\v2\x12.fletcher.v1.ImageR\x06images\"\xc7\x01\n" +
+	"\x05Image\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
+	"\x06format\x18\x02 \x01(\tR\x06format\x12\x16\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\x12\x16\n" +
+	"\x06digest\x18\x04 \x01(\tR\x06digest\x12\x1f\n" +
+	"\vimported_at\x18\x05 \x01(\x03R\n" +
+	"importedAt\x12!\n" +
+	"\fexposed_port\x18\x06 \x01(\rR\vexposedPort\x12\x1e\n" +
+	"\n" +
+	"entrypoint\x18\a \x03(\tR\n" +
+	"entrypoint\"\xa5\x01\n" +
 	"\rImportRequest\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12+\n" +
@@ -180,9 +373,11 @@ const file_fletcher_v1_images_proto_rawDesc = "" +
 	"\x0eImportResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06digest\x18\x02 \x01(\tR\x06digest\x12!\n" +
-	"\fexposed_port\x18\x03 \x01(\rR\vexposedPort2S\n" +
+	"\fexposed_port\x18\x03 \x01(\rR\vexposedPort2\xa4\x01\n" +
 	"\fImageService\x12C\n" +
-	"\x06Import\x12\x1a.fletcher.v1.ImportRequest\x1a\x1b.fletcher.v1.ImportResponse\"\x00B\xb2\x01\n" +
+	"\x06Import\x12\x1a.fletcher.v1.ImportRequest\x1a\x1b.fletcher.v1.ImportResponse\"\x00\x12O\n" +
+	"\n" +
+	"ListImages\x12\x1e.fletcher.v1.ListImagesRequest\x1a\x1f.fletcher.v1.ListImagesResponse\"\x00B\xb2\x01\n" +
 	"\x0fcom.fletcher.v1B\vImagesProtoP\x01ZEgithub.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1\xa2\x02\x03FXX\xaa\x02\vFletcher.V1\xca\x02\vFletcher\\V1\xe2\x02\x17Fletcher\\V1\\GPBMetadata\xea\x02\fFletcher::V1b\x06proto3"
 
 var (
@@ -197,19 +392,25 @@ func file_fletcher_v1_images_proto_rawDescGZIP() []byte {
 	return file_fletcher_v1_images_proto_rawDescData
 }
 
-var file_fletcher_v1_images_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_fletcher_v1_images_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_fletcher_v1_images_proto_goTypes = []any{
-	(*ImportRequest)(nil),  // 0: fletcher.v1.ImportRequest
-	(*ImportResponse)(nil), // 1: fletcher.v1.ImportResponse
+	(*ListImagesRequest)(nil),  // 0: fletcher.v1.ListImagesRequest
+	(*ListImagesResponse)(nil), // 1: fletcher.v1.ListImagesResponse
+	(*Image)(nil),              // 2: fletcher.v1.Image
+	(*ImportRequest)(nil),      // 3: fletcher.v1.ImportRequest
+	(*ImportResponse)(nil),     // 4: fletcher.v1.ImportResponse
 }
 var file_fletcher_v1_images_proto_depIdxs = []int32{
-	0, // 0: fletcher.v1.ImageService.Import:input_type -> fletcher.v1.ImportRequest
-	1, // 1: fletcher.v1.ImageService.Import:output_type -> fletcher.v1.ImportResponse
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	2, // 0: fletcher.v1.ListImagesResponse.images:type_name -> fletcher.v1.Image
+	3, // 1: fletcher.v1.ImageService.Import:input_type -> fletcher.v1.ImportRequest
+	0, // 2: fletcher.v1.ImageService.ListImages:input_type -> fletcher.v1.ListImagesRequest
+	4, // 3: fletcher.v1.ImageService.Import:output_type -> fletcher.v1.ImportResponse
+	1, // 4: fletcher.v1.ImageService.ListImages:output_type -> fletcher.v1.ListImagesResponse
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_fletcher_v1_images_proto_init() }
@@ -223,7 +424,7 @@ func file_fletcher_v1_images_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fletcher_v1_images_proto_rawDesc), len(file_fletcher_v1_images_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

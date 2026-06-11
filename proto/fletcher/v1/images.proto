@@ -14,6 +14,31 @@ service ImageService {
   // needs the working directory); this covers the "deploy a registry image"
   // path that works from anywhere.
   rpc Import(ImportRequest) returns (ImportResponse) {}
+  // ListImages lists the imported templates, so a client can offer an image
+  // picker instead of a free-text field.
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse) {}
+}
+
+message ListImagesRequest {}
+message ListImagesResponse {
+  repeated Image images = 1;
+}
+
+message Image {
+  // name is the template name (jobs/sessions reference it via --image).
+  string name = 1;
+  // format is "ext4" or "subvolume".
+  string format = 2;
+  // source is the registry ref it was imported from (empty for older imports).
+  string source = 3;
+  // digest is the image digest ("sha256:..."), empty for a local-only image.
+  string digest = 4;
+  // imported_at is when it was imported (Unix epoch seconds; 0 if unknown).
+  int64 imported_at = 5;
+  // exposed_port is the image's lowest EXPOSE (0 if it declares none).
+  uint32 exposed_port = 6;
+  // entrypoint is the image's effective launch command (ENTRYPOINT + CMD).
+  repeated string entrypoint = 7;
 }
 
 message ImportRequest {

@@ -26,6 +26,31 @@ func NewImagesService(imagesDir, format string) *ImagesService {
 	return &ImagesService{imagesDir: imagesDir, format: format}
 }
 
+// ListImages lists the imported templates so a client can offer a picker.
+func (s *ImagesService) ListImages(_ context.Context, _ *connect.Request[fletcherv1.ListImagesRequest]) (*connect.Response[fletcherv1.ListImagesResponse], error) {
+	templates, err := image.ListTemplates(s.imagesDir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*fletcherv1.Image, len(templates))
+	for i, t := range templates {
+		var port uint32
+		if t.ExposedPort > 0 && t.ExposedPort <= 65535 {
+			port = uint32(t.ExposedPort)
+		}
+		out[i] = &fletcherv1.Image{
+			Name:        t.Name,
+			Format:      t.Format,
+			Source:      t.Source,
+			Digest:      t.Digest,
+			ImportedAt:  t.ImportedAt,
+			ExposedPort: port,
+			Entrypoint:  t.Entrypoint,
+		}
+	}
+	return connect.NewResponse(&fletcherv1.ListImagesResponse{Images: out}), nil
+}
+
 // Import pulls a registry image and flattens it into a template.
 func (s *ImagesService) Import(ctx context.Context, req *connect.Request[fletcherv1.ImportRequest]) (*connect.Response[fletcherv1.ImportResponse], error) {
 	if s.format != "ext4" {
