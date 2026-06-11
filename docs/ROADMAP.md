@@ -1138,7 +1138,20 @@ the default runtime.
   logs` shows output; `session stop`/`start` and a daemon restart bring the app
   back on its own.
 
-### Mobile-first wave (Milestones 10-14) - PLANNED (decided 2026-06-11)
+### Mobile-first wave (Milestones 10-14) - DONE (shipped 2026-06-11/12)
+
+**All five milestones shipped and hardware-verified**, including the hero
+scenario end to end on real microVMs with nothing leaving the box: a dev
+session built a web app, the agent published it via the approval-gated
+`publish_image` MCP call (operator approved from the CLI), a deployment was
+created from the committed image, its port published, and the page served at
+the tunnel address. The iOS counterparts (fletcher-ios M8, M9, M12-M16) are
+code complete awaiting device verification; APNs push end-to-end still needs
+the operator's `.p8` key + device.
+
+Original plan (kept for the record):
+
+### Mobile-first wave - the plan as decided 2026-06-11
 
 Decided with the operator 2026-06-11 after walking the hero mobile scenario end
 to end: create a dev session from the phone, drive Claude in it, have Claude
