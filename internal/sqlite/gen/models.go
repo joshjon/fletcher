@@ -83,6 +83,8 @@ type Session struct {
 	EgressPolicy string
 	Gateway      string
 	RunApp       int64
+	PrevForkID   *string
+	PrevForkPath *string
 }
 
 type Setting struct {

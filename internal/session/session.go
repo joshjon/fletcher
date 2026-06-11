@@ -60,6 +60,9 @@ type Session struct {
 	Gateway string
 	// RunApp is whether the session runs the image's own app on boot (M9).
 	RunApp bool
+	// HasRollback is whether a redeploy retired a fork this session can roll
+	// back to.
+	HasRollback bool
 }
 
 // ErrNotFound is returned when a session ref matches nothing.
@@ -399,6 +402,7 @@ func (m *Manager) Stop(ctx context.Context, ref string) (Session, error) {
 		return Session{}, err
 	}
 	if handle := m.takeHandle(row.ID); handle != nil {
+		m.syncGuest(ctx, handle, row.ID)
 		if serr := handle.Stop(ctx); serr != nil {
 			m.logger.Warn("stop session vm", slog.String("session_id", row.ID), slog.String("err", serr.Error()))
 		}
@@ -429,6 +433,11 @@ func (m *Manager) Delete(ctx context.Context, ref string) (bool, error) {
 	m.closeSessionPorts(ctx, row.ID)
 	if derr := m.snapshot.Delete(context.WithoutCancel(ctx), row.ForkID); derr != nil {
 		m.logger.Warn("delete session fork", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+	}
+	if row.PrevForkID != nil {
+		if derr := m.snapshot.Delete(context.WithoutCancel(ctx), *row.PrevForkID); derr != nil {
+			m.logger.Warn("delete session previous fork", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+		}
 	}
 	// Drop any on-disk VM state (e.g. a hibernation snapshot) for the session.
 	if m.runtime != nil {
@@ -717,6 +726,19 @@ func (m *Manager) writeCommittedMeta(row sqliteq.Session, p CommitImageParams, n
 	}
 }
 
+// syncGuest flushes a guest's page cache to its disk before the VM stops.
+// Hibernation keeps memory, but the disk must stay the source of truth
+// (DESIGN §5): a stale or discarded snapshot, a redeploy retiring the fork for
+// rollback, or a commit must never lose writes that only lived in guest RAM.
+// Best-effort: a guest that cannot sync still stops.
+func (m *Manager) syncGuest(ctx context.Context, handle runtime.SessionHandle, id string) {
+	if res, err := m.execIn(ctx, handle, "sync"); err != nil {
+		m.logger.Warn("sync guest before stop", slog.String("session_id", id), slog.String("err", err.Error()))
+	} else if res.ExitCode != 0 {
+		m.logger.Warn("sync guest before stop", slog.String("session_id", id), slog.String("stderr", res.Stderr))
+	}
+}
+
 // execIn runs cmd in the session VM behind handle, capturing its output.
 func (m *Manager) execIn(ctx context.Context, handle runtime.SessionHandle, cmd string) (ExecResult, error) {
 	var stdout, stderr strings.Builder
@@ -741,17 +763,23 @@ func validImageName(name string) bool {
 	return true
 }
 
-// Redeploy replaces a session's disk with a fresh fork of its current template
-// image and restarts it. It does not rebuild or pull the image (refreshing the
-// template to a new version is a separate import); for a run_app deploy this
-// applies whatever is currently imported under the session's image, cleanly.
-func (m *Manager) Redeploy(ctx context.Context, ref string) (Session, error) {
+// Redeploy replaces a session's disk with a fresh fork of its template image
+// and restarts it. newImage, when non-empty, retargets the session to that
+// template first (it must already be imported); empty re-forks from the
+// session's current image. The retired fork is kept as the session's previous
+// fork (reflink-shared, so nearly free) so a bad redeploy can be rolled back;
+// each redeploy replaces the one before it.
+func (m *Manager) Redeploy(ctx context.Context, ref, newImage string) (Session, error) {
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return Session{}, err
+	}
+	image := row.Image
+	if strings.TrimSpace(newImage) != "" {
+		image = newImage
 	}
 
 	// Hold the per-session start lock across the disk swap so a concurrent wake
@@ -761,6 +789,8 @@ func (m *Manager) Redeploy(ctx context.Context, ref string) (Session, error) {
 	lock := m.startLock(row.ID)
 	lock.Lock()
 	if handle := m.takeHandle(row.ID); handle != nil {
+		// Flush the guest first: this disk becomes the rollback target.
+		m.syncGuest(ctx, handle, row.ID)
 		if serr := handle.Stop(ctx); serr != nil {
 			m.logger.Warn("stop session vm for redeploy", slog.String("session_id", row.ID), slog.String("err", serr.Error()))
 		}
@@ -770,25 +800,80 @@ func (m *Manager) Redeploy(ctx context.Context, ref string) (Session, error) {
 		return Session{}, err
 	}
 
-	fork, err := m.snapshot.Create(ctx, row.Image)
+	fork, err := m.snapshot.Create(ctx, image)
 	if err != nil {
 		lock.Unlock()
-		return Session{}, fmt.Errorf("re-fork session from image %q: %w", row.Image, err)
+		return Session{}, fmt.Errorf("re-fork session from image %q: %w", image, err)
 	}
-	oldForkID := row.ForkID
-	if err := m.q.UpdateSessionFork(ctx, sqliteq.UpdateSessionForkParams{
-		ForkID:    fork.ID,
-		ForkPath:  fork.Path,
-		UpdatedAt: time.Now().Unix(),
-		ID:        row.ID,
+	retiredForkID, retiredForkPath := row.ForkID, row.ForkPath
+	droppedPrev := row.PrevForkID
+	if err := m.q.UpdateSessionForks(ctx, sqliteq.UpdateSessionForksParams{
+		ForkID:       fork.ID,
+		ForkPath:     fork.Path,
+		PrevForkID:   &retiredForkID,
+		PrevForkPath: &retiredForkPath,
+		Image:        image,
+		UpdatedAt:    time.Now().Unix(),
+		ID:           row.ID,
 	}); err != nil {
 		_ = m.snapshot.Delete(context.WithoutCancel(ctx), fork.ID)
 		lock.Unlock()
 		return Session{}, fmt.Errorf("point session at new fork: %w", err)
 	}
-	// The old fork is now unreferenced; reclaim it best-effort.
-	if derr := m.snapshot.Delete(context.WithoutCancel(ctx), oldForkID); derr != nil {
-		m.logger.Warn("delete old fork after redeploy", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+	// Only one rollback level is kept: reclaim the fork the retired one replaces.
+	if droppedPrev != nil {
+		if derr := m.snapshot.Delete(context.WithoutCancel(ctx), *droppedPrev); derr != nil {
+			m.logger.Warn("delete dropped previous fork after redeploy", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+		}
+	}
+	lock.Unlock()
+
+	return m.Start(ctx, row.ID)
+}
+
+// Rollback swaps a session back to the fork its last redeploy retired and
+// restarts it - the one-step undo for a bad redeploy. Swapping (rather than
+// consuming) the forks means rolling forward again is the same operation.
+// The session's image label is not changed: the fork is the source of truth
+// for what runs; the label tracks the most recent explicit retarget.
+func (m *Manager) Rollback(ctx context.Context, ref string) (Session, error) {
+	if err := m.requireRuntime(); err != nil {
+		return Session{}, err
+	}
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return Session{}, err
+	}
+	if row.PrevForkID == nil || row.PrevForkPath == nil {
+		return Session{}, errs.Newf(errs.CategoryFailedPrecondition,
+			"session %q has no previous fork to roll back to (rollback undoes a redeploy)", row.Name)
+	}
+
+	lock := m.startLock(row.ID)
+	lock.Lock()
+	if handle := m.takeHandle(row.ID); handle != nil {
+		// Flush the guest first: this disk becomes the swap-forward target.
+		m.syncGuest(ctx, handle, row.ID)
+		if serr := handle.Stop(ctx); serr != nil {
+			m.logger.Warn("stop session vm for rollback", slog.String("session_id", row.ID), slog.String("err", serr.Error()))
+		}
+	}
+	if err := m.setState(ctx, row.ID, StateStopped); err != nil {
+		lock.Unlock()
+		return Session{}, err
+	}
+	curID, curPath := row.ForkID, row.ForkPath
+	if err := m.q.UpdateSessionForks(ctx, sqliteq.UpdateSessionForksParams{
+		ForkID:       *row.PrevForkID,
+		ForkPath:     *row.PrevForkPath,
+		PrevForkID:   &curID,
+		PrevForkPath: &curPath,
+		Image:        row.Image,
+		UpdatedAt:    time.Now().Unix(),
+		ID:           row.ID,
+	}); err != nil {
+		lock.Unlock()
+		return Session{}, fmt.Errorf("swap session forks: %w", err)
 	}
 	lock.Unlock()
 
@@ -1349,6 +1434,7 @@ func sessionFromRow(r sqliteq.Session) Session {
 		EgressPolicy: r.EgressPolicy,
 		RunApp:       r.RunApp != 0,
 		Gateway:      r.Gateway,
+		HasRollback:  r.PrevForkID != nil,
 	}
 }
 

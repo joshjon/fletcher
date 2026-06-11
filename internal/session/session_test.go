@@ -624,7 +624,7 @@ func TestCommitImageStoppedSessionCommitsWithoutExec(t *testing.T) {
 	img, err := mgr.CommitImage(ctx, "dev", session.CommitImageParams{Name: "frozen"})
 	require.NoError(t, err)
 	require.Equal(t, "frozen", img)
-	require.Empty(t, rt.handles[0].execs)
+	require.Equal(t, []string{"sync"}, rt.handles[0].execs, "one sync from the stop, none from the commit")
 	require.NotEmpty(t, snap.templates["frozen"])
 }
 
@@ -644,7 +644,7 @@ func TestCommitImageStoppedSessionAcceptsEntrypoint(t *testing.T) {
 		Entrypoint: []string{"node"},
 	})
 	require.NoError(t, err)
-	require.Empty(t, rt.handles[0].execs, "a stopped session needs no guest sync")
+	require.Equal(t, []string{"sync"}, rt.handles[0].execs, "one sync from the stop, none from the commit")
 	require.Contains(t, snap.committedFiles, "/etc/fletcher/app.json")
 }
 
@@ -709,4 +709,81 @@ func TestSessionEnvCarriesIdentity(t *testing.T) {
 	_, err = mgr.Start(ctx, "dev")
 	require.NoError(t, err)
 	require.Contains(t, rt.envs[1], "FLETCHER_SESSION_NAME=dev")
+}
+
+func TestRedeployKeepsPreviousForkAndRollbackSwaps(t *testing.T) {
+	rt := &fakeRuntime{}
+	snap := newFakeSnapshot()
+	mgr := newManager(t, rt, snap)
+	ctx := context.Background()
+
+	created, err := mgr.Create(ctx, "app", "webapp", "", "", true)
+	require.NoError(t, err)
+	require.False(t, created.HasRollback)
+	firstFork := rt.started[0]
+
+	// No rollback target before any redeploy.
+	_, err = mgr.Rollback(ctx, "app")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no previous fork")
+
+	// Redeploy: a new fork boots, the old one is retired (not deleted).
+	redeployed, err := mgr.Redeploy(ctx, "app", "")
+	require.NoError(t, err)
+	require.True(t, redeployed.HasRollback)
+	require.Len(t, rt.started, 2)
+	secondFork := rt.started[1]
+	require.NotEqual(t, firstFork, secondFork)
+	require.Empty(t, snap.deleted, "the retired fork is kept for rollback")
+
+	// Rollback boots the retired fork again.
+	rolled, err := mgr.Rollback(ctx, "app")
+	require.NoError(t, err)
+	require.True(t, rolled.HasRollback, "rolling forward again stays possible")
+	require.Len(t, rt.started, 3)
+	require.Equal(t, firstFork, rt.started[2])
+
+	// A second rollback swaps forward to the redeployed fork.
+	_, err = mgr.Rollback(ctx, "app")
+	require.NoError(t, err)
+	require.Equal(t, secondFork, rt.started[3])
+}
+
+func TestRedeployRetargetsImageAndDropsOlderPrev(t *testing.T) {
+	rt := &fakeRuntime{}
+	snap := newFakeSnapshot()
+	mgr := newManager(t, rt, snap)
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "app", "v1img", "", "", true)
+	require.NoError(t, err)
+
+	// Retarget to a different template.
+	redeployed, err := mgr.Redeploy(ctx, "app", "v2img")
+	require.NoError(t, err)
+	require.Equal(t, "v2img", redeployed.Image)
+	require.Contains(t, rt.started[1], "fork_v2img")
+
+	// A second redeploy reclaims the oldest fork (only one rollback level).
+	_, err = mgr.Redeploy(ctx, "app", "")
+	require.NoError(t, err)
+	require.Len(t, snap.deleted, 1)
+	require.Contains(t, snap.deleted[0], "fork_v1img")
+}
+
+func TestDeleteReclaimsPreviousFork(t *testing.T) {
+	rt := &fakeRuntime{}
+	snap := newFakeSnapshot()
+	mgr := newManager(t, rt, snap)
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "app", "img", "", "", true)
+	require.NoError(t, err)
+	_, err = mgr.Redeploy(ctx, "app", "")
+	require.NoError(t, err)
+
+	ok, err := mgr.Delete(ctx, "app")
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Empty(t, snap.live, "both the active and retired forks are reclaimed")
 }

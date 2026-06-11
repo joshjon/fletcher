@@ -26,7 +26,7 @@ INSERT INTO sessions (
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app
+RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path
 `
 
 type CreateSessionParams struct {
@@ -71,6 +71,8 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.EgressPolicy,
 		&i.Gateway,
 		&i.RunApp,
+		&i.PrevForkID,
+		&i.PrevForkPath,
 	)
 	return i, err
 }
@@ -88,7 +90,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) (int64, error) {
 }
 
 const getSessionByRef = `-- name: GetSessionByRef :one
-SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app FROM sessions
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path FROM sessions
 WHERE id = ?1 OR name = ?1
 LIMIT 1
 `
@@ -109,12 +111,14 @@ func (q *Queries) GetSessionByRef(ctx context.Context, ref string) (Session, err
 		&i.EgressPolicy,
 		&i.Gateway,
 		&i.RunApp,
+		&i.PrevForkID,
+		&i.PrevForkPath,
 	)
 	return i, err
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app FROM sessions
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path FROM sessions
 ORDER BY created_at DESC
 `
 
@@ -140,6 +144,8 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 			&i.EgressPolicy,
 			&i.Gateway,
 			&i.RunApp,
+			&i.PrevForkID,
+			&i.PrevForkPath,
 		); err != nil {
 			return nil, err
 		}
@@ -188,6 +194,35 @@ func (q *Queries) UpdateSessionFork(ctx context.Context, arg UpdateSessionForkPa
 	_, err := q.db.ExecContext(ctx, updateSessionFork,
 		arg.ForkID,
 		arg.ForkPath,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
+const updateSessionForks = `-- name: UpdateSessionForks :exec
+UPDATE sessions
+SET fork_id = ?, fork_path = ?, prev_fork_id = ?, prev_fork_path = ?, image = ?, updated_at = ?
+WHERE id = ?
+`
+
+type UpdateSessionForksParams struct {
+	ForkID       string
+	ForkPath     string
+	PrevForkID   *string
+	PrevForkPath *string
+	Image        string
+	UpdatedAt    int64
+	ID           string
+}
+
+func (q *Queries) UpdateSessionForks(ctx context.Context, arg UpdateSessionForksParams) error {
+	_, err := q.db.ExecContext(ctx, updateSessionForks,
+		arg.ForkID,
+		arg.ForkPath,
+		arg.PrevForkID,
+		arg.PrevForkPath,
+		arg.Image,
 		arg.UpdatedAt,
 		arg.ID,
 	)

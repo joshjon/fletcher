@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 
 	"connectrpc.com/connect"
 
@@ -32,7 +33,8 @@ type SessionsBackend interface {
 	Unpublish(ctx context.Context, ref string, guestPort int) error
 	ListPorts(ctx context.Context, ref string) ([]session.PublishedPort, error)
 	Restart(ctx context.Context, ref string) (session.Session, error)
-	Redeploy(ctx context.Context, ref string) (session.Session, error)
+	Redeploy(ctx context.Context, ref, newImage string) (session.Session, error)
+	Rollback(ctx context.Context, ref string) (session.Session, error)
 	Logs(ctx context.Context, ref string, tailLines int) (string, error)
 	StreamLogs(ctx context.Context, ref string, tailLines int, follow bool, w io.Writer) error
 	AppRestartCount(ctx context.Context, ref string) (int64, bool)
@@ -59,6 +61,12 @@ type CertStatusResolver interface {
 // skip/failure (which it logs).
 type ImageRefresher interface {
 	RefreshImage(ctx context.Context, image string) bool
+	// HasTemplate reports whether an imported template of this name exists, so
+	// a redeploy retarget can tell a local template from a registry ref.
+	HasTemplate(name string) bool
+	// ImportRef imports a registry ref under the given template name (replacing
+	// it), for a redeploy that retargets the session's image source.
+	ImportRef(ctx context.Context, ref, name string) error
 }
 
 // SessionsService implements fletcherv1connect.SessionServiceHandler.
@@ -210,17 +218,43 @@ func (s *SessionsService) RestartSession(ctx context.Context, req *connect.Reque
 // restarts it.
 func (s *SessionsService) RedeploySession(ctx context.Context, req *connect.Request[fletcherv1.RedeploySessionRequest]) (*connect.Response[fletcherv1.RedeploySessionResponse], error) {
 	ref := req.Msg.GetRef()
+	target := strings.TrimSpace(req.Msg.GetImage())
+
 	var refreshed bool
-	if s.refresher != nil {
-		// Re-pull before re-forking so the fresh fork picks up the new template.
-		// Best-effort: a failed pull is logged by the refresher and we redeploy
-		// the current template. Get the image name first; a lookup miss surfaces
+	var retargetImage string
+	switch {
+	case target == "":
+		// Re-pull the current image's source before re-forking so the fresh fork
+		// picks up the new template. Best-effort: a failed pull is logged by the
+		// refresher and we redeploy the current template. A lookup miss surfaces
 		// from Redeploy below with the proper error.
-		if sess, err := s.backend.Get(ctx, ref); err == nil {
-			refreshed = s.refresher.RefreshImage(ctx, sess.Image)
+		if s.refresher != nil {
+			if sess, err := s.backend.Get(ctx, ref); err == nil {
+				refreshed = s.refresher.RefreshImage(ctx, sess.Image)
+			}
 		}
+	case s.refresher != nil && s.refresher.HasTemplate(target):
+		// An imported template: retarget the session to it.
+		retargetImage = target
+	case s.refresher != nil:
+		// A registry ref: import it under the session's current template name.
+		// Unlike the best-effort same-ref refresh, an explicit ref must not
+		// silently fall back to the old image.
+		sess, err := s.backend.Get(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.refresher.ImportRef(ctx, target, sess.Image); err != nil {
+			return nil, errs.Newf(errs.CategoryFailedPrecondition,
+				"import %q for redeploy: %s", target, err)
+		}
+		refreshed = true
+	default:
+		return nil, errs.New(errs.CategoryFailedPrecondition,
+			"this daemon cannot retarget a redeploy (no image importer wired)")
 	}
-	sess, err := s.backend.Redeploy(ctx, ref)
+
+	sess, err := s.backend.Redeploy(ctx, ref, retargetImage)
 	if err != nil {
 		return nil, err
 	}
@@ -228,6 +262,15 @@ func (s *SessionsService) RedeploySession(ctx context.Context, req *connect.Requ
 		Session:        sessionToProto(sess),
 		ImageRefreshed: refreshed,
 	}), nil
+}
+
+// RollbackSession swaps a session back to the fork its last redeploy retired.
+func (s *SessionsService) RollbackSession(ctx context.Context, req *connect.Request[fletcherv1.RollbackSessionRequest]) (*connect.Response[fletcherv1.RollbackSessionResponse], error) {
+	sess, err := s.backend.Rollback(ctx, req.Msg.GetRef())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.RollbackSessionResponse{Session: sessionToProto(sess)}), nil
 }
 
 // CommitSessionImage commits a session's fork as a new image template.
@@ -477,6 +520,7 @@ func sessionToProto(s session.Session) *fletcherv1.Session {
 		EgressPolicy: s.EgressPolicy,
 		Gateway:      s.Gateway,
 		RunApp:       s.RunApp,
+		HasRollback:  s.HasRollback,
 	}
 	if s.LastUsedAt != nil {
 		v := s.LastUsedAt.Unix()

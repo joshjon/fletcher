@@ -39,6 +39,7 @@ func sessionCmd() *cli.Command {
 			sessionLogsCmd(),
 			sessionRestartCmd(),
 			sessionRedeployCmd(),
+			sessionRollbackCmd(),
 			sessionUpdateCmd(),
 			sessionCommitCmd(),
 		},
@@ -195,7 +196,48 @@ func sessionUpdateCmd() *cli.Command {
 func sessionRedeployCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "redeploy",
-		Usage:     "re-fork a session from its current image and restart (re-pulls a registry image first)",
+		Usage:     "re-fork a session from its image and restart (re-pulls a registry image first)",
+		ArgsUsage: "<ref>",
+		Flags: []cli.Flag{
+			socketFlag(),
+			&cli.StringFlag{
+				Name:  "image",
+				Usage: "redeploy to this image instead: an imported template name, or a registry ref (e.g. ghcr.io/you/app:v2) imported under the session's template name first",
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ref := cmd.Args().First()
+			if ref == "" {
+				return errors.New("session ref (id or name) is required")
+			}
+			client := newSessionsClient(cmd)
+			resp, err := client.RedeploySession(ctx, connect.NewRequest(&fletcherv1.RedeploySessionRequest{
+				Ref:   ref,
+				Image: cmd.String("image"),
+			}))
+			if err != nil {
+				return err
+			}
+			origin := "current image"
+			switch {
+			case cmd.String("image") != "" && resp.Msg.GetImageRefreshed():
+				origin = "imported " + cmd.String("image")
+			case cmd.String("image") != "":
+				origin = "retargeted to " + cmd.String("image")
+			case resp.Msg.GetImageRefreshed():
+				origin = "pulled latest image"
+			}
+			fmt.Printf("redeployed %s (%s); roll back with `fletcher session rollback %s` if needed\n",
+				resp.Msg.GetSession().GetName(), origin, ref)
+			return nil
+		},
+	}
+}
+
+func sessionRollbackCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "rollback",
+		Usage:     "swap a session back to the disk its last redeploy retired and restart it",
 		ArgsUsage: "<ref>",
 		Flags:     []cli.Flag{socketFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -204,15 +246,11 @@ func sessionRedeployCmd() *cli.Command {
 				return errors.New("session ref (id or name) is required")
 			}
 			client := newSessionsClient(cmd)
-			resp, err := client.RedeploySession(ctx, connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: ref}))
+			resp, err := client.RollbackSession(ctx, connect.NewRequest(&fletcherv1.RollbackSessionRequest{Ref: ref}))
 			if err != nil {
 				return err
 			}
-			origin := "current image"
-			if resp.Msg.GetImageRefreshed() {
-				origin = "pulled latest image"
-			}
-			fmt.Printf("redeployed %s (%s)\n", resp.Msg.GetSession().GetName(), origin)
+			fmt.Printf("rolled back %s (run rollback again to swap forward)\n", resp.Msg.GetSession().GetName())
 			return nil
 		},
 	}

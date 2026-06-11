@@ -35,7 +35,7 @@ func (d *Driver) StartSession(ctx context.Context, spec fcruntime.SessionSpec) (
 	}
 	vmDir := filepath.Join(d.runDir, "session-"+sanitiseID(spec.SessionID))
 
-	if d.hasValidSnapshot(vmDir) {
+	if d.hasValidSnapshot(vmDir, spec.RootfsPath) {
 		handle, err := d.restoreSession(ctx, spec, vmDir)
 		if err == nil {
 			return handle, nil
@@ -123,7 +123,7 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 		vmCancel:   vmCancel,
 		env:        effEnv,
 		forwardLns: forwardLns,
-		snapID:     d.snapshotIdentity(),
+		snapID:     d.snapshotIdentity(spec.RootfsPath),
 	}, nil
 }
 

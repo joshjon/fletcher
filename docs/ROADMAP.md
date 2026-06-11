@@ -1209,21 +1209,41 @@ unblocked on `fletcher approval approve`, and published.
   import); the operator's existing `fletcher-base` template carries a
   pre-app-mode guest and should be re-imported anyway.
 
-### Milestone 11 - redeploy to a ref + rollback - PLANNED
+### Milestone 11 - redeploy to a ref + rollback - DONE (verified on hardware 2026-06-11)
 
-**Goal.** The day-2 flow: the operator deployed `app:v1`; the next day Claude
-pushes `app:v2` (to the daemon via M10, or to a registry); the operator
+**Goal (met).** The day-2 flow: the operator deployed `app:v1`; the next day
+Claude pushes `app:v2` (to the daemon via M10, or to a registry); the operator
 redeploys to it from the phone, and can roll back if it breaks.
 
-**Today:** `RedeploySession` re-pulls the *same* source ref (so a moved tag like
-`:latest` works) but cannot point a deployment at a different ref - the only
-path is delete + recreate.
+**Shipped.**
 
-**Shape.** `RedeploySession` gains an optional `image_ref`: re-import from that
-ref (or re-resolve a daemon-local template name), refresh
-entrypoint/EXPOSE/env from the new image's meta, re-fork, restart. Keep the
-previous template digest in meta so redeploy-to-previous is a one-step rollback.
-CLI: `session redeploy --image <ref>` / `--rollback`.
+- `RedeploySession` gains an optional `image`: an imported template name
+  retargets the session to it; a registry ref is imported under the session's
+  current template name first (and unlike the best-effort same-ref refresh, an
+  explicit ref that fails to import is an error, never a silent redeploy of
+  the old image). CLI: `session redeploy --image <name-or-ref>`.
+- **Rollback is session-level, not template-level** (decided here): each
+  redeploy *retires* the session's previous fork instead of deleting it
+  (reflink-shared, so nearly free; one level kept; migration 0016), and
+  `RollbackSession` / `session rollback` swaps back to it and restarts -
+  swapping, so rolling forward again is the same call. `Session.has_rollback`
+  tells clients when to show the button. Delete reclaims both forks.
+- Two real bugs found by the hardware verification, both fixed:
+  - **Hibernation restore undid the redeploy.** Stop hibernates; Start after a
+    redeploy restored the memory snapshot - resuming the VM on the *old* disk.
+    The snapshot fingerprint now includes the rootfs path, so a fork swap
+    invalidates it and Start cold-boots the new disk.
+  - **Dirty guest pages were lost on stop.** Writes still in the guest page
+    cache lived only in the hibernation snapshot; a discarded/stale snapshot
+    (daemon upgrade, redeploy, rollback) silently lost them - breaking "disk
+    is the source of truth" (DESIGN §5). The manager now syncs the guest
+    before every stop (manual, reaper, redeploy, rollback), which is also what
+    makes the rollback disk actually hold the pre-redeploy state.
+
+*Verified on hardware:* marker file written in a session disappears on
+redeploy (fresh fork) and comes back on rollback; a second rollback swaps
+forward; retarget to a local template updates the session's image; retarget to
+a registry ref re-imports under the session's template name.
 
 ### Milestone 12 - persistent volumes - PLANNED (promoted from backlog)
 

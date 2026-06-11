@@ -87,6 +87,9 @@ const (
 	// SessionServiceCommitSessionImageProcedure is the fully-qualified name of the SessionService's
 	// CommitSessionImage RPC.
 	SessionServiceCommitSessionImageProcedure = "/fletcher.v1.SessionService/CommitSessionImage"
+	// SessionServiceRollbackSessionProcedure is the fully-qualified name of the SessionService's
+	// RollbackSession RPC.
+	SessionServiceRollbackSessionProcedure = "/fletcher.v1.SessionService/RollbackSession"
 )
 
 // SessionServiceClient is a client for the fletcher.v1.SessionService service.
@@ -151,6 +154,10 @@ type SessionServiceClient interface {
 	// A running session's disk is synced first; the result is at worst
 	// crash-consistent. Requires a snapshot driver that can commit (ext4).
 	CommitSessionImage(context.Context, *connect.Request[v1.CommitSessionImageRequest]) (*connect.Response[v1.CommitSessionImageResponse], error)
+	// RollbackSession swaps a session back to the fork its last redeploy
+	// retired and restarts it - the one-step undo for a bad redeploy. Rolling
+	// forward again is the same call (the forks swap each time).
+	RollbackSession(context.Context, *connect.Request[v1.RollbackSessionRequest]) (*connect.Response[v1.RollbackSessionResponse], error)
 }
 
 // NewSessionServiceClient constructs a client for the fletcher.v1.SessionService service. By
@@ -272,6 +279,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("CommitSessionImage")),
 			connect.WithClientOptions(opts...),
 		),
+		rollbackSession: connect.NewClient[v1.RollbackSessionRequest, v1.RollbackSessionResponse](
+			httpClient,
+			baseURL+SessionServiceRollbackSessionProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("RollbackSession")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -295,6 +308,7 @@ type sessionServiceClient struct {
 	getSessionLogs     *connect.Client[v1.GetSessionLogsRequest, v1.GetSessionLogsResponse]
 	streamSessionLogs  *connect.Client[v1.StreamSessionLogsRequest, v1.StreamSessionLogsResponse]
 	commitSessionImage *connect.Client[v1.CommitSessionImageRequest, v1.CommitSessionImageResponse]
+	rollbackSession    *connect.Client[v1.RollbackSessionRequest, v1.RollbackSessionResponse]
 }
 
 // CreateSession calls fletcher.v1.SessionService.CreateSession.
@@ -387,6 +401,11 @@ func (c *sessionServiceClient) CommitSessionImage(ctx context.Context, req *conn
 	return c.commitSessionImage.CallUnary(ctx, req)
 }
 
+// RollbackSession calls fletcher.v1.SessionService.RollbackSession.
+func (c *sessionServiceClient) RollbackSession(ctx context.Context, req *connect.Request[v1.RollbackSessionRequest]) (*connect.Response[v1.RollbackSessionResponse], error) {
+	return c.rollbackSession.CallUnary(ctx, req)
+}
+
 // SessionServiceHandler is an implementation of the fletcher.v1.SessionService service.
 type SessionServiceHandler interface {
 	// CreateSession provisions a session's persistent fork and boots its VM. The
@@ -449,6 +468,10 @@ type SessionServiceHandler interface {
 	// A running session's disk is synced first; the result is at worst
 	// crash-consistent. Requires a snapshot driver that can commit (ext4).
 	CommitSessionImage(context.Context, *connect.Request[v1.CommitSessionImageRequest]) (*connect.Response[v1.CommitSessionImageResponse], error)
+	// RollbackSession swaps a session back to the fork its last redeploy
+	// retired and restarts it - the one-step undo for a bad redeploy. Rolling
+	// forward again is the same call (the forks swap each time).
+	RollbackSession(context.Context, *connect.Request[v1.RollbackSessionRequest]) (*connect.Response[v1.RollbackSessionResponse], error)
 }
 
 // NewSessionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -566,6 +589,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("CommitSessionImage")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceRollbackSessionHandler := connect.NewUnaryHandler(
+		SessionServiceRollbackSessionProcedure,
+		svc.RollbackSession,
+		connect.WithSchema(sessionServiceMethods.ByName("RollbackSession")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
@@ -604,6 +633,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceStreamSessionLogsHandler.ServeHTTP(w, r)
 		case SessionServiceCommitSessionImageProcedure:
 			sessionServiceCommitSessionImageHandler.ServeHTTP(w, r)
+		case SessionServiceRollbackSessionProcedure:
+			sessionServiceRollbackSessionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -683,4 +714,8 @@ func (UnimplementedSessionServiceHandler) StreamSessionLogs(context.Context, *co
 
 func (UnimplementedSessionServiceHandler) CommitSessionImage(context.Context, *connect.Request[v1.CommitSessionImageRequest]) (*connect.Response[v1.CommitSessionImageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.CommitSessionImage is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) RollbackSession(context.Context, *connect.Request[v1.RollbackSessionRequest]) (*connect.Response[v1.RollbackSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.RollbackSession is not implemented"))
 }

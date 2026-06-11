@@ -1376,6 +1376,32 @@ func (r imageRefresher) RefreshImage(ctx context.Context, name string) bool {
 	return true
 }
 
+// HasTemplate reports whether an imported template of this name exists.
+func (r imageRefresher) HasTemplate(name string) bool {
+	templates, err := image.ListTemplates(r.imagesDir)
+	if err != nil {
+		return false
+	}
+	for _, t := range templates {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ImportRef imports a registry ref under the given template name (replacing
+// it), for a redeploy that retargets the session's image source.
+func (r imageRefresher) ImportRef(ctx context.Context, ref, name string) error {
+	_, err := image.ImportRegistry(ctx, image.ImportOptions{
+		Ref:       ref,
+		Name:      name,
+		ImagesDir: r.imagesDir,
+		Force:     true,
+	})
+	return err
+}
+
 // looksLikeRegistryRef reports whether ref is registry-qualified (so it can be
 // pulled), vs a bare/local tag: the component before the first "/" must look
 // like a registry host (contain "." or ":", or be "localhost").

@@ -23,6 +23,8 @@ type fakeSessionsBackend struct {
 	restarts   int64
 	restartsOK bool
 	logs       string
+	// redeploys records the newImage arg of each Redeploy call when non-nil.
+	redeploys *[]string
 }
 
 func (f fakeSessionsBackend) Get(context.Context, string) (session.Session, error) {
@@ -33,7 +35,10 @@ func (f fakeSessionsBackend) ListPorts(context.Context, string) ([]session.Publi
 	return f.ports, nil
 }
 
-func (f fakeSessionsBackend) Redeploy(context.Context, string) (session.Session, error) {
+func (f fakeSessionsBackend) Redeploy(_ context.Context, _, newImage string) (session.Session, error) {
+	if f.redeploys != nil {
+		*f.redeploys = append(*f.redeploys, newImage)
+	}
 	return f.sess, nil
 }
 
@@ -49,6 +54,9 @@ func (f fakeSessionsBackend) StreamLogs(_ context.Context, _ string, _ int, _ bo
 type fakeRefresher struct {
 	refreshed bool
 	calls     *int
+	templates []string
+	imports   *[]string
+	importErr error
 }
 
 func (f fakeRefresher) RefreshImage(context.Context, string) bool {
@@ -56,6 +64,22 @@ func (f fakeRefresher) RefreshImage(context.Context, string) bool {
 		*f.calls++
 	}
 	return f.refreshed
+}
+
+func (f fakeRefresher) HasTemplate(name string) bool {
+	for _, t := range f.templates {
+		if t == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (f fakeRefresher) ImportRef(_ context.Context, ref, name string) error {
+	if f.imports != nil {
+		*f.imports = append(*f.imports, ref+"->"+name)
+	}
+	return f.importErr
 }
 
 type fakeCerts struct {
@@ -155,4 +179,44 @@ func TestRedeploySession(t *testing.T) {
 		RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app"}))
 	require.NoError(t, err)
 	require.False(t, resp2.Msg.GetImageRefreshed())
+}
+
+// RedeploySession with an explicit image retargets to a local template, or
+// imports a registry ref under the session's current template name; an import
+// failure surfaces instead of silently redeploying the old image.
+func TestRedeploySessionWithImage(t *testing.T) {
+	sess := session.Session{ID: "s1", Name: "app", Image: "webapp", RunApp: true}
+
+	// Local template: retarget, no import.
+	var redeploys []string
+	var imports []string
+	resp, err := api.NewSessionsService(
+		fakeSessionsBackend{sess: sess, redeploys: &redeploys},
+		api.SessionsDeps{Refresher: fakeRefresher{templates: []string{"webapp-v2"}, imports: &imports}},
+	).RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app", Image: "webapp-v2"}))
+	require.NoError(t, err)
+	require.False(t, resp.Msg.GetImageRefreshed())
+	require.Equal(t, []string{"webapp-v2"}, redeploys)
+	require.Empty(t, imports)
+
+	// Registry ref: imported under the current template name, then a plain
+	// redeploy of that (unchanged) name.
+	redeploys, imports = nil, nil
+	resp, err = api.NewSessionsService(
+		fakeSessionsBackend{sess: sess, redeploys: &redeploys},
+		api.SessionsDeps{Refresher: fakeRefresher{imports: &imports}},
+	).RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app", Image: "ghcr.io/x/app:v2"}))
+	require.NoError(t, err)
+	require.True(t, resp.Msg.GetImageRefreshed())
+	require.Equal(t, []string{"ghcr.io/x/app:v2->webapp"}, imports)
+	require.Equal(t, []string{""}, redeploys)
+
+	// Import failure is an error, not a silent redeploy of the old image.
+	redeploys = nil
+	_, err = api.NewSessionsService(
+		fakeSessionsBackend{sess: sess, redeploys: &redeploys},
+		api.SessionsDeps{Refresher: fakeRefresher{importErr: context.DeadlineExceeded}},
+	).RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app", Image: "ghcr.io/x/app:v2"}))
+	require.Error(t, err)
+	require.Empty(t, redeploys)
 }

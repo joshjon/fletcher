@@ -69,6 +69,10 @@ service SessionService {
   // A running session's disk is synced first; the result is at worst
   // crash-consistent. Requires a snapshot driver that can commit (ext4).
   rpc CommitSessionImage(CommitSessionImageRequest) returns (CommitSessionImageResponse) {}
+  // RollbackSession swaps a session back to the fork its last redeploy
+  // retired and restarts it - the one-step undo for a bad redeploy. Rolling
+  // forward again is the same call (the forks swap each time).
+  rpc RollbackSession(RollbackSessionRequest) returns (RollbackSessionResponse) {}
 }
 
 enum SessionState {
@@ -103,6 +107,9 @@ message Session {
   // Populated only by GetSession (not ListSessions), and only when run_app is
   // true and the image's template metadata is available.
   DeployInfo deploy = 12;
+  // has_rollback is whether a redeploy retired a fork this session can roll
+  // back to (RollbackSession).
+  bool has_rollback = 13;
 }
 
 // DeployInfo is the image-derived detail shown on a deploy's detail screen.
@@ -210,6 +217,11 @@ message RestartSessionResponse {
 message RedeploySessionRequest {
   // ref is a session ID or name.
   string ref = 1;
+  // image retargets the session before the re-fork: the name of an imported
+  // template, or a registry ref (e.g. ghcr.io/you/app:v2) the daemon imports
+  // under the session's current template name first. Empty redeploys the
+  // session's current image (with the best-effort same-ref re-pull).
+  string image = 2;
 }
 
 message RedeploySessionResponse {
@@ -244,6 +256,15 @@ message CommitSessionImageRequest {
 message CommitSessionImageResponse {
   // image is the committed template name.
   string image = 1;
+}
+
+message RollbackSessionRequest {
+  // ref is a session ID or name.
+  string ref = 1;
+}
+
+message RollbackSessionResponse {
+  Session session = 1;
 }
 
 message GetSessionLogsRequest {

@@ -29,12 +29,13 @@ func snapshotPaths(vmDir string) (mem, state, meta string) {
 		filepath.Join(vmDir, "snapshot.meta")
 }
 
-// snapshotIdentity fingerprints the VMM binary and guest kernel a snapshot is
-// tied to. Firecracker snapshots are only restorable by the same VMM + kernel,
-// so a Fletcher upgrade (new bundled assets) changes this and invalidates any
-// stale snapshot.
-func (d *Driver) snapshotIdentity() string {
-	return fileFingerprint(d.firecrackerBinary) + "|" + fileFingerprint(d.kernelPath)
+// snapshotIdentity fingerprints what a hibernation snapshot is tied to: the
+// VMM binary and guest kernel (Firecracker snapshots are only restorable by
+// the same pair, so a Fletcher upgrade invalidates them) plus the rootfs path
+// the VM was running on - a redeploy/rollback swaps the session's fork, and
+// restoring a memory image of the old disk would silently undo the swap.
+func (d *Driver) snapshotIdentity(rootfsPath string) string {
+	return fileFingerprint(d.firecrackerBinary) + "|" + fileFingerprint(d.kernelPath) + "|" + rootfsPath
 }
 
 func fileFingerprint(path string) string {
@@ -46,8 +47,9 @@ func fileFingerprint(path string) string {
 }
 
 // hasValidSnapshot reports whether vmDir holds a hibernation snapshot this
-// daemon can restore (present, and tied to the current VMM + kernel).
-func (d *Driver) hasValidSnapshot(vmDir string) bool {
+// daemon can restore for the given rootfs (present, and tied to the current
+// VMM + kernel + that exact disk).
+func (d *Driver) hasValidSnapshot(vmDir, rootfsPath string) bool {
 	_, statePath, metaPath := snapshotPaths(vmDir)
 	if _, err := os.Stat(statePath); err != nil {
 		return false
@@ -56,7 +58,7 @@ func (d *Driver) hasValidSnapshot(vmDir string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(meta)) == d.snapshotIdentity()
+	return strings.TrimSpace(string(meta)) == d.snapshotIdentity(rootfsPath)
 }
 
 // restoreSession resumes a hibernated VM from its snapshot, reusing the same
@@ -138,7 +140,7 @@ func (d *Driver) restoreSession(ctx context.Context, spec fcruntime.SessionSpec,
 		vmCancel:   vmCancel,
 		env:        effEnv,
 		forwardLns: forwardLns,
-		snapID:     d.snapshotIdentity(),
+		snapID:     d.snapshotIdentity(spec.RootfsPath),
 	}, nil
 }
 
