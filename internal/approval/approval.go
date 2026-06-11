@@ -18,6 +18,7 @@ import (
 	"go.jetify.com/typeid"
 
 	"github.com/joshjon/fletcher/internal/errs"
+	"github.com/joshjon/fletcher/internal/events"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
 )
 
@@ -81,6 +82,10 @@ type Service struct {
 	// notifier is pinged (best-effort) when a pending approval is created, so a
 	// daemon can push a notification. nil disables it.
 	notifier Notifier
+
+	// events receives lifecycle events (created/approved/denied/expired) for
+	// live clients. nil disables it.
+	events events.Sink
 }
 
 // Notifier is told when a pending approval is created, so a daemon can push a
@@ -95,6 +100,8 @@ type ServiceOptions struct {
 	PollInterval time.Duration
 	// Notifier, when set, is pinged when a pending approval is created.
 	Notifier Notifier
+	// Events, when set, receives approval lifecycle events.
+	Events events.Sink
 }
 
 // NewService wires a Service to a sqlc-generated querier.
@@ -107,7 +114,16 @@ func NewService(q sqliteq.Querier, opts ServiceOptions) *Service {
 		wakeCh:       make(chan struct{}, 1),
 		pollInterval: opts.PollInterval,
 		notifier:     opts.Notifier,
+		events:       opts.Events,
 	}
+}
+
+// publishEvent emits an approval lifecycle event when a sink is wired.
+func (s *Service) publishEvent(action, id, name string) {
+	if s.events == nil {
+		return
+	}
+	s.events.Publish(events.Event{Type: events.TypeApproval, Action: action, ID: id, Name: name})
 }
 
 // Create inserts a new pending approval.
@@ -138,6 +154,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (Approval, error) 
 	if s.notifier != nil {
 		s.notifier.NotifyApprovalCreated(ctx, row.ID)
 	}
+	s.publishEvent("created", row.ID, row.Action)
 	return approvalFromRow(row), nil
 }
 
@@ -236,6 +253,11 @@ func (s *Service) decide(ctx context.Context, id, reason string, approve bool) (
 		return false, nil
 	}
 	s.notify()
+	action := "denied"
+	if approve {
+		action = "approved"
+	}
+	s.publishEvent(action, id, "")
 	return true, nil
 }
 
@@ -286,6 +308,7 @@ func (s *Service) SweepExpired(ctx context.Context) (int64, error) {
 	}
 	if n > 0 {
 		s.notify()
+		s.publishEvent("expired", "", "")
 	}
 	return n, nil
 }

@@ -1276,15 +1276,25 @@ deleting an attached volume is refused with a clear message.
   the volume (a base-image convention, revisit with usage), and
   rootfs-vs-volume split accounting in the session disk caps.
 
-### Milestone 13 - WatchEvents: a live client - PLANNED
+### Milestone 13 - WatchEvents: a live client - DONE (verified on hardware 2026-06-12)
 
-**Goal.** Kill polling as the app's only source of truth. A server-streaming
-`WatchEvents` RPC over the existing h2c remote surface: session state changes,
-deploy restarts/crash-loops, approval created/resolved, image
-imported/published, job state changes. Backed by the embedded NATS bus or an
-in-process broadcaster - decided at build time (NATS is already in the stack
-for exactly this, DESIGN §9). The iOS list/detail screens and approvals badge
-update live; reconnect-with-backoff on stream drop.
+**Goal (met).** Kill polling as the app's only source of truth. Verified on
+hardware: `fletcher event watch` streams session running/stopped/deleted and
+job running/succeeded transitions live while another client drives them.
+
+**Shipped.**
+
+- `internal/events`: an **in-process** bus (decided here over embedded NATS:
+  NATS was still entirely unimported, one daemon on one box needs no broker,
+  and events are hints - a client re-fetches the entity, so best-effort
+  delivery with per-subscriber drop-on-overflow is correct). The NATS option
+  stays open if cross-process consumers ever appear.
+- Publish hooks: session manager (running/stopped/deleted, plus image
+  "committed" from CommitImage), job supervisor (running/succeeded/failed),
+  approvals (created/approved/denied/expired).
+- `EventService.WatchEvents` server-streaming RPC (content-light:
+  type/action/id/name/at) on the same h2c surface as the shell, and
+  `fletcher event watch` for operators.
 
 ### Milestone 14 - notification breadth + fletcher.report - PLANNED
 

@@ -24,6 +24,7 @@ import (
 	"github.com/joshjon/fletcher/internal/appspec"
 	"github.com/joshjon/fletcher/internal/egress"
 	"github.com/joshjon/fletcher/internal/errs"
+	"github.com/joshjon/fletcher/internal/events"
 	"github.com/joshjon/fletcher/internal/image"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/snapshot"
@@ -139,6 +140,10 @@ type Manager struct {
 	// snapshot driver cannot provision volumes; sessions then refuse --volume.
 	// Set once at startup via SetVolumes, before serving.
 	volumes VolumeResolver
+
+	// events receives session lifecycle events for live clients. nil disables
+	// it. Set once at startup via SetEvents, before serving.
+	events events.Sink
 }
 
 // VolumeResolver resolves persistent volumes for attachment and boot
@@ -363,6 +368,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 	}
 
 	m.putHandle(sessionID, handle)
+	m.publishEvent(string(StateRunning), sessionID, name)
 	return m.enrich(ctx, sessionFromRow(row)), nil
 }
 
@@ -528,6 +534,7 @@ func (m *Manager) Delete(ctx context.Context, ref string) (bool, error) {
 	if _, derr := m.q.DeleteSession(ctx, row.ID); derr != nil {
 		return false, fmt.Errorf("delete session: %w", derr)
 	}
+	m.publishEvent("deleted", row.ID, row.Name)
 	return true, nil
 }
 
@@ -771,6 +778,9 @@ func (m *Manager) CommitImage(ctx context.Context, ref string, p CommitImagePara
 		return "", fmt.Errorf("commit session fork: %w", err)
 	}
 	m.writeCommittedMeta(row, p, name)
+	if m.events != nil {
+		m.events.Publish(events.Event{Type: events.TypeImage, Action: "committed", Name: name})
+	}
 	m.touch(ctx, row.ID)
 	return name, nil
 }
@@ -1015,6 +1025,18 @@ func (m *Manager) SetBroker(b PortBroker) { m.broker = b }
 // SetVolumes wires the volume resolver used to attach and boot persistent
 // volumes. Called once at startup before serving.
 func (m *Manager) SetVolumes(v VolumeResolver) { m.volumes = v }
+
+// SetEvents wires the event sink session lifecycle changes publish to.
+// Called once at startup before serving.
+func (m *Manager) SetEvents(sink events.Sink) { m.events = sink }
+
+// publishEvent emits a session lifecycle event when a sink is wired.
+func (m *Manager) publishEvent(action, id, name string) {
+	if m.events == nil {
+		return
+	}
+	m.events.Publish(events.Event{Type: events.TypeSession, Action: action, ID: id, Name: name})
+}
 
 // DialPort opens a raw byte stream to a TCP port inside a session's VM for the
 // daemon's port broker to proxy a published-port connection through. A stopped
@@ -1337,6 +1359,7 @@ func (m *Manager) setState(ctx context.Context, id string, state State) error {
 	}); err != nil {
 		return fmt.Errorf("update session state: %w", err)
 	}
+	m.publishEvent(string(state), id, "")
 	return nil
 }
 

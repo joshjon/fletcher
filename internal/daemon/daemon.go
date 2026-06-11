@@ -29,6 +29,7 @@ import (
 	"github.com/joshjon/fletcher/internal/audit"
 	"github.com/joshjon/fletcher/internal/buildinfo"
 	"github.com/joshjon/fletcher/internal/egress"
+	"github.com/joshjon/fletcher/internal/events"
 	"github.com/joshjon/fletcher/internal/gateway"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/image"
@@ -405,6 +406,10 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		slog.String("default_policy", egressDefaultPolicy(cfg)),
 	)
 
+	// In-process event bus: lifecycle changes fan out to WatchEvents clients
+	// so they update live instead of polling.
+	eventBus := events.NewBus()
+
 	deviceTokens := deviceTokenStore{q: queries}
 	approvalSvc := approval.NewService(queries, approval.ServiceOptions{
 		Notifier: approvalNotifier{
@@ -412,6 +417,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 			sender: buildAPNSSender(cfg, logger),
 			logger: logger,
 		},
+		Events: eventBus,
 	})
 	apiEndpoint := remoteAPIAddr()
 	peerSvc := peer.NewService(queries, peer.Options{
@@ -507,6 +513,8 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	volumeProvisioner, _ := snapDriver.(snapshot.VolumeProvisioner)
 	volumeMgr := volume.NewManager(queries, volumeProvisioner, logger)
 	sessionMgr.SetVolumes(volumeMgr)
+	sessionMgr.SetEvents(eventBus)
+	supervisor.SetEvents(eventBus)
 
 	// publish_image backend: agents commit their session's fork (or import a
 	// registry ref) as a template, behind an approval. Only meaningful on a
@@ -567,6 +575,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		jobs:             jobSvc,
 		sessions:         sessionMgr,
 		volumes:          volumeMgr,
+		events:           eventBus,
 		publicIP:         publicEndpointHost(netSetup.EffectivePublicEndpoint),
 		imagesDir:        filepath.Join(snapshotRootDir(cfg), "images"),
 		snapshotKind:     driverKind(cfg.SnapshotKind),
@@ -653,6 +662,7 @@ type connectDeps struct {
 	jobs      api.JobsBackend
 	sessions  api.SessionsBackend
 	volumes   api.VolumesBackend
+	events    *events.Bus
 	secrets   api.SecretsBackend
 	approvals api.ApprovalsBackend
 	push      api.PushBackend
@@ -1024,6 +1034,11 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		api.NewVolumesService(deps.volumes), interceptors,
 	)
 	mux.Handle(volumesPath, volumesHandler)
+
+	eventsPath, eventsHandler := fletcherv1connect.NewEventServiceHandler(
+		api.NewEventsService(deps.events), interceptors,
+	)
+	mux.Handle(eventsPath, eventsHandler)
 
 	// Serve cleartext HTTP/2 (h2c) alongside HTTP/1.1 so Connect bidi streams -
 	// the interactive shell (SessionService.ShellSession) - work over the unix

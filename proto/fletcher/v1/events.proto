@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// EventService streams daemon lifecycle events so clients can update live
+// instead of polling. Events are content-light hints: on receiving one, a
+// client re-fetches the entity it cares about over the normal RPCs. Delivery
+// is best-effort (a slow consumer can miss events) - re-list on reconnect.
+service EventService {
+  // WatchEvents streams events as they happen until the client disconnects.
+  // Server-streaming, so it needs HTTP/2 (the same h2c path the shell uses).
+  rpc WatchEvents(WatchEventsRequest) returns (stream WatchEventsResponse) {}
+}
+
+message WatchEventsRequest {}
+
+message WatchEventsResponse {
+  // type is the entity kind: "session" | "job" | "approval" | "image" |
+  // "volume".
+  string type = 1;
+  // action is what happened, in the entity's own vocabulary (e.g. a session's
+  // "running"/"stopped"/"deleted"; an approval's "created"/"approved"/
+  // "denied"/"expired"; a job's "running"/"succeeded"/"failed"; an image's
+  // "imported"/"committed").
+  string action = 2;
+  // id and name identify the entity (either may be empty).
+  string id = 3;
+  string name = 4;
+  // at is when it happened (Unix epoch seconds).
+  int64 at = 5;
+}

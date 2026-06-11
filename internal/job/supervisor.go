@@ -13,6 +13,7 @@ import (
 
 	"go.jetify.com/typeid"
 
+	"github.com/joshjon/fletcher/internal/events"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/snapshot"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
@@ -34,6 +35,10 @@ type Supervisor struct {
 	jobEnv          []string
 	jobGatewayEnv   []string
 	credentialsRoot string
+
+	// events receives job lifecycle events for live clients; nil disables it.
+	// Set once at startup via SetEvents, before Run.
+	events events.Sink
 
 	mu     sync.Mutex
 	active map[string]context.CancelFunc
@@ -193,6 +198,18 @@ func (s *Supervisor) failCronDefinition(ctx context.Context, id, message string,
 	}
 }
 
+// SetEvents wires the event sink job transitions publish to. Called once at
+// startup before Run.
+func (s *Supervisor) SetEvents(sink events.Sink) { s.events = sink }
+
+// publishEvent emits a job lifecycle event when a sink is wired.
+func (s *Supervisor) publishEvent(action, id, name string) {
+	if s.events == nil {
+		return
+	}
+	s.events.Publish(events.Event{Type: events.TypeJob, Action: action, ID: id, Name: name})
+}
+
 // Notify wakes the supervisor early. It is non-blocking and coalesces
 // rapid notifications: only one extra wakeup is buffered.
 func (s *Supervisor) Notify() {
@@ -268,6 +285,7 @@ func (s *Supervisor) startJob(parentCtx context.Context, row sqliteq.Job) {
 		s.logger.Error("mark job started", slog.String("job_id", row.ID), slog.String("err", err.Error()))
 		return
 	}
+	s.publishEvent("running", row.ID, row.Name)
 
 	jobCtx, cancel := context.WithCancel(parentCtx)
 	s.mu.Lock()
@@ -403,6 +421,7 @@ func (s *Supervisor) markSucceeded(jobID string, exitCode int32) {
 	}); err != nil {
 		s.logger.Error("mark succeeded", slog.String("job_id", jobID), slog.String("err", err.Error()))
 	}
+	s.publishEvent("succeeded", jobID, "")
 }
 
 func (s *Supervisor) markFailed(jobID string, exitCode int32, message string) {
@@ -420,6 +439,7 @@ func (s *Supervisor) markFailed(jobID string, exitCode int32, message string) {
 	if err := s.q.MarkJobFailed(context.Background(), params); err != nil {
 		s.logger.Error("mark failed", slog.String("job_id", jobID), slog.String("err", err.Error()))
 	}
+	s.publishEvent("failed", jobID, "")
 }
 
 func (s *Supervisor) deleteSnapshot(id string, log *slog.Logger) {
