@@ -22,6 +22,10 @@ service SessionService {
   rpc StopSession(StopSessionRequest) returns (StopSessionResponse) {}
   // DeleteSession stops the VM (if running) and destroys the fork.
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse) {}
+  // UpdateSession changes a session's egress policy and/or gateway. Both are
+  // applied to the fork at VM boot, so a change to a running session takes
+  // effect on its next start (restart_required reports that).
+  rpc UpdateSession(UpdateSessionRequest) returns (UpdateSessionResponse) {}
   // ExecSession runs a command inside a running session and returns its
   // captured output and exit code.
   rpc ExecSession(ExecSessionRequest) returns (ExecSessionResponse) {}
@@ -160,6 +164,22 @@ message DeleteSessionRequest {
 
 message DeleteSessionResponse {
   bool deleted = 1;
+}
+
+message UpdateSessionRequest {
+  // ref is a session ID or name.
+  string ref = 1;
+  // egress_policy is "none" | "allowlist" | "open"; empty leaves it unchanged.
+  string egress_policy = 2;
+  // gateway is "on" | "off"; empty leaves it unchanged.
+  string gateway = 3;
+}
+
+message UpdateSessionResponse {
+  Session session = 1;
+  // restart_required is true when the session is running, so the change only
+  // takes effect after a restart.
+  bool restart_required = 2;
 }
 
 message ExecSessionRequest {

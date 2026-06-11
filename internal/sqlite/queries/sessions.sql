@@ -35,3 +35,8 @@ DELETE FROM sessions WHERE id = ?;
 UPDATE sessions
 SET fork_id = ?, fork_path = ?, updated_at = ?
 WHERE id = ?;
+
+-- name: UpdateSessionPolicy :exec
+UPDATE sessions
+SET egress_policy = ?, gateway = ?, updated_at = ?
+WHERE id = ?;

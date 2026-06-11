@@ -51,6 +51,9 @@ const (
 	// SessionServiceDeleteSessionProcedure is the fully-qualified name of the SessionService's
 	// DeleteSession RPC.
 	SessionServiceDeleteSessionProcedure = "/fletcher.v1.SessionService/DeleteSession"
+	// SessionServiceUpdateSessionProcedure is the fully-qualified name of the SessionService's
+	// UpdateSession RPC.
+	SessionServiceUpdateSessionProcedure = "/fletcher.v1.SessionService/UpdateSession"
 	// SessionServiceExecSessionProcedure is the fully-qualified name of the SessionService's
 	// ExecSession RPC.
 	SessionServiceExecSessionProcedure = "/fletcher.v1.SessionService/ExecSession"
@@ -98,6 +101,10 @@ type SessionServiceClient interface {
 	StopSession(context.Context, *connect.Request[v1.StopSessionRequest]) (*connect.Response[v1.StopSessionResponse], error)
 	// DeleteSession stops the VM (if running) and destroys the fork.
 	DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error)
+	// UpdateSession changes a session's egress policy and/or gateway. Both are
+	// applied to the fork at VM boot, so a change to a running session takes
+	// effect on its next start (restart_required reports that).
+	UpdateSession(context.Context, *connect.Request[v1.UpdateSessionRequest]) (*connect.Response[v1.UpdateSessionResponse], error)
 	// ExecSession runs a command inside a running session and returns its
 	// captured output and exit code.
 	ExecSession(context.Context, *connect.Request[v1.ExecSessionRequest]) (*connect.Response[v1.ExecSessionResponse], error)
@@ -185,6 +192,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("DeleteSession")),
 			connect.WithClientOptions(opts...),
 		),
+		updateSession: connect.NewClient[v1.UpdateSessionRequest, v1.UpdateSessionResponse](
+			httpClient,
+			baseURL+SessionServiceUpdateSessionProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("UpdateSession")),
+			connect.WithClientOptions(opts...),
+		),
 		execSession: connect.NewClient[v1.ExecSessionRequest, v1.ExecSessionResponse](
 			httpClient,
 			baseURL+SessionServiceExecSessionProcedure,
@@ -256,6 +269,7 @@ type sessionServiceClient struct {
 	startSession      *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
 	stopSession       *connect.Client[v1.StopSessionRequest, v1.StopSessionResponse]
 	deleteSession     *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
+	updateSession     *connect.Client[v1.UpdateSessionRequest, v1.UpdateSessionResponse]
 	execSession       *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
 	shellSession      *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
 	proxySession      *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
@@ -296,6 +310,11 @@ func (c *sessionServiceClient) StopSession(ctx context.Context, req *connect.Req
 // DeleteSession calls fletcher.v1.SessionService.DeleteSession.
 func (c *sessionServiceClient) DeleteSession(ctx context.Context, req *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error) {
 	return c.deleteSession.CallUnary(ctx, req)
+}
+
+// UpdateSession calls fletcher.v1.SessionService.UpdateSession.
+func (c *sessionServiceClient) UpdateSession(ctx context.Context, req *connect.Request[v1.UpdateSessionRequest]) (*connect.Response[v1.UpdateSessionResponse], error) {
+	return c.updateSession.CallUnary(ctx, req)
 }
 
 // ExecSession calls fletcher.v1.SessionService.ExecSession.
@@ -363,6 +382,10 @@ type SessionServiceHandler interface {
 	StopSession(context.Context, *connect.Request[v1.StopSessionRequest]) (*connect.Response[v1.StopSessionResponse], error)
 	// DeleteSession stops the VM (if running) and destroys the fork.
 	DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error)
+	// UpdateSession changes a session's egress policy and/or gateway. Both are
+	// applied to the fork at VM boot, so a change to a running session takes
+	// effect on its next start (restart_required reports that).
+	UpdateSession(context.Context, *connect.Request[v1.UpdateSessionRequest]) (*connect.Response[v1.UpdateSessionResponse], error)
 	// ExecSession runs a command inside a running session and returns its
 	// captured output and exit code.
 	ExecSession(context.Context, *connect.Request[v1.ExecSessionRequest]) (*connect.Response[v1.ExecSessionResponse], error)
@@ -446,6 +469,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("DeleteSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceUpdateSessionHandler := connect.NewUnaryHandler(
+		SessionServiceUpdateSessionProcedure,
+		svc.UpdateSession,
+		connect.WithSchema(sessionServiceMethods.ByName("UpdateSession")),
+		connect.WithHandlerOptions(opts...),
+	)
 	sessionServiceExecSessionHandler := connect.NewUnaryHandler(
 		SessionServiceExecSessionProcedure,
 		svc.ExecSession,
@@ -520,6 +549,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceStopSessionHandler.ServeHTTP(w, r)
 		case SessionServiceDeleteSessionProcedure:
 			sessionServiceDeleteSessionHandler.ServeHTTP(w, r)
+		case SessionServiceUpdateSessionProcedure:
+			sessionServiceUpdateSessionHandler.ServeHTTP(w, r)
 		case SessionServiceExecSessionProcedure:
 			sessionServiceExecSessionHandler.ServeHTTP(w, r)
 		case SessionServiceShellSessionProcedure:
@@ -571,6 +602,10 @@ func (UnimplementedSessionServiceHandler) StopSession(context.Context, *connect.
 
 func (UnimplementedSessionServiceHandler) DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.DeleteSession is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) UpdateSession(context.Context, *connect.Request[v1.UpdateSessionRequest]) (*connect.Response[v1.UpdateSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.UpdateSession is not implemented"))
 }
 
 func (UnimplementedSessionServiceHandler) ExecSession(context.Context, *connect.Request[v1.ExecSessionRequest]) (*connect.Response[v1.ExecSessionResponse], error) {

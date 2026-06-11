@@ -194,6 +194,29 @@ func (q *Queries) UpdateSessionFork(ctx context.Context, arg UpdateSessionForkPa
 	return err
 }
 
+const updateSessionPolicy = `-- name: UpdateSessionPolicy :exec
+UPDATE sessions
+SET egress_policy = ?, gateway = ?, updated_at = ?
+WHERE id = ?
+`
+
+type UpdateSessionPolicyParams struct {
+	EgressPolicy string
+	Gateway      string
+	UpdatedAt    int64
+	ID           string
+}
+
+func (q *Queries) UpdateSessionPolicy(ctx context.Context, arg UpdateSessionPolicyParams) error {
+	_, err := q.db.ExecContext(ctx, updateSessionPolicy,
+		arg.EgressPolicy,
+		arg.Gateway,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
 const updateSessionState = `-- name: UpdateSessionState :exec
 UPDATE sessions
 SET state = ?, updated_at = ?

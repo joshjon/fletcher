@@ -24,6 +24,7 @@ type SessionsBackend interface {
 	Start(ctx context.Context, ref string) (session.Session, error)
 	Stop(ctx context.Context, ref string) (session.Session, error)
 	Delete(ctx context.Context, ref string) (bool, error)
+	UpdateSession(ctx context.Context, ref, egressPolicy, gateway string) (session.Session, bool, error)
 	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
 	Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error)
 	DialSSH(ctx context.Context, ref string) (net.Conn, error)
@@ -177,6 +178,20 @@ func (s *SessionsService) DeleteSession(ctx context.Context, req *connect.Reques
 		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.DeleteSessionResponse{Deleted: deleted}), nil
+}
+
+// UpdateSession changes a session's egress policy and/or gateway (empty leaves
+// a field unchanged); restart_required flags that a running session needs a
+// restart for the change to take effect.
+func (s *SessionsService) UpdateSession(ctx context.Context, req *connect.Request[fletcherv1.UpdateSessionRequest]) (*connect.Response[fletcherv1.UpdateSessionResponse], error) {
+	sess, restartRequired, err := s.backend.UpdateSession(ctx, req.Msg.GetRef(), req.Msg.GetEgressPolicy(), req.Msg.GetGateway())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.UpdateSessionResponse{
+		Session:         sessionToProto(sess),
+		RestartRequired: restartRequired,
+	}), nil
 }
 
 // RestartSession stops a running session's VM and starts it again against the

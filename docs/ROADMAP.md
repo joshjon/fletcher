@@ -669,11 +669,12 @@ services:
 - **M3 (shipped) - image picker.** `ImageService` has only `Import`, no
   `ListImages`, so the app's image field is free-text. *Small: a `ListImages`
   RPC over the imported templates.*
-- **M4 (shipped) - editable trust dials.** Egress/gateway are baked into the
-  fork at boot; no mutate RPC, so the app shows them read-only. *Medium + a
-  design call: a `SetEgressPolicy`/`SetGateway` (or `UpdateSession`) that
-  re-applies env + proxy rules; most likely "takes effect on next start", since
-  a running fork cannot change its egress live.*
+- **M4 (shipped) - editable trust dials. DONE 2026-06-11.** `UpdateSession`
+  changes a session's `egress_policy` and/or `gateway` (empty leaves a field
+  unchanged). Both are baked into the fork at VM boot, so the response's
+  `restart_required` is true for a running session (the change applies on its
+  next start); a stopped session applies it immediately when started. The app's
+  chips can become tappable, then prompt for a restart when needed.
 - **M5 (shipped) - TLS status chip. DONE 2026-06-11.** `PublishedPort` now
   carries `tls_status` (pending/valid/renewing/expired) and `tls_expires_at`,
   populated in `ListPorts` for public ports from certmagic's managed-cert store

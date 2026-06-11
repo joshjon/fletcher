@@ -502,3 +502,36 @@ func TestSessionsRequireSessionRuntime(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }
+
+func TestUpdateSession(t *testing.T) {
+	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
+	ctx := context.Background()
+
+	_, err := mgr.Create(ctx, "dev", "ubuntu", "allowlist", "on", false)
+	require.NoError(t, err)
+
+	// Change egress; empty gateway leaves it unchanged. A running session needs
+	// a restart to apply (the policy is baked into the fork at boot).
+	s, restart, err := mgr.UpdateSession(ctx, "dev", "open", "")
+	require.NoError(t, err)
+	require.True(t, restart)
+	require.Equal(t, "open", s.EgressPolicy)
+	require.Equal(t, "on", s.Gateway)
+
+	got, err := mgr.Get(ctx, "dev")
+	require.NoError(t, err)
+	require.Equal(t, "open", got.EgressPolicy)
+
+	// Invalid values are rejected.
+	_, _, err = mgr.UpdateSession(ctx, "dev", "bogus", "")
+	require.Error(t, err)
+	_, _, err = mgr.UpdateSession(ctx, "dev", "", "maybe")
+	require.Error(t, err)
+
+	// A stopped session applies on next start, so no restart flag.
+	_, err = mgr.Stop(ctx, "dev")
+	require.NoError(t, err)
+	_, restart, err = mgr.UpdateSession(ctx, "dev", "none", "off")
+	require.NoError(t, err)
+	require.False(t, restart)
+}

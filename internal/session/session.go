@@ -542,6 +542,50 @@ func (m *Manager) AppRestartCount(ctx context.Context, ref string) (int64, bool)
 	return n, true
 }
 
+// UpdateSession changes a session's egress policy and/or gateway wiring (an
+// empty value leaves that field unchanged). Both are baked into the fork at VM
+// boot, so a change to a running session takes effect on its next start;
+// restartRequired reports whether the session is currently running.
+func (m *Manager) UpdateSession(ctx context.Context, ref, egressPolicy, gateway string) (Session, bool, error) {
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return Session{}, false, err
+	}
+
+	newEgress := row.EgressPolicy
+	if strings.TrimSpace(egressPolicy) != "" {
+		switch egressPolicy {
+		case egress.PolicyNone, egress.PolicyAllowlist, egress.PolicyOpen:
+			newEgress = egressPolicy
+		default:
+			return Session{}, false, errs.Newf(errs.CategoryInvalidArgument,
+				"invalid egress policy %q (want none | allowlist | open)", egressPolicy)
+		}
+	}
+	newGateway := row.Gateway
+	if strings.TrimSpace(gateway) != "" {
+		switch gateway {
+		case "on", "off":
+			newGateway = gateway
+		default:
+			return Session{}, false, errs.Newf(errs.CategoryInvalidArgument,
+				"invalid gateway %q (want on | off)", gateway)
+		}
+	}
+
+	if err := m.q.UpdateSessionPolicy(ctx, sqliteq.UpdateSessionPolicyParams{
+		EgressPolicy: newEgress,
+		Gateway:      newGateway,
+		UpdatedAt:    time.Now().Unix(),
+		ID:           row.ID,
+	}); err != nil {
+		return Session{}, false, err
+	}
+	row.EgressPolicy = newEgress
+	row.Gateway = newGateway
+	return sessionFromRow(row), State(row.State) == StateRunning, nil
+}
+
 // Redeploy replaces a session's disk with a fresh fork of its current template
 // image and restarts it. It does not rebuild or pull the image (refreshing the
 // template to a new version is a separate import); for a run_app deploy this

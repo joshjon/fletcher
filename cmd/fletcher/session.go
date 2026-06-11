@@ -39,6 +39,7 @@ func sessionCmd() *cli.Command {
 			sessionLogsCmd(),
 			sessionRestartCmd(),
 			sessionRedeployCmd(),
+			sessionUpdateCmd(),
 		},
 	}
 }
@@ -110,6 +111,43 @@ func sessionRestartCmd() *cli.Command {
 				return err
 			}
 			fmt.Printf("restarted %s\n", resp.Msg.GetSession().GetName())
+			return nil
+		},
+	}
+}
+
+func sessionUpdateCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "update",
+		Usage:     "change a session's egress policy and/or gateway (applies on next start)",
+		ArgsUsage: "<ref>",
+		Flags: []cli.Flag{
+			socketFlag(),
+			&cli.StringFlag{Name: "egress", Usage: "egress policy: none | allowlist | open"},
+			&cli.StringFlag{Name: "gateway", Usage: "model gateway: on | off"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ref := cmd.Args().First()
+			if ref == "" {
+				return errors.New("session ref (id or name) is required")
+			}
+			if cmd.String("egress") == "" && cmd.String("gateway") == "" {
+				return errors.New("set --egress and/or --gateway")
+			}
+			client := newSessionsClient(cmd)
+			resp, err := client.UpdateSession(ctx, connect.NewRequest(&fletcherv1.UpdateSessionRequest{
+				Ref:          ref,
+				EgressPolicy: cmd.String("egress"),
+				Gateway:      cmd.String("gateway"),
+			}))
+			if err != nil {
+				return err
+			}
+			sess := resp.Msg.GetSession()
+			fmt.Printf("updated %s (egress=%s, gateway=%s)\n", sess.GetName(), sess.GetEgressPolicy(), sess.GetGateway())
+			if resp.Msg.GetRestartRequired() {
+				fmt.Println("the session is running; restart it to apply (`fletcher session restart`)")
+			}
 			return nil
 		},
 	}
