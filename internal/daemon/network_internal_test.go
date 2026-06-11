@@ -169,3 +169,19 @@ func TestRemoteAPIListenActorRetriesUntilCancelled(t *testing.T) {
 		t.Fatal("actor did not exit after ctx cancel")
 	}
 }
+
+func TestLooksLikeRegistryRef(t *testing.T) {
+	cases := map[string]bool{
+		"ghcr.io/joshjon/app:v1":  true,
+		"docker.io/library/nginx": true,
+		"registry:5000/app":       true,
+		"localhost/app":           true,
+		"myapp:latest":            false, // bare local tag
+		"myapp":                   false,
+		"library/nginx":           false, // Docker Hub implicit, not registry-qualified
+		"":                        false,
+	}
+	for ref, want := range cases {
+		require.Equal(t, want, looksLikeRegistryRef(ref), ref)
+	}
+}

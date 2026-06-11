@@ -29,6 +29,22 @@ func (f fakeSessionsBackend) ListPorts(context.Context, string) ([]session.Publi
 	return f.ports, nil
 }
 
+func (f fakeSessionsBackend) Redeploy(context.Context, string) (session.Session, error) {
+	return f.sess, nil
+}
+
+type fakeRefresher struct {
+	refreshed bool
+	calls     *int
+}
+
+func (f fakeRefresher) RefreshImage(context.Context, string) bool {
+	if f.calls != nil {
+		*f.calls++
+	}
+	return f.refreshed
+}
+
 type fakeCerts struct {
 	status  string
 	expires int64
@@ -59,21 +75,21 @@ func TestGetSessionPopulatesDeployInfo(t *testing.T) {
 		return resp.Msg.GetSession().GetDeploy()
 	}
 
-	d := get(api.NewSessionsService(fakeSessionsBackend{sess: runApp}, "", resolver, nil))
+	d := get(api.NewSessionsService(fakeSessionsBackend{sess: runApp}, api.SessionsDeps{Deploy: resolver}))
 	require.NotNil(t, d)
 	require.Equal(t, []string{"/app", "serve"}, d.GetEntrypoint())
 	require.EqualValues(t, 8080, d.GetExposedPort())
 
 	// A bare (non-run_app) session carries no deploy info even with a resolver.
 	bare := session.Session{ID: "s2", Name: "app", Image: "myapp"}
-	require.Nil(t, get(api.NewSessionsService(fakeSessionsBackend{sess: bare}, "", resolver, nil)))
+	require.Nil(t, get(api.NewSessionsService(fakeSessionsBackend{sess: bare}, api.SessionsDeps{Deploy: resolver})))
 
 	// No resolver: no deploy info.
-	require.Nil(t, get(api.NewSessionsService(fakeSessionsBackend{sess: runApp}, "", nil, nil)))
+	require.Nil(t, get(api.NewSessionsService(fakeSessionsBackend{sess: runApp}, api.SessionsDeps{})))
 
 	// Resolver without metadata (ok=false): no deploy info.
 	noMeta := fakeDeployResolver{ok: false}
-	require.Nil(t, get(api.NewSessionsService(fakeSessionsBackend{sess: runApp}, "", noMeta, nil)))
+	require.Nil(t, get(api.NewSessionsService(fakeSessionsBackend{sess: runApp}, api.SessionsDeps{Deploy: noMeta})))
 }
 
 // ListPorts attaches TLS status only to public ports that have a hostname, and
@@ -87,7 +103,7 @@ func TestListPortsAttachesTLSStatus(t *testing.T) {
 	backend := fakeSessionsBackend{ports: ports}
 	certs := fakeCerts{status: "valid", expires: 1234567890}
 
-	resp, err := api.NewSessionsService(backend, "", nil, certs).
+	resp, err := api.NewSessionsService(backend, api.SessionsDeps{Certs: certs}).
 		ListPorts(context.Background(), connect.NewRequest(&fletcherv1.ListPortsRequest{Ref: "s"}))
 	require.NoError(t, err)
 	got := resp.Msg.GetPorts()
@@ -98,8 +114,28 @@ func TestListPortsAttachesTLSStatus(t *testing.T) {
 	require.Empty(t, got[2].GetTlsStatus(), "public port without host has no TLS status")
 
 	// No cert resolver (public web off): no status even for a public port.
-	resp2, err := api.NewSessionsService(backend, "", nil, nil).
+	resp2, err := api.NewSessionsService(backend, api.SessionsDeps{}).
 		ListPorts(context.Background(), connect.NewRequest(&fletcherv1.ListPortsRequest{Ref: "s"}))
 	require.NoError(t, err)
 	require.Empty(t, resp2.Msg.GetPorts()[0].GetTlsStatus())
+}
+
+// RedeploySession re-pulls (best-effort) then redeploys, reporting whether the
+// image was refreshed; with no refresher it still redeploys (refreshed=false).
+func TestRedeploySession(t *testing.T) {
+	sess := session.Session{ID: "s1", Name: "app", Image: "ghcr.io/x/app:v1", RunApp: true}
+
+	calls := 0
+	resp, err := api.NewSessionsService(fakeSessionsBackend{sess: sess}, api.SessionsDeps{
+		Refresher: fakeRefresher{refreshed: true, calls: &calls},
+	}).RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app"}))
+	require.NoError(t, err)
+	require.True(t, resp.Msg.GetImageRefreshed())
+	require.Equal(t, 1, calls, "refresher is consulted once")
+	require.Equal(t, "app", resp.Msg.GetSession().GetName())
+
+	resp2, err := api.NewSessionsService(fakeSessionsBackend{sess: sess}, api.SessionsDeps{}).
+		RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app"}))
+	require.NoError(t, err)
+	require.False(t, resp2.Msg.GetImageRefreshed())
 }

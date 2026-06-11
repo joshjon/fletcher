@@ -171,6 +171,29 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) erro
 	return err
 }
 
+const updateSessionFork = `-- name: UpdateSessionFork :exec
+UPDATE sessions
+SET fork_id = ?, fork_path = ?, updated_at = ?
+WHERE id = ?
+`
+
+type UpdateSessionForkParams struct {
+	ForkID    string
+	ForkPath  string
+	UpdatedAt int64
+	ID        string
+}
+
+func (q *Queries) UpdateSessionFork(ctx context.Context, arg UpdateSessionForkParams) error {
+	_, err := q.db.ExecContext(ctx, updateSessionFork,
+		arg.ForkID,
+		arg.ForkPath,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
 const updateSessionState = `-- name: UpdateSessionState :exec
 UPDATE sessions
 SET state = ?, updated_at = ?

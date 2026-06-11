@@ -688,6 +688,17 @@ services:
   `/var/log/fletcher-app.log`, none exists); and **Restart + Redeploy** RPCs
   (only Start/Stop/Delete exist). Public hostname is already available via
   `ListPorts` -> `PublishedPort.host`.
+  - **Shipped 2026-06-11:** `RestartSession`; unary `GetSessionLogs` (tail);
+    deploy detail (`entrypoint`/`exposed_port` persisted in `TemplateMeta`,
+    surfaced on `GetSession` as `DeployInfo`); `PublishedPort.tls_status` +
+    `tls_expires_at`; `RedeploySession` (re-fork from the current template +
+    restart, with a best-effort registry re-pull first - works for registry and
+    local-tagged images; the daemon does not rebuild a Dockerfile).
+  - **Still open (guest-side batch, needs the guest rebuilt + images
+    re-imported):** `restart_count` (the in-guest supervisor must report it; the
+    `DeployInfo.restart_count` field is wired but reports 0 until then) and the
+    live-follow log stream `StreamSessionLogs` (needs the guest to kill `tail`
+    on client disconnect; today exec runs under `context.Background()`).
 - **M7 (next) - live settings.** `SettingsService` Set/Delete/List is complete;
   `AdminService.Health` is remote with rich fields (public_endpoint, runtime,
   base-image flags, pairing_endpoint), so the doctor-warnings row is derivable.

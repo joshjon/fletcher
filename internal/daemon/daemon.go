@@ -933,7 +933,12 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	mux.Handle(jobsPath, jobsHandler)
 
 	sessionsPath, sessionsHandler := fletcherv1connect.NewSessionServiceHandler(
-		api.NewSessionsService(deps.sessions, deps.publicIP, imageDeployResolver{imagesDir: deps.imagesDir}, deps.certStatus), interceptors,
+		api.NewSessionsService(deps.sessions, api.SessionsDeps{
+			PublicIP:  deps.publicIP,
+			Deploy:    imageDeployResolver{imagesDir: deps.imagesDir},
+			Certs:     deps.certStatus,
+			Refresher: imageRefresher{imagesDir: deps.imagesDir, logger: logger},
+		}), interceptors,
 	)
 	mux.Handle(sessionsPath, sessionsHandler)
 
@@ -1262,6 +1267,47 @@ func (r imageDeployResolver) DeployInfo(imageName string) (entrypoint []string, 
 		return nil, 0, false
 	}
 	return meta.Entrypoint, meta.ExposedPort, true
+}
+
+// imageRefresher re-pulls a registry-sourced template before a redeploy so the
+// fresh fork picks up the latest image. A local image has nothing to pull.
+type imageRefresher struct {
+	imagesDir string
+	logger    *slog.Logger
+}
+
+func (r imageRefresher) RefreshImage(ctx context.Context, name string) bool {
+	meta, found, err := image.ReadMeta(r.imagesDir, name)
+	if err != nil || !found || !looksLikeRegistryRef(meta.Source) {
+		return false
+	}
+	if _, err := image.ImportRegistry(ctx, image.ImportOptions{
+		Ref:       meta.Source,
+		Name:      name,
+		ImagesDir: r.imagesDir,
+		Force:     true,
+	}); err != nil {
+		r.logger.Warn("redeploy: re-pull failed; redeploying the current template",
+			slog.String("image", name),
+			slog.String("source", meta.Source),
+			slog.String("err", err.Error()),
+		)
+		return false
+	}
+	r.logger.Info("redeploy: re-pulled image to latest",
+		slog.String("image", name), slog.String("source", meta.Source))
+	return true
+}
+
+// looksLikeRegistryRef reports whether ref is registry-qualified (so it can be
+// pulled), vs a bare/local tag: the component before the first "/" must look
+// like a registry host (contain "." or ":", or be "localhost").
+func looksLikeRegistryRef(ref string) bool {
+	host, _, ok := strings.Cut(ref, "/")
+	if !ok {
+		return false
+	}
+	return strings.ContainsAny(host, ".:") || host == "localhost"
 }
 
 // settingsReloader live-applies the reloadable settings to the running daemon

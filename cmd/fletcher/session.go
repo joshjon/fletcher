@@ -38,6 +38,7 @@ func sessionCmd() *cli.Command {
 			sessionPortsCmd(),
 			sessionLogsCmd(),
 			sessionRestartCmd(),
+			sessionRedeployCmd(),
 		},
 	}
 }
@@ -90,6 +91,32 @@ func sessionRestartCmd() *cli.Command {
 				return err
 			}
 			fmt.Printf("restarted %s\n", resp.Msg.GetSession().GetName())
+			return nil
+		},
+	}
+}
+
+func sessionRedeployCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "redeploy",
+		Usage:     "re-fork a session from its current image and restart (re-pulls a registry image first)",
+		ArgsUsage: "<ref>",
+		Flags:     []cli.Flag{socketFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ref := cmd.Args().First()
+			if ref == "" {
+				return errors.New("session ref (id or name) is required")
+			}
+			client := newSessionsClient(cmd)
+			resp, err := client.RedeploySession(ctx, connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: ref}))
+			if err != nil {
+				return err
+			}
+			origin := "current image"
+			if resp.Msg.GetImageRefreshed() {
+				origin = "pulled latest image"
+			}
+			fmt.Printf("redeployed %s (%s)\n", resp.Msg.GetSession().GetName(), origin)
 			return nil
 		},
 	}

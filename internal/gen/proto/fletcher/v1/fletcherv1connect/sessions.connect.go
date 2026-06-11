@@ -72,6 +72,9 @@ const (
 	// SessionServiceRestartSessionProcedure is the fully-qualified name of the SessionService's
 	// RestartSession RPC.
 	SessionServiceRestartSessionProcedure = "/fletcher.v1.SessionService/RestartSession"
+	// SessionServiceRedeploySessionProcedure is the fully-qualified name of the SessionService's
+	// RedeploySession RPC.
+	SessionServiceRedeploySessionProcedure = "/fletcher.v1.SessionService/RedeploySession"
 	// SessionServiceGetSessionLogsProcedure is the fully-qualified name of the SessionService's
 	// GetSessionLogs RPC.
 	SessionServiceGetSessionLogsProcedure = "/fletcher.v1.SessionService/GetSessionLogs"
@@ -117,6 +120,11 @@ type SessionServiceClient interface {
 	// RestartSession stops a running session's VM and starts it again against the
 	// same fork. For a run_app (deploy) session this re-runs the image's app.
 	RestartSession(context.Context, *connect.Request[v1.RestartSessionRequest]) (*connect.Response[v1.RestartSessionResponse], error)
+	// RedeploySession replaces a session's disk with a fresh fork of its current
+	// template image and restarts it (a clean redeploy, vs RestartSession which
+	// keeps the same disk). For a registry-sourced image it first attempts a
+	// best-effort re-pull to the latest; a local image is re-forked as-is.
+	RedeploySession(context.Context, *connect.Request[v1.RedeploySessionRequest]) (*connect.Response[v1.RedeploySessionResponse], error)
 	// GetSessionLogs returns the tail of a run_app session's app log
 	// (/var/log/fletcher-app.log), captured from the running VM. A live-follow
 	// stream (StreamSessionLogs) lands with the guest-side change that lets the
@@ -213,6 +221,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("RestartSession")),
 			connect.WithClientOptions(opts...),
 		),
+		redeploySession: connect.NewClient[v1.RedeploySessionRequest, v1.RedeploySessionResponse](
+			httpClient,
+			baseURL+SessionServiceRedeploySessionProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("RedeploySession")),
+			connect.WithClientOptions(opts...),
+		),
 		getSessionLogs: connect.NewClient[v1.GetSessionLogsRequest, v1.GetSessionLogsResponse](
 			httpClient,
 			baseURL+SessionServiceGetSessionLogsProcedure,
@@ -224,20 +238,21 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 
 // sessionServiceClient implements SessionServiceClient.
 type sessionServiceClient struct {
-	createSession  *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
-	getSession     *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
-	listSessions   *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
-	startSession   *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
-	stopSession    *connect.Client[v1.StopSessionRequest, v1.StopSessionResponse]
-	deleteSession  *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
-	execSession    *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
-	shellSession   *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
-	proxySession   *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
-	publishPort    *connect.Client[v1.PublishPortRequest, v1.PublishPortResponse]
-	unpublishPort  *connect.Client[v1.UnpublishPortRequest, v1.UnpublishPortResponse]
-	listPorts      *connect.Client[v1.ListPortsRequest, v1.ListPortsResponse]
-	restartSession *connect.Client[v1.RestartSessionRequest, v1.RestartSessionResponse]
-	getSessionLogs *connect.Client[v1.GetSessionLogsRequest, v1.GetSessionLogsResponse]
+	createSession   *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
+	getSession      *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
+	listSessions    *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
+	startSession    *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
+	stopSession     *connect.Client[v1.StopSessionRequest, v1.StopSessionResponse]
+	deleteSession   *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
+	execSession     *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
+	shellSession    *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
+	proxySession    *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
+	publishPort     *connect.Client[v1.PublishPortRequest, v1.PublishPortResponse]
+	unpublishPort   *connect.Client[v1.UnpublishPortRequest, v1.UnpublishPortResponse]
+	listPorts       *connect.Client[v1.ListPortsRequest, v1.ListPortsResponse]
+	restartSession  *connect.Client[v1.RestartSessionRequest, v1.RestartSessionResponse]
+	redeploySession *connect.Client[v1.RedeploySessionRequest, v1.RedeploySessionResponse]
+	getSessionLogs  *connect.Client[v1.GetSessionLogsRequest, v1.GetSessionLogsResponse]
 }
 
 // CreateSession calls fletcher.v1.SessionService.CreateSession.
@@ -305,6 +320,11 @@ func (c *sessionServiceClient) RestartSession(ctx context.Context, req *connect.
 	return c.restartSession.CallUnary(ctx, req)
 }
 
+// RedeploySession calls fletcher.v1.SessionService.RedeploySession.
+func (c *sessionServiceClient) RedeploySession(ctx context.Context, req *connect.Request[v1.RedeploySessionRequest]) (*connect.Response[v1.RedeploySessionResponse], error) {
+	return c.redeploySession.CallUnary(ctx, req)
+}
+
 // GetSessionLogs calls fletcher.v1.SessionService.GetSessionLogs.
 func (c *sessionServiceClient) GetSessionLogs(ctx context.Context, req *connect.Request[v1.GetSessionLogsRequest]) (*connect.Response[v1.GetSessionLogsResponse], error) {
 	return c.getSessionLogs.CallUnary(ctx, req)
@@ -350,6 +370,11 @@ type SessionServiceHandler interface {
 	// RestartSession stops a running session's VM and starts it again against the
 	// same fork. For a run_app (deploy) session this re-runs the image's app.
 	RestartSession(context.Context, *connect.Request[v1.RestartSessionRequest]) (*connect.Response[v1.RestartSessionResponse], error)
+	// RedeploySession replaces a session's disk with a fresh fork of its current
+	// template image and restarts it (a clean redeploy, vs RestartSession which
+	// keeps the same disk). For a registry-sourced image it first attempts a
+	// best-effort re-pull to the latest; a local image is re-forked as-is.
+	RedeploySession(context.Context, *connect.Request[v1.RedeploySessionRequest]) (*connect.Response[v1.RedeploySessionResponse], error)
 	// GetSessionLogs returns the tail of a run_app session's app log
 	// (/var/log/fletcher-app.log), captured from the running VM. A live-follow
 	// stream (StreamSessionLogs) lands with the guest-side change that lets the
@@ -442,6 +467,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("RestartSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceRedeploySessionHandler := connect.NewUnaryHandler(
+		SessionServiceRedeploySessionProcedure,
+		svc.RedeploySession,
+		connect.WithSchema(sessionServiceMethods.ByName("RedeploySession")),
+		connect.WithHandlerOptions(opts...),
+	)
 	sessionServiceGetSessionLogsHandler := connect.NewUnaryHandler(
 		SessionServiceGetSessionLogsProcedure,
 		svc.GetSessionLogs,
@@ -476,6 +507,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceListPortsHandler.ServeHTTP(w, r)
 		case SessionServiceRestartSessionProcedure:
 			sessionServiceRestartSessionHandler.ServeHTTP(w, r)
+		case SessionServiceRedeploySessionProcedure:
+			sessionServiceRedeploySessionHandler.ServeHTTP(w, r)
 		case SessionServiceGetSessionLogsProcedure:
 			sessionServiceGetSessionLogsHandler.ServeHTTP(w, r)
 		default:
@@ -537,6 +570,10 @@ func (UnimplementedSessionServiceHandler) ListPorts(context.Context, *connect.Re
 
 func (UnimplementedSessionServiceHandler) RestartSession(context.Context, *connect.Request[v1.RestartSessionRequest]) (*connect.Response[v1.RestartSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.RestartSession is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) RedeploySession(context.Context, *connect.Request[v1.RedeploySessionRequest]) (*connect.Response[v1.RedeploySessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.RedeploySession is not implemented"))
 }
 
 func (UnimplementedSessionServiceHandler) GetSessionLogs(context.Context, *connect.Request[v1.GetSessionLogsRequest]) (*connect.Response[v1.GetSessionLogsResponse], error) {

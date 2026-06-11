@@ -492,6 +492,60 @@ func (m *Manager) Logs(ctx context.Context, ref string, tailLines int) (string, 
 	return res.Stdout, nil
 }
 
+// Redeploy replaces a session's disk with a fresh fork of its current template
+// image and restarts it. It does not rebuild or pull the image (refreshing the
+// template to a new version is a separate import); for a run_app deploy this
+// applies whatever is currently imported under the session's image, cleanly.
+func (m *Manager) Redeploy(ctx context.Context, ref string) (Session, error) {
+	if err := m.requireRuntime(); err != nil {
+		return Session{}, err
+	}
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return Session{}, err
+	}
+
+	// Hold the per-session start lock across the disk swap so a concurrent wake
+	// cannot boot the old fork mid-redeploy. Released before the final Start
+	// (which re-acquires it); the new fork is committed by then, so whichever
+	// caller boots uses it.
+	lock := m.startLock(row.ID)
+	lock.Lock()
+	if handle := m.takeHandle(row.ID); handle != nil {
+		if serr := handle.Stop(ctx); serr != nil {
+			m.logger.Warn("stop session vm for redeploy", slog.String("session_id", row.ID), slog.String("err", serr.Error()))
+		}
+	}
+	if err := m.setState(ctx, row.ID, StateStopped); err != nil {
+		lock.Unlock()
+		return Session{}, err
+	}
+
+	fork, err := m.snapshot.Create(ctx, row.Image)
+	if err != nil {
+		lock.Unlock()
+		return Session{}, fmt.Errorf("re-fork session from image %q: %w", row.Image, err)
+	}
+	oldForkID := row.ForkID
+	if err := m.q.UpdateSessionFork(ctx, sqliteq.UpdateSessionForkParams{
+		ForkID:    fork.ID,
+		ForkPath:  fork.Path,
+		UpdatedAt: time.Now().Unix(),
+		ID:        row.ID,
+	}); err != nil {
+		_ = m.snapshot.Delete(context.WithoutCancel(ctx), fork.ID)
+		lock.Unlock()
+		return Session{}, fmt.Errorf("point session at new fork: %w", err)
+	}
+	// The old fork is now unreferenced; reclaim it best-effort.
+	if derr := m.snapshot.Delete(context.WithoutCancel(ctx), oldForkID); derr != nil {
+		m.logger.Warn("delete old fork after redeploy", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+	}
+	lock.Unlock()
+
+	return m.Start(ctx, row.ID)
+}
+
 // Shell opens an interactive PTY in a running session, bridging the caller's
 // stdin/stdout and window resizes to the VM, and returns the shell's exit code.
 func (m *Manager) Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error) {

@@ -31,6 +31,7 @@ type SessionsBackend interface {
 	Unpublish(ctx context.Context, ref string, guestPort int) error
 	ListPorts(ctx context.Context, ref string) ([]session.PublishedPort, error)
 	Restart(ctx context.Context, ref string) (session.Session, error)
+	Redeploy(ctx context.Context, ref string) (session.Session, error)
 	Logs(ctx context.Context, ref string, tailLines int) (string, error)
 }
 
@@ -48,6 +49,14 @@ type CertStatusResolver interface {
 	CertStatus(ctx context.Context, host string) (status string, expiresAt int64)
 }
 
+// ImageRefresher attempts a best-effort re-pull of a registry-sourced image
+// before a redeploy re-forks from it, refreshing the on-disk template. Returns
+// true when a pull updated the template; false for a local image or any
+// skip/failure (which it logs).
+type ImageRefresher interface {
+	RefreshImage(ctx context.Context, image string) bool
+}
+
 // SessionsService implements fletcherv1connect.SessionServiceHandler.
 type SessionsService struct {
 	fletcherv1connect.UnimplementedSessionServiceHandler
@@ -60,14 +69,32 @@ type SessionsService struct {
 	deploy DeployInfoResolver
 	// certs resolves public TLS cert state for ListPorts; nil disables it.
 	certs CertStatusResolver
+	// refresher re-pulls a registry image before RedeploySession; nil disables it.
+	refresher ImageRefresher
 }
 
-// NewSessionsService wires a SessionsService to a backend. publicIP is the
-// daemon's public IP for --public DNS guidance ("" if unknown); deploy resolves
-// run_app deploy detail for GetSession; certs resolves public-port TLS status
-// for ListPorts (each nil disables its feature).
-func NewSessionsService(backend SessionsBackend, publicIP string, deploy DeployInfoResolver, certs CertStatusResolver) *SessionsService {
-	return &SessionsService{backend: backend, publicIP: publicIP, deploy: deploy, certs: certs}
+// SessionsDeps are the optional collaborators the SessionsService uses beyond
+// its core backend; each is independently nil-able.
+type SessionsDeps struct {
+	// PublicIP is the daemon's discovered public IP for --public DNS guidance.
+	PublicIP string
+	// Deploy resolves run_app deploy detail for GetSession.
+	Deploy DeployInfoResolver
+	// Certs resolves public-port TLS status for ListPorts.
+	Certs CertStatusResolver
+	// Refresher re-pulls a registry-sourced image before RedeploySession.
+	Refresher ImageRefresher
+}
+
+// NewSessionsService wires a SessionsService to a backend and its optional deps.
+func NewSessionsService(backend SessionsBackend, deps SessionsDeps) *SessionsService {
+	return &SessionsService{
+		backend:   backend,
+		publicIP:  deps.PublicIP,
+		deploy:    deps.Deploy,
+		certs:     deps.Certs,
+		refresher: deps.Refresher,
+	}
 }
 
 // CreateSession provisions a session and boots its VM. Categorised errors
@@ -152,6 +179,31 @@ func (s *SessionsService) RestartSession(ctx context.Context, req *connect.Reque
 		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.RestartSessionResponse{Session: sessionToProto(sess)}), nil
+}
+
+// RedeploySession re-pulls a registry-sourced image (best-effort), then
+// replaces the session's disk with a fresh fork of the current template and
+// restarts it.
+func (s *SessionsService) RedeploySession(ctx context.Context, req *connect.Request[fletcherv1.RedeploySessionRequest]) (*connect.Response[fletcherv1.RedeploySessionResponse], error) {
+	ref := req.Msg.GetRef()
+	var refreshed bool
+	if s.refresher != nil {
+		// Re-pull before re-forking so the fresh fork picks up the new template.
+		// Best-effort: a failed pull is logged by the refresher and we redeploy
+		// the current template. Get the image name first; a lookup miss surfaces
+		// from Redeploy below with the proper error.
+		if sess, err := s.backend.Get(ctx, ref); err == nil {
+			refreshed = s.refresher.RefreshImage(ctx, sess.Image)
+		}
+	}
+	sess, err := s.backend.Redeploy(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.RedeploySessionResponse{
+		Session:        sessionToProto(sess),
+		ImageRefreshed: refreshed,
+	}), nil
 }
 
 // GetSessionLogs returns the tail of a run_app session's app log.

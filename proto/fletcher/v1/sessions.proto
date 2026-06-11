@@ -47,6 +47,11 @@ service SessionService {
   // RestartSession stops a running session's VM and starts it again against the
   // same fork. For a run_app (deploy) session this re-runs the image's app.
   rpc RestartSession(RestartSessionRequest) returns (RestartSessionResponse) {}
+  // RedeploySession replaces a session's disk with a fresh fork of its current
+  // template image and restarts it (a clean redeploy, vs RestartSession which
+  // keeps the same disk). For a registry-sourced image it first attempts a
+  // best-effort re-pull to the latest; a local image is re-forked as-is.
+  rpc RedeploySession(RedeploySessionRequest) returns (RedeploySessionResponse) {}
   // GetSessionLogs returns the tail of a run_app session's app log
   // (/var/log/fletcher-app.log), captured from the running VM. A live-follow
   // stream (StreamSessionLogs) lands with the guest-side change that lets the
@@ -172,6 +177,19 @@ message RestartSessionRequest {
 
 message RestartSessionResponse {
   Session session = 1;
+}
+
+message RedeploySessionRequest {
+  // ref is a session ID or name.
+  string ref = 1;
+}
+
+message RedeploySessionResponse {
+  Session session = 1;
+  // image_refreshed is true when a registry re-pull updated the template before
+  // the re-fork; false for a local image, or when the pull was skipped or could
+  // not run (e.g. the image is private and needs credentials).
+  bool image_refreshed = 2;
 }
 
 message GetSessionLogsRequest {

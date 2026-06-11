@@ -30,3 +30,8 @@ WHERE id = ?;
 
 -- name: DeleteSession :execrows
 DELETE FROM sessions WHERE id = ?;
+
+-- name: UpdateSessionFork :exec
+UPDATE sessions
+SET fork_id = ?, fork_path = ?, updated_at = ?
+WHERE id = ?;

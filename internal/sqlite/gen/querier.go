@@ -56,6 +56,7 @@ type Querier interface {
 	SetJobNextRun(ctx context.Context, arg SetJobNextRunParams) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
+	UpdateSessionFork(ctx context.Context, arg UpdateSessionForkParams) error
 	UpdateSessionState(ctx context.Context, arg UpdateSessionStateParams) error
 	UpsertSecret(ctx context.Context, arg UpsertSecretParams) error
 	UpsertSetting(ctx context.Context, arg UpsertSettingParams) error
