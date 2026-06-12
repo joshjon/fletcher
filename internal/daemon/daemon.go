@@ -584,6 +584,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		jobs:             jobSvc,
 		sessions:         sessionMgr,
 		volumes:          volumeMgr,
+		credentials:      sessionMgr,
 		events:           eventBus,
 		reports:          reportSvc,
 		publicIP:         publicEndpointHost(netSetup.EffectivePublicEndpoint),
@@ -677,19 +678,20 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 // mux. Grouping them in a struct keeps newHTTPServer's signature tight
 // as more services land.
 type connectDeps struct {
-	jobs      api.JobsBackend
-	sessions  api.SessionsBackend
-	volumes   api.VolumesBackend
-	events    *events.Bus
-	reports   api.ReportsBackend
-	secrets   api.SecretsBackend
-	approvals api.ApprovalsBackend
-	push      api.PushBackend
-	peers     api.PeersBackend
-	serverKey api.ServerKeyProvider
-	models    api.CatalogBuilder
-	peerSync  api.PeerSyncer
-	settings  api.SettingsBackend
+	jobs        api.JobsBackend
+	sessions    api.SessionsBackend
+	volumes     api.VolumesBackend
+	credentials api.CredentialsBackend
+	events      *events.Bus
+	reports     api.ReportsBackend
+	secrets     api.SecretsBackend
+	approvals   api.ApprovalsBackend
+	push        api.PushBackend
+	peers       api.PeersBackend
+	serverKey   api.ServerKeyProvider
+	models      api.CatalogBuilder
+	peerSync    api.PeerSyncer
+	settings    api.SettingsBackend
 	// publicIP is the daemon's discovered public IP (host of the effective public
 	// endpoint), passed to the sessions service for --public DNS guidance.
 	publicIP string
@@ -1069,6 +1071,11 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		api.NewVolumesService(deps.volumes), interceptors,
 	)
 	mux.Handle(volumesPath, volumesHandler)
+
+	credentialsPath, credentialsHandler := fletcherv1connect.NewCredentialServiceHandler(
+		api.NewCredentialsService(deps.credentials), interceptors,
+	)
+	mux.Handle(credentialsPath, credentialsHandler)
 
 	eventsPath, eventsHandler := fletcherv1connect.NewEventServiceHandler(
 		api.NewEventsService(deps.events), interceptors,

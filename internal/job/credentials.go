@@ -41,6 +41,53 @@ var AllowedCredentials = map[string]AllowedCredential{
 	CredentialGemini: {Name: CredentialGemini, HostRelPath: ".config/gemini", GuestPath: "/home/fletcher/.config/gemini"},
 }
 
+// SavedCredentials lists the credential names that have files saved under root
+// (the box's saved logins), so a client can show which logins exist.
+func SavedCredentials(root string) []string {
+	if root == "" {
+		return nil
+	}
+	var out []string
+	for _, name := range CredentialNames() {
+		base := filepath.Join(root, AllowedCredentials[name].HostRelPath)
+		if entries, err := os.ReadDir(base); err == nil && len(entries) > 0 {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// DeleteSavedCredential removes a saved login's files from under root.
+func DeleteSavedCredential(root, name string) error {
+	spec, ok := AllowedCredentials[name]
+	if !ok {
+		return errs.Newf(errs.CategoryInvalidArgument, "unknown credential %q (allowed: %s)", name, allowedCredentialNames())
+	}
+	if root == "" {
+		return errs.New(errs.CategoryFailedPrecondition, "the daemon has no credentials root configured")
+	}
+	if err := os.RemoveAll(filepath.Join(root, spec.HostRelPath)); err != nil {
+		return fmt.Errorf("delete saved credential %q: %w", name, err)
+	}
+	return nil
+}
+
+// Credential returns the catalog entry for a credential name.
+func Credential(name string) (AllowedCredential, bool) {
+	c, ok := AllowedCredentials[name]
+	return c, ok
+}
+
+// CredentialNames returns every supported credential name, sorted.
+func CredentialNames() []string {
+	names := make([]string, 0, len(AllowedCredentials))
+	for name := range AllowedCredentials {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // ResolveCredentialFiles reads the named credential directories under root and
 // returns their contents as seedable files: each regular file under
 // <root>/<HostRelPath> maps to <GuestPath>/<rel>, carrying its permission bits.

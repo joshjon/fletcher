@@ -1464,19 +1464,27 @@ copies a named directory. Each provider is one row in the existing
   0600` with the master's content; after an in-session edit + stop/start the
   *edited* value survives (no re-clobber) - both correctness properties hold.
 
+**Populate path - DONE (verified on hardware 2026-06-12).** `CredentialService`
+(`SaveSessionLogin` / `ListCredentials` / `DeleteCredential`) plus
+`fletcher credential save <name> --from-session <ref>` / `list` / `rm`.
+SaveSessionLogin tars the agent's credential dir out of a running session over
+exec (gzip+base64, safe host-side extraction) into the credentials root.
+Verified end to end: logged into a session, `credential save claude
+--from-session`, then a new `--credential claude` session booted with the saved
+token and settings intact.
+
 **Still to do (the surface).**
 
-- `default_credential` setting so new sessions inherit the box login with no flag
-  (the actual "log in once" default; `Options.DefaultCredential` is wired,
-  `resolveCredentials` already honours it - just needs the setting + reload key).
-- `fletcher credential import <name> --from-session <ref>` (the populate path:
-  pull `~/.claude` out of a session you logged into), plus `list`/`rm`. Until
-  then the master is seeded manually under `<credentials-root>/.claude`.
-- iOS: credential picker on the create sheet, a "use this login for new sessions"
-  action, and the default toggle.
-- Open question to settle in the populate work: whether Anthropic rotates/revokes
-  refresh tokens on use (decides if one-way copy is enough or a sync-back is
-  wanted). Cheap experiment once login-from-session exists.
+- iOS: a credential picker on the create sheet (sends `credentials`), and a "use
+  this login for new sessions" action on a session (calls `SaveSessionLogin`) -
+  the loop the operator actually wants. This is the next chunk.
+- `default_credential` setting so new sessions inherit with no flag/picker
+  (`Options.DefaultCredential` + `resolveCredentials` already honour it - just
+  needs the setting key + reload wiring). Optional once the picker exists.
+- Open question for later: whether Anthropic rotates/revokes refresh tokens on
+  use (decides if one-way copy is enough or a sync-back is wanted). Cheap
+  experiment now that login-from-session exists - just save, use across two
+  sessions, watch for an expiry.
 
 ## Toward v1 - hardening (in progress)
 
