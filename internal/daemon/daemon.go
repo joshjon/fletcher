@@ -506,6 +506,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		DefaultGateway:      defaultGateway(cfg),
 		PublicWeb:           cfg.PublicWeb,
 		ImagesDir:           filepath.Join(snapshotRootDir(cfg), "images"),
+		CredentialsRoot:     cfg.CredentialsDir,
 	})
 	if err := sessionMgr.ReconcileOnBoot(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile sessions: %w", err)

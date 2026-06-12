@@ -139,6 +139,10 @@ message CreateSessionRequest {
   // volume attaches the named persistent volume (an ID or name), mounted at
   // /volume in the guest for the session's lifetime. Empty attaches none.
   string volume = 6;
+  // credentials seeds the box's saved agent logins (e.g. "claude") into the new
+  // session's fork so it boots already authenticated. Empty uses the daemon's
+  // default_credential setting (which may also be empty, for no login).
+  repeated string credentials = 7;
 }
 
 message CreateSessionResponse {

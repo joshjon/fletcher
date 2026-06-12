@@ -313,7 +313,11 @@ type CreateSessionRequest struct {
 	RunApp bool `protobuf:"varint,5,opt,name=run_app,json=runApp,proto3" json:"run_app,omitempty"`
 	// volume attaches the named persistent volume (an ID or name), mounted at
 	// /volume in the guest for the session's lifetime. Empty attaches none.
-	Volume        string `protobuf:"bytes,6,opt,name=volume,proto3" json:"volume,omitempty"`
+	Volume string `protobuf:"bytes,6,opt,name=volume,proto3" json:"volume,omitempty"`
+	// credentials seeds the box's saved agent logins (e.g. "claude") into the new
+	// session's fork so it boots already authenticated. Empty uses the daemon's
+	// default_credential setting (which may also be empty, for no login).
+	Credentials   []string `protobuf:"bytes,7,rep,name=credentials,proto3" json:"credentials,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -388,6 +392,13 @@ func (x *CreateSessionRequest) GetVolume() string {
 		return x.Volume
 	}
 	return ""
+}
+
+func (x *CreateSessionRequest) GetCredentials() []string {
+	if x != nil {
+		return x.Credentials
+	}
+	return nil
 }
 
 type CreateSessionResponse struct {
@@ -2711,14 +2722,15 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"entrypoint\x18\x01 \x03(\tR\n" +
 	"entrypoint\x12!\n" +
 	"\fexposed_port\x18\x02 \x01(\rR\vexposedPort\x12#\n" +
-	"\rrestart_count\x18\x03 \x01(\rR\frestartCount\"\xb0\x01\n" +
+	"\rrestart_count\x18\x03 \x01(\rR\frestartCount\"\xd2\x01\n" +
 	"\x14CreateSessionRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x12\x18\n" +
 	"\agateway\x18\x04 \x01(\tR\agateway\x12#\n" +
 	"\regress_policy\x18\x03 \x01(\tR\fegressPolicy\x12\x17\n" +
 	"\arun_app\x18\x05 \x01(\bR\x06runApp\x12\x16\n" +
-	"\x06volume\x18\x06 \x01(\tR\x06volume\"G\n" +
+	"\x06volume\x18\x06 \x01(\tR\x06volume\x12 \n" +
+	"\vcredentials\x18\a \x03(\tR\vcredentials\"G\n" +
 	"\x15CreateSessionResponse\x12.\n" +
 	"\asession\x18\x01 \x01(\v2\x14.fletcher.v1.SessionR\asession\"%\n" +
 	"\x11GetSessionRequest\x12\x10\n" +

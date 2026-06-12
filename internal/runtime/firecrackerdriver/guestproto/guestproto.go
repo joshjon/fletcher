@@ -73,6 +73,22 @@ type Spec struct {
 	WorkDir string `json:"workDir"`
 	// Forwards are loopback services to relay to the host before running.
 	Forwards []Forward `json:"forwards,omitempty"`
+	// Credentials are agent login files the host seeds into a freshly created
+	// session at setup (e.g. the box's saved ~/.claude). Sent only on the create
+	// path, so a later start never overwrites a token the session refreshed.
+	Credentials []CredentialFile `json:"credentials,omitempty"`
+}
+
+// CredentialFile is one file seeded into a new session's fork so it boots
+// already logged in. The guest writes it as root then hands it to the login
+// user (the agent runs as that user and refreshes the token in place).
+type CredentialFile struct {
+	// Path is the absolute guest path to write (e.g. /home/fletcher/.claude/...).
+	Path string `json:"path"`
+	// Mode is the file's permission bits (e.g. 0o600 for a token file).
+	Mode uint32 `json:"mode"`
+	// Data is the file contents.
+	Data []byte `json:"data"`
 }
 
 // RequestKind is the type of a host->guest control message in session mode.

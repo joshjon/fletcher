@@ -110,7 +110,7 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 	// usable for a shell, just not for model/MCP calls. envForPolicy strips the
 	// proxy vars for a "none" session so they match its (absent) egress forward.
 	effEnv := envForPolicy(spec.EgressPolicy, spec.Env)
-	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv)
+	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv, guestCredentials(spec.Credentials))
 	if ferr != nil {
 		d.logger.Warn("session service forwards not fully established; model gateway/MCP may be unreachable in this session",
 			slog.String("session_id", spec.SessionID), slog.String("err", ferr.Error()))
@@ -161,10 +161,7 @@ type fcSession struct {
 // does the equivalent inline in Run. Best-effort: it returns any listeners it
 // did open alongside an error so the caller can both close them and log, leaving
 // the session usable (just without model/MCP access) rather than failing to boot.
-func (d *Driver) startSessionForwards(ctx context.Context, vsockUDS string, forwards []Forward, env []string) ([]net.Listener, error) {
-	if len(forwards) == 0 {
-		return nil, nil
-	}
+func (d *Driver) startSessionForwards(ctx context.Context, vsockUDS string, forwards []Forward, env []string, creds []guestproto.CredentialFile) ([]net.Listener, error) {
 	lns := make([]net.Listener, 0, len(forwards))
 	gforwards := make([]guestproto.Forward, 0, len(forwards))
 	for i, f := range forwards {
@@ -177,24 +174,29 @@ func (d *Driver) startSessionForwards(ctx context.Context, vsockUDS string, forw
 		gforwards = append(gforwards, guestproto.Forward{ListenAddr: f.ListenAddr, VsockPort: port})
 	}
 
+	// Nothing to deliver (no forwards, no seeded credentials): skip the setup
+	// round-trip, preserving the prior behaviour for a bare session.
+	if len(gforwards) == 0 && len(creds) == 0 {
+		return lns, nil
+	}
 	setupCtx, cancel := context.WithTimeout(ctx, sessionStartGrace)
 	defer cancel()
-	if err := sendSessionSetup(setupCtx, vsockUDS, gforwards, env); err != nil {
+	if err := sendSessionSetup(setupCtx, vsockUDS, gforwards, env, creds); err != nil {
 		return lns, fmt.Errorf("send setup: %w", err)
 	}
 	return lns, nil
 }
 
-// sendSessionSetup tells the guest to bring up the given forwards and export the
-// session env to login shells, then waits for its ack frame so both are in place
-// before the session is reported ready.
-func sendSessionSetup(ctx context.Context, vsockUDS string, forwards []guestproto.Forward, env []string) error {
+// sendSessionSetup tells the guest to bring up the given forwards, export the
+// session env to login shells, and seed any agent-login credentials, then waits
+// for its ack frame so all are in place before the session is reported ready.
+func sendSessionSetup(ctx context.Context, vsockUDS string, forwards []guestproto.Forward, env []string, creds []guestproto.CredentialFile) error {
 	conn, err := dialGuest(ctx, vsockUDS, guestproto.ControlPort)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
-	req := guestproto.Request{Kind: guestproto.RequestSetup, Spec: guestproto.Spec{Forwards: forwards, Env: env}}
+	req := guestproto.Request{Kind: guestproto.RequestSetup, Spec: guestproto.Spec{Forwards: forwards, Env: env, Credentials: creds}}
 	if err := guestproto.WriteRequest(conn, req); err != nil {
 		return err
 	}
@@ -202,6 +204,20 @@ func sendSessionSetup(ctx context.Context, vsockUDS string, forwards []guestprot
 		return err
 	}
 	return nil
+}
+
+// guestCredentials converts the runtime's seeded credential files into the
+// guest wire form. Returns nil for none, so a start (which seeds nothing) sends
+// an empty setup.
+func guestCredentials(creds []fcruntime.CredentialFile) []guestproto.CredentialFile {
+	if len(creds) == 0 {
+		return nil
+	}
+	out := make([]guestproto.CredentialFile, len(creds))
+	for i, c := range creds {
+		out[i] = guestproto.CredentialFile{Path: c.Path, Mode: c.Mode, Data: c.Data}
+	}
+	return out
 }
 
 // closeForwards shuts the host-side forward proxies (called when the VM stops or

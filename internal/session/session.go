@@ -26,6 +26,7 @@ import (
 	"github.com/joshjon/fletcher/internal/errs"
 	"github.com/joshjon/fletcher/internal/events"
 	"github.com/joshjon/fletcher/internal/image"
+	"github.com/joshjon/fletcher/internal/job"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/snapshot"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
@@ -98,6 +99,15 @@ type Options struct {
 	// set, committing a session image records its TemplateMeta sidecar there so
 	// pickers and deploys see the entrypoint and port.
 	ImagesDir string
+	// CredentialsRoot is the host directory holding the box's saved agent logins
+	// (the operator's $HOME by default; <root>/.claude etc.). A session created
+	// with a credential seeds those files into its fork so it boots already
+	// logged in. Empty disables credential seeding.
+	CredentialsRoot string
+	// DefaultCredential is the agent login seeded into a new session when create
+	// is called with no explicit credential: "" (none) | "claude" | "codex" |
+	// "gemini". The box-level "log in once" default; reloadable.
+	DefaultCredential string
 }
 
 // idleLoadThreshold is the guest 1-minute load average below which a session
@@ -292,7 +302,7 @@ func (m *Manager) requireRuntime() error {
 // egressPolicy is "none"|"allowlist"|"open"; empty resolves to the manager's
 // configured default. volumeRef, when non-empty, attaches that persistent
 // volume (mounted at /volume in the guest) for the session's lifetime.
-func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool, volumeRef string) (Session, error) {
+func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool, volumeRef string, credentials []string) (Session, error) {
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
@@ -327,6 +337,13 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		}
 	}
 
+	// Resolve seeded credentials before allocating a fork so a bad/absent login
+	// fails fast. Create-only: a later Start never reseeds (see resolveCredentials).
+	credFiles, err := m.resolveCredentials(credentials)
+	if err != nil {
+		return Session{}, err
+	}
+
 	id, err := typeid.WithPrefix(idPrefix)
 	if err != nil {
 		return Session{}, fmt.Errorf("generate session id: %w", err)
@@ -345,6 +362,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		EgressPolicy: egressPolicy,
 		RunApp:       runApp,
 		VolumePath:   volumePath,
+		Credentials:  credFiles,
 	})
 	if err != nil {
 		_ = m.snapshot.Delete(context.WithoutCancel(ctx), fork.ID)
@@ -378,6 +396,26 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 	m.putHandle(sessionID, handle)
 	m.publishEvent(string(StateRunning), sessionID, name)
 	return m.enrich(ctx, sessionFromRow(row)), nil
+}
+
+// resolveCredentials turns the requested agent-login names (or the box default
+// when none are given) into the files seeded into a new session's fork. Only
+// Create calls this; a later Start never reseeds, so a token the session
+// refreshed in its fork is never overwritten by the (older) box login.
+func (m *Manager) resolveCredentials(requested []string) ([]runtime.CredentialFile, error) {
+	opt := m.opt()
+	names := requested
+	if len(names) == 0 && strings.TrimSpace(opt.DefaultCredential) != "" {
+		names = []string{opt.DefaultCredential}
+	}
+	if len(names) == 0 {
+		return nil, nil
+	}
+	names, err := job.ValidateCredentialNames(names)
+	if err != nil {
+		return nil, err
+	}
+	return job.ResolveCredentialFiles(opt.CredentialsRoot, names)
 }
 
 // Get returns the session matching ref (an ID or name).

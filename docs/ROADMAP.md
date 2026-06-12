@@ -1422,6 +1422,62 @@ tmux server, and tmux redrew the prior screen. Still worth an interactive pass
 from the app (background mid-`claude`, reattach) and a confirmation that an idle
 session still hibernates and warm-restores.
 
+### Milestone 16 - credential seeding ("log in once") - ENGINE DONE (verified on hardware 2026-06-12); surface in progress
+
+**Goal.** Stop re-logging-in for every new session. The box holds a saved agent
+login; each *new* session's fork is seeded from it at create, so it boots already
+authenticated. Not a live shared credential - a one-way seed, the same fork-from-a-
+template model used everywhere else. DESIGN.md §5 trusted-credential mode, made a
+box-level default.
+
+**Why not the obvious alternatives (decided 2026-06-12).**
+
+- **virtio-fs (live mount)** is a non-starter: Firecracker's device model
+  (virtio-block/net/vsock/balloon/rng only) has no virtio-fs, independent of the
+  fact that it would also need an external `virtiofsd`. Off the table without
+  switching VMM.
+- **A shared volume** can't be the general answer: a volume is an ext4 block
+  device, single-writer (no concurrent sessions) and one-per-session (can't hold
+  a login *and* project data). Works as a one-session-at-a-time hack, not a clean
+  model.
+- So: **copy-at-create**, delivered over the existing daemon->guest vsock setup
+  channel - no new device, no external dep, correct file ownership for free (the
+  guest writes as root and hands the files to the login user).
+
+**Per-provider?** No custom code per agent - the daemon never parses a token, it
+copies a named directory. Each provider is one row in the existing
+`AllowedCredentials` map (claude/codex/gemini, host rel path -> guest path).
+
+**Shipped + verified on hardware (the engine).**
+
+- `guestproto.Spec.Credentials` + guest `applySetup` writes each file and chowns
+  it (and its credential dirs) to the login user, inside `setupOnce`.
+- `runtime.SessionSpec.Credentials`; the Firecracker driver passes them in the
+  setup request. Create-gated: `session.Create` sets them, `Start`/restore never
+  do, so a token the session refreshed is never overwritten.
+- `job.ResolveCredentialFiles(root, names)` reads `<credentials-root>/<relpath>`
+  (reusing `AllowedCredentials`, no duplicated allowlist) into seedable files.
+  `session.Options.CredentialsRoot` (= `cfg.CredentialsDir`, default
+  `/var/lib/fletcher`) + `resolveCredentials` in Create.
+- proto `CreateSessionRequest.credentials`; CLI `session create --credential`.
+- Verified: seeded `~/.claude/.credentials.json` lands owned `fletcher:fletcher
+  0600` with the master's content; after an in-session edit + stop/start the
+  *edited* value survives (no re-clobber) - both correctness properties hold.
+
+**Still to do (the surface).**
+
+- `default_credential` setting so new sessions inherit the box login with no flag
+  (the actual "log in once" default; `Options.DefaultCredential` is wired,
+  `resolveCredentials` already honours it - just needs the setting + reload key).
+- `fletcher credential import <name> --from-session <ref>` (the populate path:
+  pull `~/.claude` out of a session you logged into), plus `list`/`rm`. Until
+  then the master is seeded manually under `<credentials-root>/.claude`.
+- iOS: credential picker on the create sheet, a "use this login for new sessions"
+  action, and the default toggle.
+- Open question to settle in the populate work: whether Anthropic rotates/revokes
+  refresh tokens on use (decides if one-way copy is enough or a sync-back is
+  wanted). Cheap experiment once login-from-session exists.
+
 ## Toward v1 - hardening (in progress)
 
 With M1-M6 done, the daemon is feature-complete on the thesis (ephemeral jobs +

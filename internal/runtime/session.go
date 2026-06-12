@@ -27,6 +27,23 @@ type SessionSpec struct {
 	// VolumePath is the host path of the session's persistent volume, attached
 	// as a second disk (the guest mounts it at /volume). Empty means none.
 	VolumePath string
+	// Credentials are agent login files seeded into the fork at first boot so a
+	// new session starts already authenticated (the box's saved login). Set only
+	// when creating a session - never on a later start, so a refreshed token is
+	// never overwritten. Empty means seed nothing.
+	Credentials []CredentialFile
+}
+
+// CredentialFile is one file seeded into a new session's fork (e.g. a
+// ~/.claude token). The driver delivers it to the guest, which writes it as the
+// login user.
+type CredentialFile struct {
+	// Path is the absolute guest path to write.
+	Path string
+	// Mode is the file's permission bits.
+	Mode uint32
+	// Data is the file contents.
+	Data []byte
 }
 
 // ShellSpec parameterises an interactive PTY in a session VM.

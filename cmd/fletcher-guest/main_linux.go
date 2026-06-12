@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -817,6 +818,7 @@ func applySetup(conn net.Conn, spec guestproto.Spec) {
 	setupOnce.Do(func() {
 		startForwards(spec.Forwards)
 		writeSessionEnv(spec.Env)
+		writeCredentials(spec.Credentials)
 	})
 	if err := guestproto.WriteFrame(conn, guestproto.KindExit, guestproto.EncodeExit(0)); err != nil {
 		fmt.Fprintf(os.Stderr, "fletcher-guest: ack setup: %v\n", err)
@@ -849,6 +851,52 @@ func writeSessionEnv(env []string) {
 // embedded single quotes the POSIX way ('\”).
 func shellSingleQuote(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", `'\''`) + "'"
+}
+
+// writeCredentials seeds a freshly created session with the box's saved agent
+// login (e.g. ~/.claude): each file is written as root, then handed to the login
+// user since the agent runs as that user and refreshes the token in place.
+// Best-effort - a bad credential logs and is skipped rather than blocking boot.
+func writeCredentials(creds []guestproto.CredentialFile) {
+	if len(creds) == 0 {
+		return
+	}
+	lu := lookupLoginUser()
+	for _, c := range creds {
+		if !filepath.IsAbs(c.Path) {
+			fmt.Fprintf(os.Stderr, "fletcher-guest: skip non-absolute credential path %q\n", c.Path)
+			continue
+		}
+		if err := writeCredentialFile(c, lu); err != nil {
+			fmt.Fprintf(os.Stderr, "fletcher-guest: seed credential %s: %v\n", c.Path, err)
+		}
+	}
+}
+
+// writeCredentialFile writes one seeded credential file and gives it (and the
+// credential directories under the user's home) to the login user.
+func writeCredentialFile(c guestproto.CredentialFile, lu loginUser) error {
+	mode := os.FileMode(c.Mode)
+	if mode == 0 {
+		mode = 0o600
+	}
+	dir := filepath.Dir(c.Path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(c.Path, c.Data, mode); err != nil {
+		return err
+	}
+	if lu.ok {
+		_ = os.Chown(c.Path, int(lu.uid), int(lu.gid))
+		// Hand the credential directories (which MkdirAll may have created
+		// root-owned) up to but not including the home to the login user, so the
+		// agent can refresh tokens in place.
+		for d := dir; d != lu.home && d != "/" && d != "." && strings.HasPrefix(d, lu.home); d = filepath.Dir(d) {
+			_ = os.Chown(d, int(lu.uid), int(lu.gid))
+		}
+	}
+	return nil
 }
 
 // startForwards launches a TCP->vsock relay for each forward. The agent inside
