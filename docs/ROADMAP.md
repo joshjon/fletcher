@@ -1473,6 +1473,15 @@ Verified end to end: logged into a session, `credential save claude
 --from-session`, then a new `--credential claude` session booted with the saved
 token and settings intact.
 
+**Gotcha: Claude Code's login is split across two paths (fixed 2026-06-12).**
+Seeding `~/.claude/` alone left a session re-prompting for login: Claude keeps its
+OAuth tokens in `~/.claude/.credentials.json` but its account/onboarding state in
+`~/.claude.json` - a sibling *file* the base image pre-creates (with the MCP
+config), so the seed delivered the token but a login-less `~/.claude.json` shadowed
+it. `AllowedCredential` grew `SiblingFiles` (claude: `.claude.json`); the session
+save/seed paths carry them (the job bind-mount path is unchanged). Verified the
+file flows save -> master -> seeded session.
+
 **Still to do (the surface).**
 
 - iOS: a credential picker on the create sheet (sends `credentials`), and a "use

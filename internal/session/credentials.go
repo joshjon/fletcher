@@ -33,12 +33,16 @@ func (m *Manager) ExportCredential(ctx context.Context, ref, name string) error 
 	if root == "" {
 		return errs.New(errs.CategoryFailedPrecondition, "the daemon has no credentials root configured")
 	}
-	// GuestPath = <home>/<HostRelPath>; tar the relpath from the home so the
-	// archive entries match the host layout under the credentials root.
+	// GuestPath = <home>/<HostRelPath>; tar the relpath (and any sibling files
+	// like ~/.claude.json) from the home so the archive entries match the host
+	// layout under the credentials root. --ignore-failed-read so an absent
+	// sibling still saves what is present.
 	home := strings.TrimSuffix(spec.GuestPath, "/"+spec.HostRelPath)
+	paths := append([]string{spec.HostRelPath}, spec.SiblingFiles...)
 	// `test -e <dir> && tar ... | base64`: a missing login short-circuits to a
 	// non-zero exit so we report "log in first" instead of writing an empty dir.
-	cmd := fmt.Sprintf("test -e %s && tar -cz -C %s %s | base64 -w0", spec.GuestPath, home, spec.HostRelPath)
+	cmd := fmt.Sprintf("test -e %s && tar -cz --ignore-failed-read -C %s %s | base64 -w0",
+		spec.GuestPath, home, strings.Join(paths, " "))
 	res, err := m.Exec(ctx, ref, cmd)
 	if err != nil {
 		return err

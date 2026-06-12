@@ -30,15 +30,24 @@ type AllowedCredential struct {
 	// GuestPath is the fixed mount point inside the fletcher-base image,
 	// matching the paths the bundled agent CLIs read by default.
 	GuestPath string
+	// SiblingFiles are extra home-relative files (not under HostRelPath) that an
+	// agent's login also needs. Claude Code splits its state between ~/.claude/
+	// (tokens) and ~/.claude.json (account, onboarding), so seeding the dir alone
+	// leaves a session re-prompting for login. Session seed/export carry these;
+	// the job bind-mount path (HostRelPath only) does not.
+	SiblingFiles []string
 }
+
+// homeRel is the login user's home, the root SiblingFiles and GuestPath share.
+const homeRel = "/home/fletcher"
 
 // AllowedCredentials lists every credential the trusted-credential mode
 // supports. The supervisor resolves names → AllowedCredential entries at
 // job-start time.
 var AllowedCredentials = map[string]AllowedCredential{
-	CredentialClaude: {Name: CredentialClaude, HostRelPath: ".claude", GuestPath: "/home/fletcher/.claude"},
-	CredentialCodex:  {Name: CredentialCodex, HostRelPath: ".codex", GuestPath: "/home/fletcher/.codex"},
-	CredentialGemini: {Name: CredentialGemini, HostRelPath: ".config/gemini", GuestPath: "/home/fletcher/.config/gemini"},
+	CredentialClaude: {Name: CredentialClaude, HostRelPath: ".claude", GuestPath: homeRel + "/.claude", SiblingFiles: []string{".claude.json"}},
+	CredentialCodex:  {Name: CredentialCodex, HostRelPath: ".codex", GuestPath: homeRel + "/.codex"},
+	CredentialGemini: {Name: CredentialGemini, HostRelPath: ".config/gemini", GuestPath: homeRel + "/.config/gemini"},
 }
 
 // SavedCredentials lists the credential names that have files saved under root
@@ -109,48 +118,79 @@ func ResolveCredentialFiles(root string, names []string) ([]runtime.CredentialFi
 		if !ok {
 			return nil, errs.Newf(errs.CategoryInvalidArgument, "unknown credential %q (allowed: %s)", name, allowedCredentialNames())
 		}
-		base := filepath.Join(root, spec.HostRelPath)
-		info, err := os.Stat(base)
+		files, err := resolveOneCredential(root, spec)
 		if err != nil {
-			return nil, errs.Newf(errs.CategoryFailedPrecondition,
-				"credential %q not found at %s (save it with `fletcher credential import %s`)", name, base, name)
+			return nil, err
 		}
-		if !info.IsDir() {
-			return nil, fmt.Errorf("credential %q: host path %s is not a directory", name, base)
-		}
-		walkErr := filepath.WalkDir(base, func(p string, d fs.DirEntry, werr error) error {
-			if werr != nil {
-				return werr
-			}
-			// Skip directories and anything that is not a regular file (sockets,
-			// symlinks): only real credential files are seeded.
-			if d.IsDir() || !d.Type().IsRegular() {
-				return nil
-			}
-			rel, err := filepath.Rel(base, p)
-			if err != nil {
-				return err
-			}
-			data, err := os.ReadFile(p) //nolint:gosec // p is under the daemon-owned credentials root
-			if err != nil {
-				return err
-			}
-			fi, err := d.Info()
-			if err != nil {
-				return err
-			}
-			out = append(out, runtime.CredentialFile{
-				Path: path.Join(spec.GuestPath, filepath.ToSlash(rel)),
-				Mode: uint32(fi.Mode().Perm()),
-				Data: data,
-			})
-			return nil
-		})
-		if walkErr != nil {
-			return nil, fmt.Errorf("credential %q: read %s: %w", name, base, walkErr)
-		}
+		out = append(out, files...)
 	}
 	return out, nil
+}
+
+// resolveOneCredential reads one credential's directory (and any sibling files)
+// under root into seedable files.
+func resolveOneCredential(root string, spec AllowedCredential) ([]runtime.CredentialFile, error) {
+	base := filepath.Join(root, spec.HostRelPath)
+	info, err := os.Stat(base)
+	if err != nil {
+		return nil, errs.Newf(errs.CategoryFailedPrecondition,
+			"credential %q not found at %s (save it with `fletcher credential save %s`)", spec.Name, base, spec.Name)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("credential %q: host path %s is not a directory", spec.Name, base)
+	}
+	out, err := walkCredentialDir(base, spec.GuestPath)
+	if err != nil {
+		return nil, fmt.Errorf("credential %q: read %s: %w", spec.Name, base, err)
+	}
+	// Sibling files (e.g. ~/.claude.json) live next to the dir, not under it.
+	// Skip any that are absent so a partial login still seeds what it has.
+	for _, rel := range spec.SiblingFiles {
+		src := filepath.Join(root, rel)
+		data, err := os.ReadFile(src) //nolint:gosec // src is under the daemon-owned credentials root
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("credential %q: read %s: %w", spec.Name, src, err)
+		}
+		out = append(out, runtime.CredentialFile{Path: path.Join(homeRel, filepath.ToSlash(rel)), Mode: 0o600, Data: data})
+	}
+	return out, nil
+}
+
+// walkCredentialDir reads every regular file under base into a CredentialFile
+// rooted at guestPath, preserving each file's permission bits.
+func walkCredentialDir(base, guestPath string) ([]runtime.CredentialFile, error) {
+	var out []runtime.CredentialFile
+	err := filepath.WalkDir(base, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		// Skip directories and anything not a regular file (sockets, symlinks).
+		if d.IsDir() || !d.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(base, p)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(p) //nolint:gosec // p is under the daemon-owned credentials root
+		if err != nil {
+			return err
+		}
+		fi, err := d.Info()
+		if err != nil {
+			return err
+		}
+		out = append(out, runtime.CredentialFile{
+			Path: path.Join(guestPath, filepath.ToSlash(rel)),
+			Mode: uint32(fi.Mode().Perm()),
+			Data: data,
+		})
+		return nil
+	})
+	return out, err
 }
 
 // ValidateCredentialNames checks each name against AllowedCredentials, returning
