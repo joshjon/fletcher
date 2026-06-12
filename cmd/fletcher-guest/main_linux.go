@@ -420,16 +420,16 @@ func loadAvg1() float64 {
 	return v
 }
 
-// runShell opens a PTY running a login shell and bridges it to the host over
-// conn: the guest streams terminal output back as KindStdout frames while
-// reading KindStdin/KindResize frames from the host. It returns when the shell
-// exits (user typed exit) or the host closes the connection (client detached).
+// runShell opens a PTY running the durable session shell and bridges it to the
+// host over conn: the guest streams terminal output back as KindStdout frames
+// while reading KindStdin/KindResize frames from the host. It returns when the
+// shell exits (user typed exit) or the host closes the connection (client
+// detached). When tmux is present the PTY backs a tmux client, so a detach
+// leaves the shell - and any agent running in it - alive to reattach; see
+// shellCommand.
 func runShell(conn net.Conn, spec guestproto.ShellSpec) {
 	lu := lookupLoginUser()
-	shell := loginShell()
-	cmd := exec.CommandContext(context.Background(), shell, "-l") //nolint:gosec // launching a shell is the entire purpose
-	cmd.Dir = shellDir()
-	cmd.Env = shellEnv(spec, lu)
+	cmd := shellCommand(spec, lu)
 	applyLoginUser(cmd, lu) // before pty.Start, which augments SysProcAttr
 
 	ptmx, err := pty.Start(cmd)
@@ -486,6 +486,65 @@ func runShell(conn net.Conn, spec guestproto.ShellSpec) {
 	code := waitCode(cmd)
 	<-outDone                                                             // drain any output the shell wrote on its way out
 	_ = fc.write(guestproto.KindExit, guestproto.EncodeExit(int32(code))) //nolint:gosec // exit codes are 0-255
+}
+
+const (
+	// tmuxSocket names the per-VM tmux server's socket (-L); a fixed name means
+	// every attach reaches the same server. tmuxSession is the single durable
+	// session every shell attaches to.
+	tmuxSocket  = "fletcher"
+	tmuxSession = "main"
+)
+
+// shellCommand builds the interactive shell process. When tmux is on PATH it
+// attaches to (or creates) one durable session per VM, so the REPL survives a
+// client detach: the host PTY backs a tmux client, and hanging up the
+// connection detaches that client rather than killing the shell - the server
+// and its windows keep running in the VM until the session is stopped. Without
+// tmux it falls back to a plain login shell whose lifetime is the connection
+// (the pre-durability behaviour, kept for a minimal rootfs and the mock
+// driver). Either way cmd carries the login user's env and start directory; the
+// caller applies the login-user credential before pty.Start.
+func shellCommand(spec guestproto.ShellSpec, lu loginUser) *exec.Cmd {
+	shell := loginShell()
+	dir := shellDir()
+
+	var cmd *exec.Cmd
+	if tmux, ok := tmuxPath(); ok {
+		// new-session -A attaches to tmuxSession when it exists, else creates it
+		// in dir running `shell -l`. The trailing command is ignored on attach,
+		// so a reattach lands in the existing session untouched.
+		// -u forces UTF-8 I/O: tmux interprets the byte stream (unlike the old
+		// raw-passthrough shell), so without this it splits multibyte runes and
+		// miscounts cell widths, mangling rich TUIs like Claude Code. The env
+		// also carries a UTF-8 LANG so the inner programs agree (see withDefaults).
+		cmd = exec.CommandContext(context.Background(), tmux, //nolint:gosec // launching the user's shell is the entire purpose
+			"-u", "-L", tmuxSocket,
+			"new-session", "-A", "-s", tmuxSession, "-c", dir,
+			shell, "-l")
+	} else {
+		cmd = exec.CommandContext(context.Background(), shell, "-l") //nolint:gosec // launching a shell is the entire purpose
+	}
+	cmd.Dir = dir
+	cmd.Env = shellEnv(spec, lu)
+	return cmd
+}
+
+// tmuxPath resolves the tmux binary. PID 1 boots with an empty environment, so
+// exec.LookPath (which consults $PATH) usually fails in the guest; fall back to
+// the absolute paths a packaged tmux installs to. Returns ok=false when tmux is
+// genuinely absent (minimal rootfs, mock driver), so the caller runs a bare
+// login shell.
+func tmuxPath() (string, bool) {
+	if p, err := exec.LookPath("tmux"); err == nil {
+		return p, true
+	}
+	for _, p := range []string{"/usr/bin/tmux", "/bin/tmux", "/usr/local/bin/tmux"} {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p, true
+		}
+	}
+	return "", false
 }
 
 // loginShell prefers bash, falling back to sh on a minimal rootfs.
@@ -720,6 +779,11 @@ func withDefaults(env []string, lu loginUser) []string {
 	}
 	if !hasKey(out, "USER") {
 		out = append(out, "USER="+name)
+	}
+	if !hasKey(out, "LANG") {
+		// A UTF-8 locale so tmux and the agent TUIs compute character widths
+		// correctly. C.UTF-8 is built into glibc, so no locale-gen is needed.
+		out = append(out, "LANG=C.UTF-8")
 	}
 	return out
 }

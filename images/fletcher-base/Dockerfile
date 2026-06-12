@@ -29,7 +29,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Base packages: dev essentials, systemd, wireguard-tools.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget gnupg \
-        git gh jq ripgrep vim less \
+        git gh jq ripgrep vim less tmux \
         build-essential pkg-config \
         python3 python3-pip python-is-python3 pipx \
         sqlite3 \
@@ -42,6 +42,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Never bake SSH host keys; the VM generates its own on first boot.
 RUN rm -f /etc/ssh/ssh_host_*_key*
+
+# Durable interactive shells: the guest wraps the session shell in tmux so a
+# client detach (app backgrounded, navigated away, tunnel dropped) leaves the
+# REPL - and any agent running in it - alive to reattach. This config keeps tmux
+# invisible (no status bar) with generous scrollback. See cmd/fletcher-guest
+# runShell.
+COPY tmux.conf /etc/tmux.conf
 
 # Latest Go from go.dev (apt's golang-go lags behind).
 RUN ARCH=$(dpkg --print-architecture) && \

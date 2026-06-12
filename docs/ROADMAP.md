@@ -808,8 +808,10 @@ M6 already expose; the app consumes the daemon, it does not extend it:
    > `pairing_tls_fingerprint`, plumbed into the pairing blob.
 2. **In-app terminal (the hero interaction).** A SwiftUI terminal over
    `ShellSession`: attach to a session, run `claude`, detach and reattach.
-   Backgrounding the app never kills the session - durability is server-side
-   (M6), which is the whole point. This is the demo.
+   Backgrounding the app never kills the *session* - disk durability is
+   server-side (M6). Note: the original M7 framing overstated this as REPL
+   durability too; the interactive shell was in fact per-connection until
+   **M15** made it durable (tmux in the guest). This is the demo.
 3. **Approvals + APNs push.** Promote APNs from the backlog: the daemon pushes a
    `pending_approval` to the device; the app approves / denies, resolving the row.
    Polling is the fallback until this lands.
@@ -838,7 +840,8 @@ M6 already expose; the app consumes the daemon, it does not extend it:
   `ShellSession` cleanly; the gRPC-Web surface is the fallback if not.
 - **iOS backgrounding** truncates long-lived streams - acceptable by design: the
   session is durable server-side, so the app detaches and reattaches rather than
-  holding the stream open.
+  holding the stream open. (The *shell* behind that stream is only durable as of
+  M15; before it, a reattach got a fresh shell.)
 - **APNs** needs an Apple developer account + push setup; the push goes through
   Apple's push service (the accepted transport in §5), not infrastructure we
   operate, so it stays on-thesis.
@@ -1337,6 +1340,87 @@ operator's `.p8` key + a device to observe.
 - Cut from the sketch: a "deploy went live" push - deploys are
   operator-initiated from the phone, so the operator is already looking at
   the result; crash-looping is the signal that matters.
+
+### Milestone 15 - durable REPL (tmux-backed shell) - DONE (verified on hardware 2026-06-12)
+
+**Goal.** Close the gap between *session* durability and *REPL* durability. M6
+made the session (microVM + fork disk) durable, and M7 leaned on that for the
+in-app terminal - but the interactive shell was never durable. The guest's
+`runShell` spawned a bare `bash -l` whose lifetime equalled the vsock
+connection; on a client detach (app backgrounded, navigated away, tunnel
+dropped) the guest closed the PTY, SIGHUP killed the shell, and the foreground
+agent (`claude`) died with it. Reattaching got a fresh shell. Nothing replayed
+scrollback despite an iOS comment claiming the daemon did. So "background the
+app, come back where you left off" did not hold for the REPL, only for files on
+disk.
+
+**Approach - a multiplexer in the guest, not a hand-rolled PTY registry.** The
+guest now attaches every interactive shell to one persistent **tmux** session
+per VM (`tmux -L fletcher new-session -A -s main`). The host PTY backs a tmux
+*client*; hanging up the connection detaches that client, and the tmux server +
+its windows (the running agent, scrollback, TUI state) keep running in the VM.
+Reattach is lossless: tmux redraws the current screen. Chosen over building an
+in-guest PTY registry + scrollback ring + resize bookkeeping in Go because tmux
+already does all of it correctly; it is a ~tiny dependency that runs entirely
+inside the VM on metal the user owns (on-thesis, hosts nothing), and it is
+*genuinely* server-side durability, not a client-side fake.
+
+**Shipped.**
+
+- **Guest** (`cmd/fletcher-guest` `runShell` -> new `shellCommand`): tmux
+  attach-or-create, preserving the login user's credential, env, and start
+  directory. Falls back to a plain `bash -l` when tmux is absent (minimal
+  rootfs, mock driver) - the pre-durability behaviour. No proto or daemon
+  change: the session `ref` already keys durability, so it falls out of the
+  guest change. (Future option, not built: a `window` field on `ShellStart`
+  for multiple named shells per session.)
+- **Base image** (`images/fletcher-base`): `tmux` added; an invisible-wrapper
+  `/etc/tmux.conf` (no status bar, 50k-line scrollback, snappy ESC,
+  screen-256color). *Requires an image rebuild to take effect.*
+- **iOS** (`fletcher-ios` `TerminalSession.swift`): corrected the inaccurate
+  "daemon replays recent scrollback" comments to describe the real mechanism
+  (the in-VM tmux session holds state; reattach redraws). The resume-time RIS
+  reset is kept and is now meaningful - tmux genuinely redraws, so the reset
+  stops the redraw duplicating what was on screen.
+
+**Interaction with the idle reaper + hibernate (no change needed, composes
+cleanly).** A detached tmux with an idle shell contributes ~0 to the guest load
+average, so the M14-era reaper still hibernates the VM after the idle timeout
+(default 30 min) and reclaims host RAM - tmux does not pin the VM open. And
+because stop/idle-stop hibernate via a Firecracker *memory* snapshot, the warm
+reattach restores the live tmux + agent exactly as they were. The cold floor is
+unchanged: if the memory snapshot is unavailable (best-effort per the thesis,
+not load-bearing), the VM boots from the durable fork - tmux is gone, but files
+and the agent's on-disk conversation history survive, so `claude --continue`
+resumes. tmux makes the warm and hibernated paths lossless; the fork disk is the
+floor either way.
+
+**Behaviour change (intended).** One durable shell per session, shared across
+attaches (two clients see the same screen) - which is exactly what durability
+requires. Typing `exit` ends the session; the next attach starts fresh.
+
+**Gotcha found + fixed in verification.** The guest's PID 1 boots with an empty
+environment, so `exec.LookPath("tmux")` (which consults `$PATH`) failed in the
+guest and `shellCommand` silently took the bare-shell fallback - no durability,
+even with tmux installed. `tmuxPath` now resolves the binary by absolute path
+(`/usr/bin/tmux` et al.), not `$PATH`. Same root cause as the M12-era "PID 1
+boots with an empty environment" note - worth remembering for any guest code
+that shells out to a packaged tool.
+
+**Second gotcha: UTF-8.** The old bare-shell path streamed raw bytes to the
+client, which decoded UTF-8 itself. tmux *interprets* the stream, so without a
+UTF-8 locale it split multibyte runes and miscounted cell widths - rich TUIs
+(Claude Code) rendered garbled and misaligned. Fixed by running tmux with `-u`
+and defaulting `LANG=C.UTF-8` in the guest env (`withDefaults`), so tmux and the
+inner programs agree. Verified: `#{client_utf8}` is 1 and capture-pane preserves
+box-drawing/accented glyphs intact.
+
+**Verified on hardware 2026-06-12.** Re-imported `fletcher-base`, created a
+session, attached a shell (confirmed `$TMUX` set), recorded the shell PID,
+detached without `exit`, and reattached: the same PID came back under the same
+tmux server, and tmux redrew the prior screen. Still worth an interactive pass
+from the app (background mid-`claude`, reattach) and a confirmation that an idle
+session still hibernates and warm-restores.
 
 ## Toward v1 - hardening (in progress)
 
