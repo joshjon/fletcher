@@ -29,6 +29,10 @@ func (m *Manager) ExportCredential(ctx context.Context, ref, name string) error 
 		return errs.Newf(errs.CategoryInvalidArgument, "unknown credential %q (allowed: %s)",
 			name, strings.Join(job.CredentialNames(), ", "))
 	}
+	if !spec.FromSession {
+		return errs.Newf(errs.CategoryInvalidArgument,
+			"credential %q is not saved from a session - save it from its own form instead", name)
+	}
 	root := m.opt().CredentialsRoot
 	if root == "" {
 		return errs.New(errs.CategoryFailedPrecondition, "the daemon has no credentials root configured")
@@ -67,11 +71,20 @@ func (m *Manager) SavedCredentials() []string {
 	return job.SavedCredentials(m.opt().CredentialsRoot)
 }
 
-// SupportedCredentials lists every agent whose login can be saved/seeded (the
-// catalog), so clients drive their picker from this rather than a hardcoded
-// list that drifts from what the image ships.
+// SupportedCredentials lists every agent whose login can be saved out of a
+// running session (the catalog), so clients drive their "save login from a
+// session" picker from this rather than a hardcoded list that drifts from what
+// the image ships. The git login is excluded - it is saved via SaveGitCredential.
 func (m *Manager) SupportedCredentials() []string {
-	return job.CredentialNames()
+	return job.SessionLoginNames()
+}
+
+// SaveGitCredential saves a git host login (host + username + token, plus an
+// optional committer identity) under the box's credentials root, so new
+// sessions seeded with the "git" credential clone over HTTPS. No running
+// session is needed - the credential is built from the given fields.
+func (m *Manager) SaveGitCredential(host, username, token, gitName, gitEmail string) error {
+	return job.WriteGitCredential(m.opt().CredentialsRoot, host, username, token, gitName, gitEmail)
 }
 
 // DeleteSavedCredential removes a saved login from the credentials root.

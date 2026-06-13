@@ -14,6 +14,7 @@ import (
 // the saved ones (and which agents are supported), and delete one.
 type CredentialsBackend interface {
 	ExportCredential(ctx context.Context, ref, name string) error
+	SaveGitCredential(host, username, token, gitName, gitEmail string) error
 	SavedCredentials() []string
 	SupportedCredentials() []string
 	DeleteSavedCredential(name string) error
@@ -37,6 +38,19 @@ func (s *CredentialsService) SaveSessionLogin(ctx context.Context, req *connect.
 		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.SaveSessionLoginResponse{}), nil
+}
+
+// SaveGitCredential saves a git host login (host + username + token) into the
+// box's saved logins from structured fields, so new sessions seeded with the
+// "git" credential can clone over HTTPS.
+func (s *CredentialsService) SaveGitCredential(_ context.Context, req *connect.Request[fletcherv1.SaveGitCredentialRequest]) (*connect.Response[fletcherv1.SaveGitCredentialResponse], error) {
+	if err := s.backend.SaveGitCredential(
+		req.Msg.GetHost(), req.Msg.GetUsername(), req.Msg.GetToken(),
+		req.Msg.GetGitUserName(), req.Msg.GetGitUserEmail(),
+	); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.SaveGitCredentialResponse{}), nil
 }
 
 // ListCredentials returns the box's saved logins and every agent whose login

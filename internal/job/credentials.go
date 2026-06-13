@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/joshjon/fletcher/internal/errs"
 	"github.com/joshjon/fletcher/internal/runtime"
@@ -19,6 +21,10 @@ const (
 	CredentialCodex  = "codex"
 	CredentialPi     = "pi"
 	CredentialGemini = "gemini"
+	// CredentialGit is the vendor-neutral git HTTPS login (host + username +
+	// token). Unlike the agents it is saved from structured fields, not by
+	// exporting a session - see WriteGitCredential.
+	CredentialGit = "git"
 )
 
 // AllowedCredential describes one mountable credential directory.
@@ -37,6 +43,12 @@ type AllowedCredential struct {
 	// leaves a session re-prompting for login. Session seed/export carry these;
 	// the job bind-mount path (HostRelPath only) does not.
 	SiblingFiles []string
+	// FromSession marks a login saved by exporting it out of a running session
+	// (the agent flow: log in interactively, then save). Logins populated another
+	// way - git, written from structured fields via WriteGitCredential - set this
+	// false so they are not offered in the "save login from a session" picker.
+	// They still seed into new sessions and list among the saved logins.
+	FromSession bool
 }
 
 // homeRel is the login user's home, the root SiblingFiles and GuestPath share.
@@ -46,10 +58,14 @@ const homeRel = "/home/fletcher"
 // supports. The supervisor resolves names → AllowedCredential entries at
 // job-start time.
 var AllowedCredentials = map[string]AllowedCredential{
-	CredentialClaude: {Name: CredentialClaude, HostRelPath: ".claude", GuestPath: homeRel + "/.claude", SiblingFiles: []string{".claude.json"}},
-	CredentialCodex:  {Name: CredentialCodex, HostRelPath: ".codex", GuestPath: homeRel + "/.codex"},
-	CredentialPi:     {Name: CredentialPi, HostRelPath: ".pi", GuestPath: homeRel + "/.pi"},
-	CredentialGemini: {Name: CredentialGemini, HostRelPath: ".gemini", GuestPath: homeRel + "/.gemini"},
+	CredentialClaude: {Name: CredentialClaude, HostRelPath: ".claude", GuestPath: homeRel + "/.claude", SiblingFiles: []string{".claude.json"}, FromSession: true},
+	CredentialCodex:  {Name: CredentialCodex, HostRelPath: ".codex", GuestPath: homeRel + "/.codex", FromSession: true},
+	CredentialPi:     {Name: CredentialPi, HostRelPath: ".pi", GuestPath: homeRel + "/.pi", FromSession: true},
+	CredentialGemini: {Name: CredentialGemini, HostRelPath: ".gemini", GuestPath: homeRel + "/.gemini", FromSession: true},
+	// git is one self-contained XDG dir: a `credentials` file (one
+	// https://user:token@host line per host) and a `config` file (store helper +
+	// committer identity). No SiblingFiles, FromSession false (saved via the form).
+	CredentialGit: {Name: CredentialGit, HostRelPath: ".config/git", GuestPath: homeRel + "/.config/git"},
 }
 
 // SavedCredentials lists the credential names that have files saved under root
@@ -89,11 +105,143 @@ func Credential(name string) (AllowedCredential, bool) {
 	return c, ok
 }
 
+// WriteGitCredential saves a git host login under the box's credentials root as
+// the vendor-neutral "git" credential, so a session seeded with it clones over
+// HTTPS with no prompt. It writes git's XDG config dir (~/.config/git): a
+// `credentials` file holding one `https://user:token@host` line per host
+// (git-credential-store's default search path) and a `config` file enabling
+// that store helper plus any committer identity. Call once per host - an
+// existing line for the same host is replaced and other hosts are kept, so
+// github.com and gitlab.com coexist. A blank name/email leaves any previously
+// saved identity untouched.
+func WriteGitCredential(root, host, username, token, gitName, gitEmail string) error {
+	if root == "" {
+		return errs.New(errs.CategoryFailedPrecondition, "the daemon has no credentials root configured")
+	}
+	host = strings.TrimSpace(host)
+	username = strings.TrimSpace(username)
+	token = strings.TrimSpace(token)
+	if host == "" || username == "" || token == "" {
+		return errs.New(errs.CategoryInvalidArgument, "git credential needs a host, username, and token")
+	}
+	// host matches the store by scheme+host, so a scheme or path here would never
+	// match a clone URL - reject it rather than silently never authenticating.
+	if strings.Contains(host, "://") || strings.ContainsAny(host, "/@ ") {
+		return errs.Newf(errs.CategoryInvalidArgument,
+			"git host %q must be a bare hostname like github.com (no scheme, no path)", host)
+	}
+	dir := filepath.Join(root, ".config", "git")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create git credential dir: %w", err)
+	}
+	if err := upsertGitCredentialLine(filepath.Join(dir, "credentials"), host, username, token); err != nil {
+		return fmt.Errorf("write git credentials: %w", err)
+	}
+	if err := writeGitConfig(filepath.Join(dir, "config"), gitName, gitEmail); err != nil {
+		return fmt.Errorf("write git config: %w", err)
+	}
+	return nil
+}
+
+// upsertGitCredentialLine writes the store line for host into path, replacing
+// any existing line for the same host and keeping the rest. url.UserPassword
+// percent-encodes the credentials, which git-credential-store decodes on read.
+func upsertGitCredentialLine(path, host, username, token string) error {
+	line := (&url.URL{Scheme: "https", User: url.UserPassword(username, token), Host: host}).String()
+	var kept []string
+	switch data, err := os.ReadFile(path); { //nolint:gosec // path is under the daemon-owned credentials root
+	case err == nil:
+		for _, l := range strings.Split(string(data), "\n") {
+			if l = strings.TrimSpace(l); l == "" {
+				continue
+			}
+			if u, perr := url.Parse(l); perr == nil && u.Host == host {
+				continue // replaced by the new line below
+			}
+			kept = append(kept, l)
+		}
+	case !os.IsNotExist(err):
+		return err
+	}
+	kept = append(kept, line)
+	//nolint:gosec // path is the daemon-owned credentials file, not user input
+	return os.WriteFile(path, []byte(strings.Join(kept, "\n")+"\n"), 0o600)
+}
+
+// gitIdentity is the committer name/email writeGitConfig manages under [user].
+type gitIdentity struct{ name, email string }
+
+// writeGitConfig writes ~/.config/git/config enabling the credential store
+// helper and, when set, the committer identity. A blank name/email is filled
+// from the existing file so saving a second host does not wipe the identity.
+func writeGitConfig(path, name, email string) error {
+	cur := readGitIdentity(path)
+	if name == "" {
+		name = cur.name
+	}
+	if email == "" {
+		email = cur.email
+	}
+	var b strings.Builder
+	b.WriteString("[credential]\n\thelper = store\n")
+	if name != "" || email != "" {
+		b.WriteString("[user]\n")
+		if name != "" {
+			fmt.Fprintf(&b, "\tname = %s\n", name)
+		}
+		if email != "" {
+			fmt.Fprintf(&b, "\temail = %s\n", email)
+		}
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o600)
+}
+
+// readGitIdentity recovers the user.name / user.email that writeGitConfig
+// previously wrote. It only understands the shape writeGitConfig emits
+// (tab-indented `name = ` / `email = ` under [user]); this package fully owns
+// the file, so anything else is safe to ignore.
+func readGitIdentity(path string) gitIdentity {
+	data, err := os.ReadFile(path) //nolint:gosec // path is under the daemon-owned credentials root
+	if err != nil {
+		return gitIdentity{}
+	}
+	var id gitIdentity
+	inUser := false
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		switch {
+		case line == "[user]":
+			inUser = true
+		case strings.HasPrefix(line, "["):
+			inUser = false
+		case inUser && strings.HasPrefix(line, "name ="):
+			id.name = strings.TrimSpace(strings.TrimPrefix(line, "name ="))
+		case inUser && strings.HasPrefix(line, "email ="):
+			id.email = strings.TrimSpace(strings.TrimPrefix(line, "email ="))
+		}
+	}
+	return id
+}
+
 // CredentialNames returns every supported credential name, sorted.
 func CredentialNames() []string {
 	names := make([]string, 0, len(AllowedCredentials))
 	for name := range AllowedCredentials {
 		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// SessionLoginNames returns the logins saved by exporting a running session
+// (the agent logins), sorted. Clients drive their "save login from a session"
+// picker from this; git, saved from structured fields, is excluded.
+func SessionLoginNames() []string {
+	var names []string
+	for name, spec := range AllowedCredentials {
+		if spec.FromSession {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	return names

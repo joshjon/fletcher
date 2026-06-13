@@ -89,12 +89,16 @@ RUN useradd --create-home --shell /bin/bash --uid 1000 fletcher && \
 # Rootfs auto-grows on first boot.
 RUN echo '/dev/vda / ext4 defaults,x-systemd.growfs 0 1' > /etc/fstab
 
-# Workspace mount point and agent config dirs (Phase 12 bind-mount targets).
+# Workspace mount point and login config dirs (seed/bind-mount targets). The
+# git dir holds a seeded HTTPS credential: git reads ~/.config/git/config (XDG)
+# natively and git-credential-store searches ~/.config/git/credentials by
+# default, so a session seeded with the "git" login clones with no extra setup.
 RUN mkdir -p /workspace \
             /home/fletcher/.claude \
             /home/fletcher/.codex \
             /home/fletcher/.pi \
-            /home/fletcher/.gemini && \
+            /home/fletcher/.gemini \
+            /home/fletcher/.config/git && \
     chown -R fletcher:fletcher /workspace /home/fletcher
 
 # Single AGENTS.md, symlinked into each agent's expected location.

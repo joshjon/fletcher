@@ -36,6 +36,9 @@ const (
 	// CredentialServiceSaveSessionLoginProcedure is the fully-qualified name of the CredentialService's
 	// SaveSessionLogin RPC.
 	CredentialServiceSaveSessionLoginProcedure = "/fletcher.v1.CredentialService/SaveSessionLogin"
+	// CredentialServiceSaveGitCredentialProcedure is the fully-qualified name of the
+	// CredentialService's SaveGitCredential RPC.
+	CredentialServiceSaveGitCredentialProcedure = "/fletcher.v1.CredentialService/SaveGitCredential"
 	// CredentialServiceListCredentialsProcedure is the fully-qualified name of the CredentialService's
 	// ListCredentials RPC.
 	CredentialServiceListCredentialsProcedure = "/fletcher.v1.CredentialService/ListCredentials"
@@ -50,6 +53,12 @@ type CredentialServiceClient interface {
 	// operator logged in interactively) into the box's saved logins, so future
 	// sessions can be seeded with it.
 	SaveSessionLogin(context.Context, *connect.Request[v1.SaveSessionLoginRequest]) (*connect.Response[v1.SaveSessionLoginResponse], error)
+	// SaveGitCredential saves a git host login (host + username + token, e.g. a
+	// GitHub or GitLab personal access token) from structured fields - no running
+	// session needed. A session seeded with the "git" credential then clones over
+	// HTTPS without prompting (subject to the egress policy reaching the host).
+	// Call once per host; several hosts coexist in the one "git" credential.
+	SaveGitCredential(context.Context, *connect.Request[v1.SaveGitCredentialRequest]) (*connect.Response[v1.SaveGitCredentialResponse], error)
 	// ListCredentials returns the names of the box's saved logins.
 	ListCredentials(context.Context, *connect.Request[v1.ListCredentialsRequest]) (*connect.Response[v1.ListCredentialsResponse], error)
 	// DeleteCredential removes a saved login.
@@ -73,6 +82,12 @@ func NewCredentialServiceClient(httpClient connect.HTTPClient, baseURL string, o
 			connect.WithSchema(credentialServiceMethods.ByName("SaveSessionLogin")),
 			connect.WithClientOptions(opts...),
 		),
+		saveGitCredential: connect.NewClient[v1.SaveGitCredentialRequest, v1.SaveGitCredentialResponse](
+			httpClient,
+			baseURL+CredentialServiceSaveGitCredentialProcedure,
+			connect.WithSchema(credentialServiceMethods.ByName("SaveGitCredential")),
+			connect.WithClientOptions(opts...),
+		),
 		listCredentials: connect.NewClient[v1.ListCredentialsRequest, v1.ListCredentialsResponse](
 			httpClient,
 			baseURL+CredentialServiceListCredentialsProcedure,
@@ -90,14 +105,20 @@ func NewCredentialServiceClient(httpClient connect.HTTPClient, baseURL string, o
 
 // credentialServiceClient implements CredentialServiceClient.
 type credentialServiceClient struct {
-	saveSessionLogin *connect.Client[v1.SaveSessionLoginRequest, v1.SaveSessionLoginResponse]
-	listCredentials  *connect.Client[v1.ListCredentialsRequest, v1.ListCredentialsResponse]
-	deleteCredential *connect.Client[v1.DeleteCredentialRequest, v1.DeleteCredentialResponse]
+	saveSessionLogin  *connect.Client[v1.SaveSessionLoginRequest, v1.SaveSessionLoginResponse]
+	saveGitCredential *connect.Client[v1.SaveGitCredentialRequest, v1.SaveGitCredentialResponse]
+	listCredentials   *connect.Client[v1.ListCredentialsRequest, v1.ListCredentialsResponse]
+	deleteCredential  *connect.Client[v1.DeleteCredentialRequest, v1.DeleteCredentialResponse]
 }
 
 // SaveSessionLogin calls fletcher.v1.CredentialService.SaveSessionLogin.
 func (c *credentialServiceClient) SaveSessionLogin(ctx context.Context, req *connect.Request[v1.SaveSessionLoginRequest]) (*connect.Response[v1.SaveSessionLoginResponse], error) {
 	return c.saveSessionLogin.CallUnary(ctx, req)
+}
+
+// SaveGitCredential calls fletcher.v1.CredentialService.SaveGitCredential.
+func (c *credentialServiceClient) SaveGitCredential(ctx context.Context, req *connect.Request[v1.SaveGitCredentialRequest]) (*connect.Response[v1.SaveGitCredentialResponse], error) {
+	return c.saveGitCredential.CallUnary(ctx, req)
 }
 
 // ListCredentials calls fletcher.v1.CredentialService.ListCredentials.
@@ -116,6 +137,12 @@ type CredentialServiceHandler interface {
 	// operator logged in interactively) into the box's saved logins, so future
 	// sessions can be seeded with it.
 	SaveSessionLogin(context.Context, *connect.Request[v1.SaveSessionLoginRequest]) (*connect.Response[v1.SaveSessionLoginResponse], error)
+	// SaveGitCredential saves a git host login (host + username + token, e.g. a
+	// GitHub or GitLab personal access token) from structured fields - no running
+	// session needed. A session seeded with the "git" credential then clones over
+	// HTTPS without prompting (subject to the egress policy reaching the host).
+	// Call once per host; several hosts coexist in the one "git" credential.
+	SaveGitCredential(context.Context, *connect.Request[v1.SaveGitCredentialRequest]) (*connect.Response[v1.SaveGitCredentialResponse], error)
 	// ListCredentials returns the names of the box's saved logins.
 	ListCredentials(context.Context, *connect.Request[v1.ListCredentialsRequest]) (*connect.Response[v1.ListCredentialsResponse], error)
 	// DeleteCredential removes a saved login.
@@ -135,6 +162,12 @@ func NewCredentialServiceHandler(svc CredentialServiceHandler, opts ...connect.H
 		connect.WithSchema(credentialServiceMethods.ByName("SaveSessionLogin")),
 		connect.WithHandlerOptions(opts...),
 	)
+	credentialServiceSaveGitCredentialHandler := connect.NewUnaryHandler(
+		CredentialServiceSaveGitCredentialProcedure,
+		svc.SaveGitCredential,
+		connect.WithSchema(credentialServiceMethods.ByName("SaveGitCredential")),
+		connect.WithHandlerOptions(opts...),
+	)
 	credentialServiceListCredentialsHandler := connect.NewUnaryHandler(
 		CredentialServiceListCredentialsProcedure,
 		svc.ListCredentials,
@@ -151,6 +184,8 @@ func NewCredentialServiceHandler(svc CredentialServiceHandler, opts ...connect.H
 		switch r.URL.Path {
 		case CredentialServiceSaveSessionLoginProcedure:
 			credentialServiceSaveSessionLoginHandler.ServeHTTP(w, r)
+		case CredentialServiceSaveGitCredentialProcedure:
+			credentialServiceSaveGitCredentialHandler.ServeHTTP(w, r)
 		case CredentialServiceListCredentialsProcedure:
 			credentialServiceListCredentialsHandler.ServeHTTP(w, r)
 		case CredentialServiceDeleteCredentialProcedure:
@@ -166,6 +201,10 @@ type UnimplementedCredentialServiceHandler struct{}
 
 func (UnimplementedCredentialServiceHandler) SaveSessionLogin(context.Context, *connect.Request[v1.SaveSessionLoginRequest]) (*connect.Response[v1.SaveSessionLoginResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.CredentialService.SaveSessionLogin is not implemented"))
+}
+
+func (UnimplementedCredentialServiceHandler) SaveGitCredential(context.Context, *connect.Request[v1.SaveGitCredentialRequest]) (*connect.Response[v1.SaveGitCredentialResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.CredentialService.SaveGitCredential is not implemented"))
 }
 
 func (UnimplementedCredentialServiceHandler) ListCredentials(context.Context, *connect.Request[v1.ListCredentialsRequest]) (*connect.Response[v1.ListCredentialsResponse], error) {

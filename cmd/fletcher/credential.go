@@ -16,9 +16,10 @@ import (
 func credentialCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "credential",
-		Usage: "save an agent login once and reuse it across sessions (claude | codex | gemini)",
+		Usage: "save a login once and reuse it across sessions (agent logins, or a git host login)",
 		Commands: []*cli.Command{
 			credentialSaveCmd(),
+			credentialGitCmd(),
 			credentialListCmd(),
 			credentialDeleteCmd(),
 		},
@@ -58,6 +59,37 @@ func credentialSaveCmd() *cli.Command {
 	}
 }
 
+func credentialGitCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "git",
+		Usage: "save a git host login (host + username + token) for cloning in new sessions",
+		Flags: []cli.Flag{
+			socketFlag(),
+			&cli.StringFlag{Name: "host", Usage: "git host (a bare hostname)", Value: "github.com"},
+			&cli.StringFlag{Name: "username", Usage: "account/login for the host", Required: true},
+			&cli.StringFlag{Name: "token", Usage: "password or personal access token", Required: true},
+			&cli.StringFlag{Name: "name", Usage: "committer name (git user.name)"},
+			&cli.StringFlag{Name: "email", Usage: "committer email (git user.email)"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			host := cmd.String("host")
+			client := newCredentialsClient(cmd)
+			_, err := client.SaveGitCredential(ctx, connect.NewRequest(&fletcherv1.SaveGitCredentialRequest{
+				Host:         host,
+				Username:     cmd.String("username"),
+				Token:        cmd.String("token"),
+				GitUserName:  cmd.String("name"),
+				GitUserEmail: cmd.String("email"),
+			}))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("saved git login for %s; create a session with `--credential git` and egress that reaches %s to clone\n", host, host)
+			return nil
+		},
+	}
+}
+
 func credentialListCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "list",
@@ -84,7 +116,7 @@ func credentialDeleteCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "rm",
 		Usage:     "remove a saved login",
-		ArgsUsage: "<claude|codex|gemini>",
+		ArgsUsage: "<claude|codex|gemini|pi|git>",
 		Flags:     []cli.Flag{socketFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			name := cmd.Args().First()

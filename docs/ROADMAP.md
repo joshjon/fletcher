@@ -1482,6 +1482,26 @@ it. `AllowedCredential` grew `SiblingFiles` (claude: `.claude.json`); the sessio
 save/seed paths carry them (the job bind-mount path is unchanged). Verified the
 file flows save -> master -> seeded session.
 
+**Git host login (vendor-neutral) - DONE.** The same seed model now carries a
+`git` credential so sessions can clone private repos over HTTPS - GitHub, GitLab,
+Bitbucket, or self-hosted, not just one vendor. It is one self-contained XDG dir
+(`~/.config/git`): a `credentials` file (one `https://user:token@host` line per
+host - git-credential-store's default search path) and a `config` file enabling
+that store helper plus the committer identity. The base image reads
+`~/.config/git/config` natively, so a seeded session clones with no extra setup.
+- `AllowedCredential` grew `FromSession` (false for git): git is *not* offered in
+  the "save login from a session" picker (`SupportedCredentials` =
+  `SessionLoginNames`), because it is saved from structured fields, not exported
+  from a session. It still seeds via `--credential git` and lists in `names`.
+- New `CredentialService.SaveGitCredential(host, username, token, git_user_name,
+  git_user_email)` + `job.WriteGitCredential`: upserts the host line (several
+  hosts coexist; a blank identity keeps the saved one). CLI `fletcher credential
+  git --host ... --username ... --token ...`.
+- Two dials stay independent: the credential lets a session authenticate, but the
+  egress policy must still reach the host (allowlist `github.com` etc. or `open`),
+  or the clone hangs. The token sits cleartext under the credentials root, the
+  same posture as the agent logins (the operator's own metal, root-owned 0600).
+
 **Still to do (the surface).**
 
 - iOS: a credential picker on the create sheet (sends `credentials`), and a "use
