@@ -11,10 +11,11 @@ import (
 
 // CredentialsBackend is what the CredentialService handler needs from the
 // session manager: save a session's login as a reusable box credential, list
-// the saved ones, and delete one.
+// the saved ones (and which agents are supported), and delete one.
 type CredentialsBackend interface {
 	ExportCredential(ctx context.Context, ref, name string) error
 	SavedCredentials() []string
+	SupportedCredentials() []string
 	DeleteSavedCredential(name string) error
 }
 
@@ -38,9 +39,13 @@ func (s *CredentialsService) SaveSessionLogin(ctx context.Context, req *connect.
 	return connect.NewResponse(&fletcherv1.SaveSessionLoginResponse{}), nil
 }
 
-// ListCredentials returns the names of the box's saved logins.
+// ListCredentials returns the box's saved logins and every agent whose login
+// can be saved (the agents that ship in the image).
 func (s *CredentialsService) ListCredentials(_ context.Context, _ *connect.Request[fletcherv1.ListCredentialsRequest]) (*connect.Response[fletcherv1.ListCredentialsResponse], error) {
-	return connect.NewResponse(&fletcherv1.ListCredentialsResponse{Names: s.backend.SavedCredentials()}), nil
+	return connect.NewResponse(&fletcherv1.ListCredentialsResponse{
+		Names:     s.backend.SavedCredentials(),
+		Supported: s.backend.SupportedCredentials(),
+	}), nil
 }
 
 // DeleteCredential removes a saved login.

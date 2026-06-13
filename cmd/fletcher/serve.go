@@ -75,7 +75,7 @@ func serveCmd() *cli.Command {
 			},
 			&cli.StringFlag{
 				Name:    "credentials-dir",
-				Usage:   "host directory holding agent credential dirs (.claude, .codex, .config/gemini) for trusted-credential mode",
+				Usage:   "host directory holding agent credential dirs (.claude, .codex, .pi, .gemini) for trusted-credential mode",
 				Sources: cli.EnvVars("FLETCHER_CREDENTIALS_DIR"),
 				Value:   defaultCredentialsDir(),
 			},

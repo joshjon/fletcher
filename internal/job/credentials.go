@@ -17,6 +17,7 @@ import (
 const (
 	CredentialClaude = "claude"
 	CredentialCodex  = "codex"
+	CredentialPi     = "pi"
 	CredentialGemini = "gemini"
 )
 
@@ -47,7 +48,8 @@ const homeRel = "/home/fletcher"
 var AllowedCredentials = map[string]AllowedCredential{
 	CredentialClaude: {Name: CredentialClaude, HostRelPath: ".claude", GuestPath: homeRel + "/.claude", SiblingFiles: []string{".claude.json"}},
 	CredentialCodex:  {Name: CredentialCodex, HostRelPath: ".codex", GuestPath: homeRel + "/.codex"},
-	CredentialGemini: {Name: CredentialGemini, HostRelPath: ".config/gemini", GuestPath: homeRel + "/.config/gemini"},
+	CredentialPi:     {Name: CredentialPi, HostRelPath: ".pi", GuestPath: homeRel + "/.pi"},
+	CredentialGemini: {Name: CredentialGemini, HostRelPath: ".gemini", GuestPath: homeRel + "/.gemini"},
 }
 
 // SavedCredentials lists the credential names that have files saved under root

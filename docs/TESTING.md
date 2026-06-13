@@ -156,8 +156,8 @@ secret, stamps it on the upstream call, and that the daemon's role as
 
 ### 5. Trusted-credential mode (Phase 12)
 
-The daemon can bind-mount your real `~/.claude/`, `~/.codex/`, or
-`~/.config/gemini/` into a job's fork at start time, so agents inside
+The daemon can bind-mount your real `~/.claude/`, `~/.codex/`, `~/.pi/`,
+or `~/.gemini/` into a job's fork at start time, so agents inside
 forks see your existing logins. On macOS with the mock runtime no
 actual bind-mount happens - the test value here is just that the
 validation and resolution path works.

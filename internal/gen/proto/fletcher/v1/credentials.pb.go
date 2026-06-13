@@ -150,7 +150,12 @@ func (*ListCredentialsRequest) Descriptor() ([]byte, []int) {
 type ListCredentialsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// names are the saved logins, e.g. ["claude"].
-	Names         []string `protobuf:"bytes,1,rep,name=names,proto3" json:"names,omitempty"`
+	Names []string `protobuf:"bytes,1,rep,name=names,proto3" json:"names,omitempty"`
+	// supported are every agent whose login can be saved/seeded on this box (the
+	// agents that ship in the image), e.g. ["claude", "codex", "gemini", "pi"].
+	// Clients drive their "save login" picker from this so it never drifts from
+	// what the image actually ships.
+	Supported     []string `protobuf:"bytes,2,rep,name=supported,proto3" json:"supported,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -188,6 +193,13 @@ func (*ListCredentialsResponse) Descriptor() ([]byte, []int) {
 func (x *ListCredentialsResponse) GetNames() []string {
 	if x != nil {
 		return x.Names
+	}
+	return nil
+}
+
+func (x *ListCredentialsResponse) GetSupported() []string {
+	if x != nil {
+		return x.Supported
 	}
 	return nil
 }
@@ -283,9 +295,10 @@ const file_fletcher_v1_credentials_proto_rawDesc = "" +
 	"sessionRef\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"\x1a\n" +
 	"\x18SaveSessionLoginResponse\"\x18\n" +
-	"\x16ListCredentialsRequest\"/\n" +
+	"\x16ListCredentialsRequest\"M\n" +
 	"\x17ListCredentialsResponse\x12\x14\n" +
-	"\x05names\x18\x01 \x03(\tR\x05names\"-\n" +
+	"\x05names\x18\x01 \x03(\tR\x05names\x12\x1c\n" +
+	"\tsupported\x18\x02 \x03(\tR\tsupported\"-\n" +
 	"\x17DeleteCredentialRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x1a\n" +
 	"\x18DeleteCredentialResponse2\xb9\x02\n" +

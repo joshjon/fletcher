@@ -67,6 +67,13 @@ func (m *Manager) SavedCredentials() []string {
 	return job.SavedCredentials(m.opt().CredentialsRoot)
 }
 
+// SupportedCredentials lists every agent whose login can be saved/seeded (the
+// catalog), so clients drive their picker from this rather than a hardcoded
+// list that drifts from what the image ships.
+func (m *Manager) SupportedCredentials() []string {
+	return job.CredentialNames()
+}
+
 // DeleteSavedCredential removes a saved login from the credentials root.
 func (m *Manager) DeleteSavedCredential(name string) error {
 	return job.DeleteSavedCredential(m.opt().CredentialsRoot, name)

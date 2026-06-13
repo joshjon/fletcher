@@ -94,7 +94,7 @@ RUN mkdir -p /workspace \
             /home/fletcher/.claude \
             /home/fletcher/.codex \
             /home/fletcher/.pi \
-            /home/fletcher/.config/gemini && \
+            /home/fletcher/.gemini && \
     chown -R fletcher:fletcher /workspace /home/fletcher
 
 # Single AGENTS.md, symlinked into each agent's expected location.
@@ -127,10 +127,18 @@ RUN curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
 RUN curl -fsSL https://pi.dev/install.sh | sh && \
     test -x /home/fletcher/.local/bin/pi
 
+# gemini (Google) - recommended for users on a Gemini subscription. Installed
+# into the same ~/.local prefix as the other agent CLIs so its binary lands on
+# PATH; its login lives under the home dir (seedable, see internal/job
+# AllowedCredentials).
+RUN npm install -g --prefix /home/fletcher/.local @google/gemini-cli && \
+    test -x /home/fletcher/.local/bin/gemini
+
 USER root
 RUN ln -sf /home/fletcher/.local/bin/claude /usr/local/bin/claude && \
     ln -sf /home/fletcher/.local/bin/codex /usr/local/bin/codex && \
-    ln -sf /home/fletcher/.local/bin/pi /usr/local/bin/pi
+    ln -sf /home/fletcher/.local/bin/pi /usr/local/bin/pi && \
+    ln -sf /home/fletcher/.local/bin/gemini /usr/local/bin/gemini
 
 # Wire the daemon's MCP tool surface (daemon-mediated web egress via
 # http_get / http_request, plus approvals) into Claude Code so agents can
