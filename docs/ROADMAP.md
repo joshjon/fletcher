@@ -1422,6 +1422,48 @@ tmux server, and tmux redrew the prior screen. Still worth an interactive pass
 from the app (background mid-`claude`, reattach) and a confirmation that an idle
 session still hibernates and warm-restores.
 
+**Follow-up (2026-06-17): scrollable in-session shell.** One tmux knob in
+`images/fletcher-base/tmux.conf`: **`set -g mouse on`** (was `off`).
+
+M15 shipped with mouse off on the theory that the client's terminal emulator
+would own scrolling. That does not hold under tmux: tmux redraws one screen and
+holds the whole 50k-line history itself, so the client has nothing local to
+scroll. With mouse on, the client forwards the wheel to tmux and tmux scrolls
+its own history (copy-mode, auto-returning to the prompt at the bottom) - the
+same standard mechanism a normal SSH terminal (e.g. Termius) uses to scroll a
+tmux session. This is the whole daemon-side fix.
+
+It needs the client to forward the wheel into tmux: SwiftTerm's stock wheel
+scrolls its own (empty, under tmux) local buffer, so the macOS client
+(`fletcher-ios` `TerminalEmulatorView`) forwards wheel motion as mouse events
+when the terminal has mouse reporting on. iOS needs the same (a pan-gesture
+forwarder) - still a follow-up.
+
+**Two detours, both reverted (kept here so they are not re-tried).** Between mouse
+on and landing on the above, two "clever" daemon changes were shipped and then
+backed out:
+
+- `default-terminal "tmux-256color"` (instead of `screen-256color`): the theory
+  was to get Claude Code to enable its *own* mouse so it would scroll its
+  transcript. Wrong premise - Claude Code does not scroll on the wheel; like any
+  TUI it relies on the *terminal's* scrollback (which under tmux is tmux's). When
+  the agent grabs the mouse, tmux hands it the wheel instead of scrolling
+  history, and the gesture dies. `screen-256color` keeps the agent's mouse off so
+  the wheel reliably drives tmux scrollback.
+- Custom `WheelUpPane`/`WheelDownPane` bindings that forwarded the wheel to the
+  app and otherwise did nothing: this *disabled* tmux's normal copy-mode scroll -
+  the exact mechanism that works in a standard SSH terminal - so scrolling
+  stopped entirely. Reverted to tmux defaults.
+
+The lesson: the in-app terminal should behave like a normal SSH terminal against
+a standard tmux (mouse on, default bindings). Confirmed by the user: SSH into the
+session with Termius/Terminal scrolls Claude Code perfectly. Remaining gap, if
+any, is client-side rendering polish in SwiftTerm, not the daemon.
+
+*Requires an image rebuild for new sessions*; an already-running session picks up
+mouse on via `tmux -L fletcher source-file /etc/tmux.conf` on a fork that has the
+new file.
+
 ### Milestone 16 - credential seeding ("log in once") - ENGINE DONE (verified on hardware 2026-06-12); surface in progress
 
 **Goal.** Stop re-logging-in for every new session. The box holds a saved agent
