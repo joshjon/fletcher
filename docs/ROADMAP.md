@@ -1533,22 +1533,23 @@ strands the content at the top and the cursor at the bottom - a large blank gap,
 a stray byte from the mispositioned cursor). Client commits `fletcher-ios`
 a9a9d2e + c05ae7f.
 
-**Reconnect while a TUI is running (the alternate-screen case).** Reconnecting with
-Claude Code running duplicated its input box. Cause, confirmed against `fletcher-base`
-with a real claude session: claude runs in the *alternate* screen (its `%output`
-carries `1049h`), but a control-mode reattach does not replay it, so the emulator was
-in the *normal* screen - capture-pane's alt frame got painted into the normal buffer
-and claude's live `%output` redrew over it (two unaligned copies), made worse by
-`refresh-client` triggering a claude redraw. Fix: a reconnect handshake that matches
-the pane's screen mode first. After the first frame, `display-message -p -F
-"#{alternate_on}"` returns `1`/`0`; if `1`, feed `ESC[?1049h` so the emulator enters
-the alt screen (normal buffer/scrollback preserved for when the TUI exits), if `0`
-stay in the normal buffer (shell scrollback still scrolls); then `refresh-client` +
-`capture-pane` repaint into the now-matching buffer, where claude's own redraw lands
-at the same absolute positions - idempotent, no duplication. The parser now delivers
-every `%begin/%end` block (via `onReplyBlock`) so the client correlates the ordered
-replies; a small state machine (idle / awaitingAlt / awaitingCapture) consumes each.
-Client commit `fletcher-ios` 755c809.
+**Reconnect repaint, the simple version that stuck.** The capture-pane approach went
+through several broken iterations - a blank-then-`0` that wiped the buffer, and
+duplicated lines when a TUI (Claude Code) was running. Root causes, found by testing
+against `fletcher-base` tmux 3.5a rather than guessing: (1) correlating control-mode
+command replies by order is unsound - the startup block (flags `0`) and acks from the
+resize path desync it, so the `display-message #{alternate_on}` reply (`0`/`1`) got
+painted as screen content; (2) claude runs in the *alternate* screen, so capture-pane's
+alt frame painted into the emulator's normal buffer collided with claude's own redraw.
+The winning insight: a bare reattach replays nothing, but **sending the pane Ctrl-L**
+(`send-keys -t %0 -H 0c`) makes a shell reprint its prompt and makes claude clear (its
+own `ESC[2J`) and repaint its whole frame - exactly one clean copy, in whatever buffer
+the emulator is in, no screen-mode query needed (verified: `shortcuts` appears once,
+4.4 KB of output). So control-mode attach now just sizes the client
+(`refresh-client -C WxH`) and sends Ctrl-L after the first frame. No reply correlation,
+no state machine, no capture-pane - the bugs those carried are gone with them. The
+parser drops back to skipping `%begin/%end` blocks. Client commit `fletcher-ios`
+aacb967 (supersedes the reverted a9a9d2e/c05ae7f/755c809 attempts).
 
 ### Milestone 16 - credential seeding ("log in once") - ENGINE DONE (verified on hardware 2026-06-12); surface in progress
 
