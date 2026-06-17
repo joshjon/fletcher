@@ -1464,7 +1464,7 @@ any, is client-side rendering polish in SwiftTerm, not the daemon.
 mouse on via `tmux -L fletcher source-file /etc/tmux.conf` on a fork that has the
 new file.
 
-### Milestone 18 - native terminal scroll via tmux control mode (tmux -CC) - DAEMON + CLIENT BUILT (2026-06-17); pending hardware end-to-end test
+### Milestone 18 - native terminal scroll via tmux control mode (tmux -CC) - WORKING ON HARDWARE (2026-06-17)
 
 **Why.** The M15 scroll follow-up (above) ended in a hard wall: tmux enters the
 client's *alternate screen* on attach (verified - it emits `\033[?1049h`), so a
@@ -1515,11 +1515,25 @@ and a few rough edges (capture-pane repaint polish, command/startup race, Swift 
 concurrency annotations) are for the hardware test to shake out; the commit messages
 flag each.
 
-**Deploy + test.** Daemon built/installed and template reimported (the `-CC` guest);
-the running daemon needs `sudo systemctl restart fletcher` to pick up the
-`control_mode` plumbing (cold-restarts live sessions; disk persists). Then a *new*
-session exercises it end to end: client requests control mode -> guest `tmux -CC`
--> parser -> native scroll.
+**Deployed + verified on hardware (2026-06-17).** Daemon rebuilt/installed, template
+reimported (the `-CC` guest), `systemctl restart fletcher`. Native scroll works in
+the in-app terminal with no `[N/M]` and no jank - the original goal.
+
+**Reconnect repaint (the part that needed iteration).** Stop + reopen a session and
+the terminal came back blank. A control-mode reattach does NOT replay the existing
+screen - it emits `%output` for *changes* only (verified: the reattach stream is just
+`%session-changed`) - so the client must repaint. The working sequence: after the
+first control frame (tmux is alive, the pane exists - sending earlier races `-CC`
+startup and the commands are dropped) send `refresh-client -C WxH` then
+`capture-pane -p -e -t %0`; the reply is the screen as raw ANSI in a `%begin/%end`
+block. Two follow-on fixes: do this on *every* control-mode attach, not just resume
+(stop+reopen builds a fresh view that goes through attach, not resume); and trim the
+reply's trailing blank rows (capture-pane pads to full height, which otherwise
+strands the content at the top and the cursor at the bottom - a large blank gap, plus
+a stray byte from the mispositioned cursor). Client commits `fletcher-ios`
+a9a9d2e + c05ae7f. Remaining nicety, not blocking: an agent mid-run in its alternate
+screen is captured as raw ANSI into the normal buffer on reattach - fine for the
+shell, may want refinement for a live TUI repaint.
 
 ### Milestone 16 - credential seeding ("log in once") - ENGINE DONE (verified on hardware 2026-06-12); surface in progress
 
