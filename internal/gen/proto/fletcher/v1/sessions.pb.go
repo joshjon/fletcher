@@ -1862,8 +1862,15 @@ type ShellStart struct {
 	// term is the client's TERM (e.g. xterm-256color), set inside the PTY.
 	Term string `protobuf:"bytes,2,opt,name=term,proto3" json:"term,omitempty"`
 	// cols and rows are the initial window size.
-	Cols          uint32 `protobuf:"varint,3,opt,name=cols,proto3" json:"cols,omitempty"`
-	Rows          uint32 `protobuf:"varint,4,opt,name=rows,proto3" json:"rows,omitempty"`
+	Cols uint32 `protobuf:"varint,3,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows uint32 `protobuf:"varint,4,opt,name=rows,proto3" json:"rows,omitempty"`
+	// control_mode opts the durable shell into tmux control mode (tmux -CC): the
+	// stream then carries the tmux control protocol (%output, %begin/%end, ...)
+	// instead of a rendered terminal, so a client that speaks it renders panes
+	// natively with its own scrollback (native scroll, no copy-mode) while
+	// keeping tmux durability. A plain client leaves this false and gets the
+	// rendered-terminal stream as before.
+	ControlMode   bool `protobuf:"varint,5,opt,name=control_mode,json=controlMode,proto3" json:"control_mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1924,6 +1931,13 @@ func (x *ShellStart) GetRows() uint32 {
 		return x.Rows
 	}
 	return 0
+}
+
+func (x *ShellStart) GetControlMode() bool {
+	if x != nil {
+		return x.ControlMode
+	}
+	return false
 }
 
 type ShellResize struct {
@@ -2810,13 +2824,14 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\x05start\x18\x01 \x01(\v2\x17.fletcher.v1.ShellStartH\x00R\x05start\x12\x16\n" +
 	"\x05stdin\x18\x02 \x01(\fH\x00R\x05stdin\x122\n" +
 	"\x06resize\x18\x03 \x01(\v2\x18.fletcher.v1.ShellResizeH\x00R\x06resizeB\x05\n" +
-	"\x03msg\"Z\n" +
+	"\x03msg\"}\n" +
 	"\n" +
 	"ShellStart\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x12\n" +
 	"\x04term\x18\x02 \x01(\tR\x04term\x12\x12\n" +
 	"\x04cols\x18\x03 \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\x04 \x01(\rR\x04rows\"5\n" +
+	"\x04rows\x18\x04 \x01(\rR\x04rows\x12!\n" +
+	"\fcontrol_mode\x18\x05 \x01(\bR\vcontrolMode\"5\n" +
 	"\vShellResize\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\x02 \x01(\rR\x04rows\"R\n" +

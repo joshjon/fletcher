@@ -55,6 +55,10 @@ type ShellSpec struct {
 	Rows uint16
 	// Env is extra environment for the login shell.
 	Env []string
+	// ControlMode runs the durable shell's tmux client in control mode (tmux
+	// -CC), so the stream carries the tmux control protocol instead of a
+	// rendered terminal. Off by default (plain rendered terminal).
+	ControlMode bool
 }
 
 // WinSize is a terminal window size pushed mid-session on a resize.

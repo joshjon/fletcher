@@ -1464,6 +1464,54 @@ any, is client-side rendering polish in SwiftTerm, not the daemon.
 mouse on via `tmux -L fletcher source-file /etc/tmux.conf` on a fork that has the
 new file.
 
+### Milestone 18 - native terminal scroll via tmux control mode (tmux -CC) - DAEMON OPT-IN DONE (2026-06-17); client parser pending
+
+**Why.** The M15 scroll follow-up (above) ended in a hard wall: tmux enters the
+client's *alternate screen* on attach (verified - it emits `\033[?1049h`), so a
+*plain* terminal physically cannot scroll tmux's content except via copy-mode
+(the yellow `[N/M]`, which traps typing). No daemon knob removes that; it is
+inherent to a plain tmux attach. The agent does not scroll on the wheel either -
+it renders inline and relies on the *terminal's* scrollback, which tmux owns.
+Confirmed against reality: the user gets perfect native scroll (1) over plain SSH
+(no tmux in the path) and (2) in Termius attached to tmux - because Termius, like
+iTerm2, speaks tmux **control mode** (`tmux -CC`), which renders panes natively
+with the client's own scrollback. No `[N/M]`, native scroll, *and* tmux
+durability. That is the only way to get all three; the in-app terminal must speak
+it too.
+
+**How control mode works** (captured from `tmux -CC` in `fletcher-base`): the
+stream is a line protocol, not a rendered terminal. Enter via DCS `\033P1000p`;
+notifications are `%`-prefixed and `\r\n`-terminated. The load-bearing one is
+`%output %<pane> <data>`, where `<data>` is the pane's raw inline terminal stream
+**octal-escaped** (`\033`, `\015`, `\012`, `\\`). The client decodes it and feeds
+it to a normal emulator (SwiftTerm) -> native scrollback. Other lines:
+`%begin/%end/%error` wrap command replies; `%window-add`, `%layout-change`,
+`%session-changed`, `%client-detached`, `%exit` track state. Input is sent back
+as tmux *commands* on the stream (`send-keys -t %0 ...`, `refresh-client -C WxH`
+for resize), not raw bytes. Verified: a second `-CC` `new-session -A` reattaches
+to the same durable session (`%session-changed $0 main`) - durability holds; the
+client issues `capture-pane` on (re)attach to restore the current screen, since
+tmux pushes `%output` for *changes*, not a full repaint.
+
+**Shipped (daemon opt-in, this commit).** `ShellStart.control_mode` (proto) ->
+`runtime.ShellSpec.ControlMode` -> `guestproto.ShellSpec.ControlMode` -> the
+guest's `shellCommand` adds `-CC` to the same `tmux -u -L fletcher new-session -A
+-s main` invocation. Off by default (a plain client gets the rendered stream
+exactly as before - fully backward compatible). The existing byte-pipe and the
+durable session are unchanged; `-CC` only changes what the bytes *are*. No daemon
+restart shipped yet (no client to test against, and restarting disrupts live
+sessions): deploy = rebuild daemon (re-embeds the guest) + reimport image +
+restart, done together with the client.
+
+**Remaining (client, `fletcher-ios` - the bulk).** A tmux control-mode parser on
+top of SwiftTerm: set `control_mode=true` on `ShellStart`; parse the `%` protocol;
+decode `%output` octal -> `view.feed`; map the single pane `%0` to the terminal
+view (native scrollback => native scroll, no `[N/M]`); translate keystrokes ->
+`send-keys -t %0 -H <hex>`; send `refresh-client -C <cols>x<rows>` on resize;
+`capture-pane -p -e -t %0` on attach to restore the screen. Needs the regenerated
+Swift stubs (the new proto field) - regen via the daemon's buf per the iOS-tooling
+note. A detailed brief accompanies this for the Mac agent.
+
 ### Milestone 16 - credential seeding ("log in once") - ENGINE DONE (verified on hardware 2026-06-12); surface in progress
 
 **Goal.** Stop re-logging-in for every new session. The box holds a saved agent

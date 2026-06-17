@@ -374,9 +374,10 @@ func (s *SessionsService) ShellSession(ctx context.Context, stream *connect.Bidi
 	}()
 
 	spec := runtime.ShellSpec{
-		Term: start.GetTerm(),
-		Cols: clampUint16(start.GetCols()),
-		Rows: clampUint16(start.GetRows()),
+		Term:        start.GetTerm(),
+		Cols:        clampUint16(start.GetCols()),
+		Rows:        clampUint16(start.GetRows()),
+		ControlMode: start.GetControlMode(),
 	}
 	code, err := s.backend.Shell(ctx, start.GetRef(), spec, pr, stdout, resize)
 	_ = pr.Close() // unblock the receive goroutine's pipe writes

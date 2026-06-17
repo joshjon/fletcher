@@ -519,10 +519,17 @@ func shellCommand(spec guestproto.ShellSpec, lu loginUser) *exec.Cmd {
 		// raw-passthrough shell), so without this it splits multibyte runes and
 		// miscounts cell widths, mangling rich TUIs like Claude Code. The env
 		// also carries a UTF-8 LANG so the inner programs agree (see withDefaults).
-		cmd = exec.CommandContext(context.Background(), tmux, //nolint:gosec // launching the user's shell is the entire purpose
-			"-u", "-L", tmuxSocket,
-			"new-session", "-A", "-s", tmuxSession, "-c", dir,
-			shell, "-l")
+		args := []string{"-u", "-L", tmuxSocket}
+		// -CC puts the tmux client in control mode: the PTY then carries the
+		// tmux control protocol (%output, %begin/%end, ...) instead of a
+		// rendered terminal, so a client that speaks it renders panes natively
+		// with its own scrollback while tmux keeps the session durable. The same
+		// new-session -A reaches the same durable session as the plain client.
+		if spec.ControlMode {
+			args = append(args, "-CC")
+		}
+		args = append(args, "new-session", "-A", "-s", tmuxSession, "-c", dir, shell, "-l")
+		cmd = exec.CommandContext(context.Background(), tmux, args...) //nolint:gosec // launching the user's shell is the entire purpose
 	} else {
 		cmd = exec.CommandContext(context.Background(), shell, "-l") //nolint:gosec // launching a shell is the entire purpose
 	}

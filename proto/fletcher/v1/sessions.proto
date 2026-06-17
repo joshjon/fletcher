@@ -324,6 +324,13 @@ message ShellStart {
   // cols and rows are the initial window size.
   uint32 cols = 3;
   uint32 rows = 4;
+  // control_mode opts the durable shell into tmux control mode (tmux -CC): the
+  // stream then carries the tmux control protocol (%output, %begin/%end, ...)
+  // instead of a rendered terminal, so a client that speaks it renders panes
+  // natively with its own scrollback (native scroll, no copy-mode) while
+  // keeping tmux durability. A plain client leaves this false and gets the
+  // rendered-terminal stream as before.
+  bool control_mode = 5;
 }
 
 message ShellResize {

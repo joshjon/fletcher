@@ -271,7 +271,7 @@ func (s *fcSession) Shell(ctx context.Context, spec fcruntime.ShellSpec, stdin i
 	}
 	req := guestproto.Request{
 		Kind:  guestproto.RequestShell,
-		Shell: guestproto.ShellSpec{Term: spec.Term, Cols: spec.Cols, Rows: spec.Rows, Env: env},
+		Shell: guestproto.ShellSpec{Term: spec.Term, Cols: spec.Cols, Rows: spec.Rows, Env: env, ControlMode: spec.ControlMode},
 	}
 	if err := guestproto.WriteRequest(conn, req); err != nil {
 		return 0, fmt.Errorf("firecracker: send shell: %w", err)

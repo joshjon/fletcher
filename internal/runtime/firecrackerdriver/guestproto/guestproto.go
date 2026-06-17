@@ -162,6 +162,9 @@ type ShellSpec struct {
 	Rows uint16 `json:"rows"`
 	// Env is extra environment for the login shell.
 	Env []string `json:"env,omitempty"`
+	// ControlMode runs tmux in control mode (tmux -CC); the stream then carries
+	// the tmux control protocol instead of a rendered terminal.
+	ControlMode bool `json:"control_mode,omitempty"`
 }
 
 // Request is one host->guest control message a session guest serves. The
