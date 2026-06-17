@@ -1464,7 +1464,7 @@ any, is client-side rendering polish in SwiftTerm, not the daemon.
 mouse on via `tmux -L fletcher source-file /etc/tmux.conf` on a fork that has the
 new file.
 
-### Milestone 18 - native terminal scroll via tmux control mode (tmux -CC) - DAEMON OPT-IN DONE (2026-06-17); client parser pending
+### Milestone 18 - native terminal scroll via tmux control mode (tmux -CC) - DAEMON + CLIENT BUILT (2026-06-17); pending hardware end-to-end test
 
 **Why.** The M15 scroll follow-up (above) ended in a hard wall: tmux enters the
 client's *alternate screen* on attach (verified - it emits `\033[?1049h`), so a
@@ -1503,14 +1503,23 @@ restart shipped yet (no client to test against, and restarting disrupts live
 sessions): deploy = rebuild daemon (re-embeds the guest) + reimport image +
 restart, done together with the client.
 
-**Remaining (client, `fletcher-ios` - the bulk).** A tmux control-mode parser on
-top of SwiftTerm: set `control_mode=true` on `ShellStart`; parse the `%` protocol;
-decode `%output` octal -> `view.feed`; map the single pane `%0` to the terminal
-view (native scrollback => native scroll, no `[N/M]`); translate keystrokes ->
-`send-keys -t %0 -H <hex>`; send `refresh-client -C <cols>x<rows>` on resize;
-`capture-pane -p -e -t %0` on attach to restore the screen. Needs the regenerated
-Swift stubs (the new proto field) - regen via the daemon's buf per the iOS-tooling
-note. A detailed brief accompanies this for the Mac agent.
+**Built (client, `fletcher-ios`, commits 63acf56 + 27fc668).** A tmux control-mode
+parser on top of SwiftTerm: `TmuxControlParser` (octal-decode `%output` ->
+`view.feed`; `%begin/%end` reply blocks -> `capture-pane` repaint); `TerminalSession`
+sets `control_mode=true`, routes output through the parser, sends keystrokes as
+`send-keys -t %0 -H <hex>` and resize as `refresh-client -C WxH`; `SessionShellClient`
+gained `controlMode` + `sendControlCommand`; the macOS wheel-forwarding monitor was
+removed so SwiftTerm's normal-buffer scrollback scrolls natively. Swift stubs
+regenerated for the new field. Authored on Linux (no Swift toolchain), so the build
+and a few rough edges (capture-pane repaint polish, command/startup race, Swift 6
+concurrency annotations) are for the hardware test to shake out; the commit messages
+flag each.
+
+**Deploy + test.** Daemon built/installed and template reimported (the `-CC` guest);
+the running daemon needs `sudo systemctl restart fletcher` to pick up the
+`control_mode` plumbing (cold-restarts live sessions; disk persists). Then a *new*
+session exercises it end to end: client requests control mode -> guest `tmux -CC`
+-> parser -> native scroll.
 
 ### Milestone 16 - credential seeding ("log in once") - ENGINE DONE (verified on hardware 2026-06-12); surface in progress
 
