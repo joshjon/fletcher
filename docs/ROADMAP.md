@@ -1531,9 +1531,24 @@ block. Two follow-on fixes: do this on *every* control-mode attach, not just res
 reply's trailing blank rows (capture-pane pads to full height, which otherwise
 strands the content at the top and the cursor at the bottom - a large blank gap, plus
 a stray byte from the mispositioned cursor). Client commits `fletcher-ios`
-a9a9d2e + c05ae7f. Remaining nicety, not blocking: an agent mid-run in its alternate
-screen is captured as raw ANSI into the normal buffer on reattach - fine for the
-shell, may want refinement for a live TUI repaint.
+a9a9d2e + c05ae7f.
+
+**Reconnect while a TUI is running (the alternate-screen case).** Reconnecting with
+Claude Code running duplicated its input box. Cause, confirmed against `fletcher-base`
+with a real claude session: claude runs in the *alternate* screen (its `%output`
+carries `1049h`), but a control-mode reattach does not replay it, so the emulator was
+in the *normal* screen - capture-pane's alt frame got painted into the normal buffer
+and claude's live `%output` redrew over it (two unaligned copies), made worse by
+`refresh-client` triggering a claude redraw. Fix: a reconnect handshake that matches
+the pane's screen mode first. After the first frame, `display-message -p -F
+"#{alternate_on}"` returns `1`/`0`; if `1`, feed `ESC[?1049h` so the emulator enters
+the alt screen (normal buffer/scrollback preserved for when the TUI exits), if `0`
+stay in the normal buffer (shell scrollback still scrolls); then `refresh-client` +
+`capture-pane` repaint into the now-matching buffer, where claude's own redraw lands
+at the same absolute positions - idempotent, no duplication. The parser now delivers
+every `%begin/%end` block (via `onReplyBlock`) so the client correlates the ordered
+replies; a small state machine (idle / awaitingAlt / awaitingCapture) consumes each.
+Client commit `fletcher-ios` 755c809.
 
 ### Milestone 16 - credential seeding ("log in once") - ENGINE DONE (verified on hardware 2026-06-12); surface in progress
 
