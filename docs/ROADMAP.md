@@ -1611,6 +1611,35 @@ it. `AllowedCredential` grew `SiblingFiles` (claude: `.claude.json`); the sessio
 save/seed paths carry them (the job bind-mount path is unchanged). Verified the
 file flows save -> master -> seeded session.
 
+**BROKEN for Claude subscription logins - root cause found (2026-06-18).** The seed
+mechanism is mechanically correct (verified on hardware: a `--credential claude`
+session boots with `.credentials.json` + `.claude.json` present, owned
+`fletcher:fletcher`, and with gateway off no `ANTHROPIC_*` env leaks in to shadow the
+OAuth login). The failure is the credential *content*: a saved Claude subscription
+login is a **frozen OAuth snapshot that goes dead**. The access token expires in hours
+(the saved master's was 40h expired by test time), so every new session must refresh -
+and the saved refresh token is invalid. Confirmed by running the host `claude` binary
+against a throwaway copy of the daemon's master credential: `Failed to authenticate.
+API Error: 401 Invalid authentication credentials`, after which Claude Code wiped the
+`.credentials.json` (so the session drops to the login screen). The refresh token dies
+because the source login's lineage rotates/ages it after the one-time save, and the
+master is never updated - so it fails on *every* new session, not intermittently.
+
+This is architectural, not a patch: **you cannot freeze-and-fork a living OAuth
+credential.** The thesis-aligned fix is to stop seeding subscription tokens into forks
+and instead let the **daemon gateway** hold the subscription credential, refresh it
+centrally (one lineage - no fork, rotation handled in one place), and proxy Claude
+Code's `/v1/messages` with a fresh `Authorization: Bearer` (+ the OAuth beta header,
+no `x-api-key`). Sessions run gateway-on and never see or refresh a token - exactly the
+"keys never enter forks" model the gateway already implements for API keys
+(`internal/gateway`, which today stamps `x-api-key` from the secrets store). Scope: an
+OAuth credential in the secrets store, a central refresher (Anthropic OAuth token
+endpoint + Claude Code's client id), subscription-mode request shaping in
+`AnthropicBackend.ForwardMessages`, and an import path to load the user's subscription
+login into the gateway. Seeding stays as-is for API-key and git credentials. *Decision
+pending: confirm the gateway-OAuth direction before building (needs the user's live
+subscription to test end to end).*
+
 **Git host login (vendor-neutral) - DONE.** The same seed model now carries a
 `git` credential so sessions can clone private repos over HTTPS - GitHub, GitLab,
 Bitbucket, or self-hosted, not just one vendor. It is one self-contained XDG dir
