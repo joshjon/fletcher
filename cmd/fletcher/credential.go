@@ -16,9 +16,8 @@ import (
 func credentialCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "credential",
-		Usage: "save a login once and reuse it across sessions (agent logins, or a git host login)",
+		Usage: "save a git host login once and reuse it for cloning across sessions",
 		Commands: []*cli.Command{
-			credentialSaveCmd(),
 			credentialGitCmd(),
 			credentialListCmd(),
 			credentialDeleteCmd(),
@@ -29,34 +28,6 @@ func credentialCmd() *cli.Command {
 func newCredentialsClient(cmd *cli.Command) fletcherv1connect.CredentialServiceClient {
 	hc, base, opts := clientTarget(cmd)
 	return fletcherv1connect.NewCredentialServiceClient(hc, base, opts...)
-}
-
-func credentialSaveCmd() *cli.Command {
-	return &cli.Command{
-		Name:      "save",
-		Usage:     "save a running session's agent login as the box default for new sessions",
-		ArgsUsage: "<claude|codex|gemini>",
-		Flags: []cli.Flag{
-			socketFlag(),
-			&cli.StringFlag{Name: "from-session", Usage: "session (id or name) you logged into", Required: true},
-		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			name := cmd.Args().First()
-			if name == "" {
-				return errors.New("name the login to save: claude | codex | gemini")
-			}
-			client := newCredentialsClient(cmd)
-			_, err := client.SaveSessionLogin(ctx, connect.NewRequest(&fletcherv1.SaveSessionLoginRequest{
-				SessionRef: cmd.String("from-session"),
-				Name:       name,
-			}))
-			if err != nil {
-				return err
-			}
-			fmt.Printf("saved %s login; create a session with `--credential %s` to reuse it\n", name, name)
-			return nil
-		},
-	}
 }
 
 func credentialGitCmd() *cli.Command {
@@ -103,7 +74,7 @@ func credentialListCmd() *cli.Command {
 			}
 			names := resp.Msg.GetNames()
 			if len(names) == 0 {
-				fmt.Println("no saved logins (save one with `fletcher credential save`)")
+				fmt.Println("no saved logins (save one with `fletcher credential git`)")
 				return nil
 			}
 			fmt.Println(strings.Join(names, "\n"))
@@ -116,7 +87,7 @@ func credentialDeleteCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "rm",
 		Usage:     "remove a saved login",
-		ArgsUsage: "<claude|codex|gemini|pi|git>",
+		ArgsUsage: "<git>",
 		Flags:     []cli.Flag{socketFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			name := cmd.Args().First()

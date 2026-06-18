@@ -21,14 +21,14 @@ func TestNormaliseCredentials(t *testing.T) {
 		require.Nil(t, got)
 	})
 
-	t.Run("known names sort + dedupe", func(t *testing.T) {
-		got, err := normaliseCredentials([]string{"codex", "claude", "codex"})
+	t.Run("known names dedupe", func(t *testing.T) {
+		got, err := normaliseCredentials([]string{"git", "git"})
 		require.NoError(t, err)
-		require.Equal(t, []string{"claude", "codex"}, got)
+		require.Equal(t, []string{"git"}, got)
 	})
 
 	t.Run("unknown name fails with InvalidArgument", func(t *testing.T) {
-		_, err := normaliseCredentials([]string{"claude", "nope"})
+		_, err := normaliseCredentials([]string{"git", "nope"})
 		require.Error(t, err)
 		require.Equal(t, errs.CategoryInvalidArgument, errs.CategoryOf(err))
 	})
@@ -155,7 +155,7 @@ func TestSupervisorResolveCredentials(t *testing.T) {
 
 	t.Run("credentials requested with no root configured fails clearly", func(t *testing.T) {
 		sup := &Supervisor{credentialsRoot: ""}
-		encoded, err := encodeCredentials([]string{"claude"})
+		encoded, err := encodeCredentials([]string{CredentialGit})
 		require.NoError(t, err)
 
 		_, err = sup.resolveCredentials(encoded)
@@ -165,12 +165,12 @@ func TestSupervisorResolveCredentials(t *testing.T) {
 
 	t.Run("missing host directory fails with the path it tried", func(t *testing.T) {
 		sup := &Supervisor{credentialsRoot: t.TempDir()}
-		encoded, err := encodeCredentials([]string{"claude"})
+		encoded, err := encodeCredentials([]string{CredentialGit})
 		require.NoError(t, err)
 
 		_, err = sup.resolveCredentials(encoded)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), AllowedCredentials[CredentialClaude].HostRelPath)
+		require.Contains(t, err.Error(), AllowedCredentials[CredentialGit].HostRelPath)
 	})
 
 	t.Run("present host directories resolve to mount entries", func(t *testing.T) {
@@ -179,14 +179,14 @@ func TestSupervisorResolveCredentials(t *testing.T) {
 			require.NoError(t, os.MkdirAll(filepath.Join(root, c.HostRelPath), 0o700))
 		}
 		sup := &Supervisor{credentialsRoot: root}
-		encoded, err := encodeCredentials([]string{"claude", "codex"})
+		encoded, err := encodeCredentials([]string{CredentialGit})
 		require.NoError(t, err)
 
 		mounts, err := sup.resolveCredentials(encoded)
 		require.NoError(t, err)
-		require.Len(t, mounts, 2)
-		require.Equal(t, filepath.Join(root, AllowedCredentials[CredentialClaude].HostRelPath), mounts[0].Source)
-		require.Equal(t, AllowedCredentials[CredentialClaude].GuestPath, mounts[0].Destination)
+		require.Len(t, mounts, 1)
+		require.Equal(t, filepath.Join(root, AllowedCredentials[CredentialGit].HostRelPath), mounts[0].Source)
+		require.Equal(t, AllowedCredentials[CredentialGit].GuestPath, mounts[0].Destination)
 		require.False(t, mounts[0].ReadOnly, "credentials must be rw so token refresh can write back")
 	})
 }

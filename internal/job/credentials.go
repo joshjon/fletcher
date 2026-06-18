@@ -16,14 +16,15 @@ import (
 )
 
 // Credential names accepted by the trusted-credential mode.
+//
+// Agent login seeding (claude/codex/gemini/pi) was removed: a saved agent login
+// is a frozen OAuth snapshot whose access token expires within hours and whose
+// refresh token is invalidated soon after the save, so a seeded session boots
+// unauthenticated every time (docs/ROADMAP.md M16). Git remains - it is a static
+// token, not a living OAuth credential, so seeding it is durable.
 const (
-	CredentialClaude = "claude"
-	CredentialCodex  = "codex"
-	CredentialPi     = "pi"
-	CredentialGemini = "gemini"
 	// CredentialGit is the vendor-neutral git HTTPS login (host + username +
-	// token). Unlike the agents it is saved from structured fields, not by
-	// exporting a session - see WriteGitCredential.
+	// token), saved from structured fields - see WriteGitCredential.
 	CredentialGit = "git"
 )
 
@@ -37,18 +38,11 @@ type AllowedCredential struct {
 	// GuestPath is the fixed mount point inside the fletcher-base image,
 	// matching the paths the bundled agent CLIs read by default.
 	GuestPath string
-	// SiblingFiles are extra home-relative files (not under HostRelPath) that an
-	// agent's login also needs. Claude Code splits its state between ~/.claude/
-	// (tokens) and ~/.claude.json (account, onboarding), so seeding the dir alone
-	// leaves a session re-prompting for login. Session seed/export carry these;
-	// the job bind-mount path (HostRelPath only) does not.
+	// SiblingFiles are extra home-relative files (not under HostRelPath) that a
+	// login also needs, seeded alongside the credential dir. Unused today (git
+	// is a single dir), kept as generic infra for any future credential that
+	// splits its state across sibling files.
 	SiblingFiles []string
-	// FromSession marks a login saved by exporting it out of a running session
-	// (the agent flow: log in interactively, then save). Logins populated another
-	// way - git, written from structured fields via WriteGitCredential - set this
-	// false so they are not offered in the "save login from a session" picker.
-	// They still seed into new sessions and list among the saved logins.
-	FromSession bool
 }
 
 // homeRel is the login user's home, the root SiblingFiles and GuestPath share.
@@ -58,13 +52,9 @@ const homeRel = "/home/fletcher"
 // supports. The supervisor resolves names → AllowedCredential entries at
 // job-start time.
 var AllowedCredentials = map[string]AllowedCredential{
-	CredentialClaude: {Name: CredentialClaude, HostRelPath: ".claude", GuestPath: homeRel + "/.claude", SiblingFiles: []string{".claude.json"}, FromSession: true},
-	CredentialCodex:  {Name: CredentialCodex, HostRelPath: ".codex", GuestPath: homeRel + "/.codex", FromSession: true},
-	CredentialPi:     {Name: CredentialPi, HostRelPath: ".pi", GuestPath: homeRel + "/.pi", FromSession: true},
-	CredentialGemini: {Name: CredentialGemini, HostRelPath: ".gemini", GuestPath: homeRel + "/.gemini", FromSession: true},
 	// git is one self-contained XDG dir: a `credentials` file (one
 	// https://user:token@host line per host) and a `config` file (store helper +
-	// committer identity). No SiblingFiles, FromSession false (saved via the form).
+	// committer identity), saved via the form (WriteGitCredential).
 	CredentialGit: {Name: CredentialGit, HostRelPath: ".config/git", GuestPath: homeRel + "/.config/git"},
 }
 
@@ -228,20 +218,6 @@ func CredentialNames() []string {
 	names := make([]string, 0, len(AllowedCredentials))
 	for name := range AllowedCredentials {
 		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-// SessionLoginNames returns the logins saved by exporting a running session
-// (the agent logins), sorted. Clients drive their "save login from a session"
-// picker from this; git, saved from structured fields, is excluded.
-func SessionLoginNames() []string {
-	var names []string
-	for name, spec := range AllowedCredentials {
-		if spec.FromSession {
-			names = append(names, name)
-		}
 	}
 	sort.Strings(names)
 	return names

@@ -10,13 +10,11 @@ import (
 )
 
 // CredentialsBackend is what the CredentialService handler needs from the
-// session manager: save a session's login as a reusable box credential, list
-// the saved ones (and which agents are supported), and delete one.
+// session manager: save a git host login as a reusable box credential, list the
+// saved ones, and delete one. (Agent login seeding was removed - see M16.)
 type CredentialsBackend interface {
-	ExportCredential(ctx context.Context, ref, name string) error
 	SaveGitCredential(host, username, token, gitName, gitEmail string) error
 	SavedCredentials() []string
-	SupportedCredentials() []string
 	DeleteSavedCredential(name string) error
 }
 
@@ -29,15 +27,6 @@ type CredentialsService struct {
 // NewCredentialsService wires the service to its backend.
 func NewCredentialsService(backend CredentialsBackend) *CredentialsService {
 	return &CredentialsService{backend: backend}
-}
-
-// SaveSessionLogin copies an agent login out of a running session into the box's
-// saved logins.
-func (s *CredentialsService) SaveSessionLogin(ctx context.Context, req *connect.Request[fletcherv1.SaveSessionLoginRequest]) (*connect.Response[fletcherv1.SaveSessionLoginResponse], error) {
-	if err := s.backend.ExportCredential(ctx, req.Msg.GetSessionRef(), req.Msg.GetName()); err != nil {
-		return nil, err
-	}
-	return connect.NewResponse(&fletcherv1.SaveSessionLoginResponse{}), nil
 }
 
 // SaveGitCredential saves a git host login (host + username + token) into the
@@ -53,12 +42,10 @@ func (s *CredentialsService) SaveGitCredential(_ context.Context, req *connect.R
 	return connect.NewResponse(&fletcherv1.SaveGitCredentialResponse{}), nil
 }
 
-// ListCredentials returns the box's saved logins and every agent whose login
-// can be saved (the agents that ship in the image).
+// ListCredentials returns the box's saved logins (today, the git login).
 func (s *CredentialsService) ListCredentials(_ context.Context, _ *connect.Request[fletcherv1.ListCredentialsRequest]) (*connect.Response[fletcherv1.ListCredentialsResponse], error) {
 	return connect.NewResponse(&fletcherv1.ListCredentialsResponse{
-		Names:     s.backend.SavedCredentials(),
-		Supported: s.backend.SupportedCredentials(),
+		Names: s.backend.SavedCredentials(),
 	}), nil
 }
 

@@ -1551,7 +1551,26 @@ no state machine, no capture-pane - the bugs those carried are gone with them. T
 parser drops back to skipping `%begin/%end` blocks. Client commit `fletcher-ios`
 aacb967 (supersedes the reverted a9a9d2e/c05ae7f/755c809 attempts).
 
-### Milestone 16 - credential seeding ("log in once") - ENGINE DONE (verified on hardware 2026-06-12); surface in progress
+### Milestone 16 - credential seeding ("log in once") - AGENT SEEDING REMOVED (2026-06-18); git seeding kept
+
+**Outcome (2026-06-18): agent login seeding removed.** After the root-cause finding
+below (a frozen OAuth snapshot goes dead, so seeded Claude/Codex/Gemini sessions boot
+unauthenticated every time), the agent login seeding was removed from the daemon and
+the iOS app rather than rebuilt as a gateway-OAuth feature - the user chose simplicity
+over the larger build. Removed: the four agent credentials (claude/codex/gemini/pi),
+the save-from-session export path (`ExportCredential` / `SaveSessionLogin` RPC + tar
+helpers), `SessionLoginNames` / `SupportedCredentials`, the `DefaultCredential` option,
+the proto `SaveSessionLogin` RPC and the `ListCredentialsResponse.supported` field
+(reserved), the `fletcher credential save` CLI, and the iOS agent-login picker / "Save
+login" UI. **Kept:** the vendor-neutral **git** credential (a static token, not living
+OAuth, so seeding it is durable) and all the generic seed infra it rides on, plus the
+`default_agent` picker hint (which agent runs - unrelated to seeding). Subscription
+users now log into the agent per session. If gateway-OAuth is ever wanted, the design
+sketch is preserved below.
+
+The original M16 content (engine, populate path, gotchas) is kept below for history.
+
+### Milestone 16 (historical) - credential seeding engine
 
 **Goal.** Stop re-logging-in for every new session. The box holds a saved agent
 login; each *new* session's fork is seeded from it at create, so it boots already

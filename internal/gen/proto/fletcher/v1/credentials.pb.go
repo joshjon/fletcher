@@ -21,96 +21,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type SaveSessionLoginRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// session_ref is the session (ID or name) to copy the login out of.
-	SessionRef string `protobuf:"bytes,1,opt,name=session_ref,json=sessionRef,proto3" json:"session_ref,omitempty"`
-	// name is the agent login to save: "claude" | "codex" | "gemini".
-	Name          string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SaveSessionLoginRequest) Reset() {
-	*x = SaveSessionLoginRequest{}
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SaveSessionLoginRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SaveSessionLoginRequest) ProtoMessage() {}
-
-func (x *SaveSessionLoginRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SaveSessionLoginRequest.ProtoReflect.Descriptor instead.
-func (*SaveSessionLoginRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *SaveSessionLoginRequest) GetSessionRef() string {
-	if x != nil {
-		return x.SessionRef
-	}
-	return ""
-}
-
-func (x *SaveSessionLoginRequest) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-type SaveSessionLoginResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SaveSessionLoginResponse) Reset() {
-	*x = SaveSessionLoginResponse{}
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SaveSessionLoginResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SaveSessionLoginResponse) ProtoMessage() {}
-
-func (x *SaveSessionLoginResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SaveSessionLoginResponse.ProtoReflect.Descriptor instead.
-func (*SaveSessionLoginResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{1}
-}
-
 type SaveGitCredentialRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// host is the git host, e.g. "github.com" or "gitlab.com" (a bare hostname,
@@ -133,7 +43,7 @@ type SaveGitCredentialRequest struct {
 
 func (x *SaveGitCredentialRequest) Reset() {
 	*x = SaveGitCredentialRequest{}
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[2]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -145,7 +55,7 @@ func (x *SaveGitCredentialRequest) String() string {
 func (*SaveGitCredentialRequest) ProtoMessage() {}
 
 func (x *SaveGitCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[2]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -158,7 +68,7 @@ func (x *SaveGitCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveGitCredentialRequest.ProtoReflect.Descriptor instead.
 func (*SaveGitCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{2}
+	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *SaveGitCredentialRequest) GetHost() string {
@@ -204,7 +114,7 @@ type SaveGitCredentialResponse struct {
 
 func (x *SaveGitCredentialResponse) Reset() {
 	*x = SaveGitCredentialResponse{}
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[3]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -216,7 +126,7 @@ func (x *SaveGitCredentialResponse) String() string {
 func (*SaveGitCredentialResponse) ProtoMessage() {}
 
 func (x *SaveGitCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[3]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -229,7 +139,7 @@ func (x *SaveGitCredentialResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveGitCredentialResponse.ProtoReflect.Descriptor instead.
 func (*SaveGitCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{3}
+	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{1}
 }
 
 type ListCredentialsRequest struct {
@@ -240,7 +150,7 @@ type ListCredentialsRequest struct {
 
 func (x *ListCredentialsRequest) Reset() {
 	*x = ListCredentialsRequest{}
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[4]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -252,7 +162,7 @@ func (x *ListCredentialsRequest) String() string {
 func (*ListCredentialsRequest) ProtoMessage() {}
 
 func (x *ListCredentialsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[4]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -265,27 +175,20 @@ func (x *ListCredentialsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCredentialsRequest.ProtoReflect.Descriptor instead.
 func (*ListCredentialsRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{4}
+	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{2}
 }
 
 type ListCredentialsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// names are the saved logins, e.g. ["claude"].
-	Names []string `protobuf:"bytes,1,rep,name=names,proto3" json:"names,omitempty"`
-	// supported are every agent whose login can be saved out of a running session
-	// (the agents that ship in the image), e.g. ["claude", "codex", "gemini",
-	// "pi"]. Clients drive their "save login from a session" picker from this so
-	// it never drifts from what the image ships. The "git" login is not listed
-	// here - it is saved from structured fields via SaveGitCredential, not by
-	// exporting a session - but appears in names once saved.
-	Supported     []string `protobuf:"bytes,2,rep,name=supported,proto3" json:"supported,omitempty"`
+	// names are the saved logins, e.g. ["git"].
+	Names         []string `protobuf:"bytes,1,rep,name=names,proto3" json:"names,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListCredentialsResponse) Reset() {
 	*x = ListCredentialsResponse{}
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[5]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -297,7 +200,7 @@ func (x *ListCredentialsResponse) String() string {
 func (*ListCredentialsResponse) ProtoMessage() {}
 
 func (x *ListCredentialsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[5]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -310,7 +213,7 @@ func (x *ListCredentialsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCredentialsResponse.ProtoReflect.Descriptor instead.
 func (*ListCredentialsResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{5}
+	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListCredentialsResponse) GetNames() []string {
@@ -320,16 +223,9 @@ func (x *ListCredentialsResponse) GetNames() []string {
 	return nil
 }
 
-func (x *ListCredentialsResponse) GetSupported() []string {
-	if x != nil {
-		return x.Supported
-	}
-	return nil
-}
-
 type DeleteCredentialRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// name is the saved login to remove: "claude" | "codex" | "gemini" | "git".
+	// name is the saved login to remove (today: "git").
 	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -337,7 +233,7 @@ type DeleteCredentialRequest struct {
 
 func (x *DeleteCredentialRequest) Reset() {
 	*x = DeleteCredentialRequest{}
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[6]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -349,7 +245,7 @@ func (x *DeleteCredentialRequest) String() string {
 func (*DeleteCredentialRequest) ProtoMessage() {}
 
 func (x *DeleteCredentialRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[6]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -362,7 +258,7 @@ func (x *DeleteCredentialRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCredentialRequest.ProtoReflect.Descriptor instead.
 func (*DeleteCredentialRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{6}
+	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *DeleteCredentialRequest) GetName() string {
@@ -380,7 +276,7 @@ type DeleteCredentialResponse struct {
 
 func (x *DeleteCredentialResponse) Reset() {
 	*x = DeleteCredentialResponse{}
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[7]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -392,7 +288,7 @@ func (x *DeleteCredentialResponse) String() string {
 func (*DeleteCredentialResponse) ProtoMessage() {}
 
 func (x *DeleteCredentialResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_credentials_proto_msgTypes[7]
+	mi := &file_fletcher_v1_credentials_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -405,19 +301,14 @@ func (x *DeleteCredentialResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCredentialResponse.ProtoReflect.Descriptor instead.
 func (*DeleteCredentialResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{7}
+	return file_fletcher_v1_credentials_proto_rawDescGZIP(), []int{5}
 }
 
 var File_fletcher_v1_credentials_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_credentials_proto_rawDesc = "" +
 	"\n" +
-	"\x1dfletcher/v1/credentials.proto\x12\vfletcher.v1\"N\n" +
-	"\x17SaveSessionLoginRequest\x12\x1f\n" +
-	"\vsession_ref\x18\x01 \x01(\tR\n" +
-	"sessionRef\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\x1a\n" +
-	"\x18SaveSessionLoginResponse\"\xaa\x01\n" +
+	"\x1dfletcher/v1/credentials.proto\x12\vfletcher.v1\"\xaa\x01\n" +
 	"\x18SaveGitCredentialRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x14\n" +
@@ -425,15 +316,13 @@ const file_fletcher_v1_credentials_proto_rawDesc = "" +
 	"\rgit_user_name\x18\x04 \x01(\tR\vgitUserName\x12$\n" +
 	"\x0egit_user_email\x18\x05 \x01(\tR\fgitUserEmail\"\x1b\n" +
 	"\x19SaveGitCredentialResponse\"\x18\n" +
-	"\x16ListCredentialsRequest\"M\n" +
+	"\x16ListCredentialsRequest\"@\n" +
 	"\x17ListCredentialsResponse\x12\x14\n" +
-	"\x05names\x18\x01 \x03(\tR\x05names\x12\x1c\n" +
-	"\tsupported\x18\x02 \x03(\tR\tsupported\"-\n" +
+	"\x05names\x18\x01 \x03(\tR\x05namesJ\x04\b\x02\x10\x03R\tsupported\"-\n" +
 	"\x17DeleteCredentialRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x1a\n" +
-	"\x18DeleteCredentialResponse2\x9f\x03\n" +
-	"\x11CredentialService\x12a\n" +
-	"\x10SaveSessionLogin\x12$.fletcher.v1.SaveSessionLoginRequest\x1a%.fletcher.v1.SaveSessionLoginResponse\"\x00\x12d\n" +
+	"\x18DeleteCredentialResponse2\xbc\x02\n" +
+	"\x11CredentialService\x12d\n" +
 	"\x11SaveGitCredential\x12%.fletcher.v1.SaveGitCredentialRequest\x1a&.fletcher.v1.SaveGitCredentialResponse\"\x00\x12^\n" +
 	"\x0fListCredentials\x12#.fletcher.v1.ListCredentialsRequest\x1a$.fletcher.v1.ListCredentialsResponse\"\x00\x12a\n" +
 	"\x10DeleteCredential\x12$.fletcher.v1.DeleteCredentialRequest\x1a%.fletcher.v1.DeleteCredentialResponse\"\x00B\xb7\x01\n" +
@@ -451,28 +340,24 @@ func file_fletcher_v1_credentials_proto_rawDescGZIP() []byte {
 	return file_fletcher_v1_credentials_proto_rawDescData
 }
 
-var file_fletcher_v1_credentials_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_fletcher_v1_credentials_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_fletcher_v1_credentials_proto_goTypes = []any{
-	(*SaveSessionLoginRequest)(nil),   // 0: fletcher.v1.SaveSessionLoginRequest
-	(*SaveSessionLoginResponse)(nil),  // 1: fletcher.v1.SaveSessionLoginResponse
-	(*SaveGitCredentialRequest)(nil),  // 2: fletcher.v1.SaveGitCredentialRequest
-	(*SaveGitCredentialResponse)(nil), // 3: fletcher.v1.SaveGitCredentialResponse
-	(*ListCredentialsRequest)(nil),    // 4: fletcher.v1.ListCredentialsRequest
-	(*ListCredentialsResponse)(nil),   // 5: fletcher.v1.ListCredentialsResponse
-	(*DeleteCredentialRequest)(nil),   // 6: fletcher.v1.DeleteCredentialRequest
-	(*DeleteCredentialResponse)(nil),  // 7: fletcher.v1.DeleteCredentialResponse
+	(*SaveGitCredentialRequest)(nil),  // 0: fletcher.v1.SaveGitCredentialRequest
+	(*SaveGitCredentialResponse)(nil), // 1: fletcher.v1.SaveGitCredentialResponse
+	(*ListCredentialsRequest)(nil),    // 2: fletcher.v1.ListCredentialsRequest
+	(*ListCredentialsResponse)(nil),   // 3: fletcher.v1.ListCredentialsResponse
+	(*DeleteCredentialRequest)(nil),   // 4: fletcher.v1.DeleteCredentialRequest
+	(*DeleteCredentialResponse)(nil),  // 5: fletcher.v1.DeleteCredentialResponse
 }
 var file_fletcher_v1_credentials_proto_depIdxs = []int32{
-	0, // 0: fletcher.v1.CredentialService.SaveSessionLogin:input_type -> fletcher.v1.SaveSessionLoginRequest
-	2, // 1: fletcher.v1.CredentialService.SaveGitCredential:input_type -> fletcher.v1.SaveGitCredentialRequest
-	4, // 2: fletcher.v1.CredentialService.ListCredentials:input_type -> fletcher.v1.ListCredentialsRequest
-	6, // 3: fletcher.v1.CredentialService.DeleteCredential:input_type -> fletcher.v1.DeleteCredentialRequest
-	1, // 4: fletcher.v1.CredentialService.SaveSessionLogin:output_type -> fletcher.v1.SaveSessionLoginResponse
-	3, // 5: fletcher.v1.CredentialService.SaveGitCredential:output_type -> fletcher.v1.SaveGitCredentialResponse
-	5, // 6: fletcher.v1.CredentialService.ListCredentials:output_type -> fletcher.v1.ListCredentialsResponse
-	7, // 7: fletcher.v1.CredentialService.DeleteCredential:output_type -> fletcher.v1.DeleteCredentialResponse
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
+	0, // 0: fletcher.v1.CredentialService.SaveGitCredential:input_type -> fletcher.v1.SaveGitCredentialRequest
+	2, // 1: fletcher.v1.CredentialService.ListCredentials:input_type -> fletcher.v1.ListCredentialsRequest
+	4, // 2: fletcher.v1.CredentialService.DeleteCredential:input_type -> fletcher.v1.DeleteCredentialRequest
+	1, // 3: fletcher.v1.CredentialService.SaveGitCredential:output_type -> fletcher.v1.SaveGitCredentialResponse
+	3, // 4: fletcher.v1.CredentialService.ListCredentials:output_type -> fletcher.v1.ListCredentialsResponse
+	5, // 5: fletcher.v1.CredentialService.DeleteCredential:output_type -> fletcher.v1.DeleteCredentialResponse
+	3, // [3:6] is the sub-list for method output_type
+	0, // [0:3] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -489,7 +374,7 @@ func file_fletcher_v1_credentials_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fletcher_v1_credentials_proto_rawDesc), len(file_fletcher_v1_credentials_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

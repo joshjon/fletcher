@@ -104,10 +104,6 @@ type Options struct {
 	// with a credential seeds those files into its fork so it boots already
 	// logged in. Empty disables credential seeding.
 	CredentialsRoot string
-	// DefaultCredential is the agent login seeded into a new session when create
-	// is called with no explicit credential: "" (none) | "claude" | "codex" |
-	// "gemini". The box-level "log in once" default; reloadable.
-	DefaultCredential string
 }
 
 // idleLoadThreshold is the guest 1-minute load average below which a session
@@ -403,19 +399,14 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 // Create calls this; a later Start never reseeds, so a token the session
 // refreshed in its fork is never overwritten by the (older) box login.
 func (m *Manager) resolveCredentials(requested []string) ([]runtime.CredentialFile, error) {
-	opt := m.opt()
-	names := requested
-	if len(names) == 0 && strings.TrimSpace(opt.DefaultCredential) != "" {
-		names = []string{opt.DefaultCredential}
-	}
-	if len(names) == 0 {
+	if len(requested) == 0 {
 		return nil, nil
 	}
-	names, err := job.ValidateCredentialNames(names)
+	names, err := job.ValidateCredentialNames(requested)
 	if err != nil {
 		return nil, err
 	}
-	return job.ResolveCredentialFiles(opt.CredentialsRoot, names)
+	return job.ResolveCredentialFiles(m.opt().CredentialsRoot, names)
 }
 
 // Get returns the session matching ref (an ID or name).

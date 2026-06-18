@@ -281,7 +281,7 @@ func sessionCreateCmd() *cli.Command {
 			&cli.StringFlag{Name: "gateway", Usage: "model gateway: on (inject ANTHROPIC_/OPENAI_ env) | off (use the agent's own auth, e.g. a subscription login) (default: the daemon's default_gateway setting)"},
 			&cli.BoolFlag{Name: "app", Usage: "run the image's own app (its entrypoint) on boot, instead of a bare environment"},
 			&cli.StringFlag{Name: "volume", Usage: "persistent volume (id or name) to attach, mounted at /volume in the guest (create one with `fletcher volume create`)"},
-			&cli.StringSliceFlag{Name: "credential", Usage: "seed a saved login into the new session so it boots ready: claude | codex | gemini | pi | git (repeatable; save one with `fletcher credential save` or `fletcher credential git`)"},
+			&cli.StringSliceFlag{Name: "credential", Usage: "seed the saved git login into the new session so it can clone private repos: git (save one with `fletcher credential git`)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			client := newSessionsClient(cmd)
