@@ -1551,6 +1551,69 @@ no state machine, no capture-pane - the bugs those carried are gone with them. T
 parser drops back to skipping `%begin/%end` blocks. Client commit `fletcher-ios`
 aacb967 (supersedes the reverted a9a9d2e/c05ae7f/755c809 attempts).
 
+### Milestone 19 - session-native image build + deploy (M9 v2) - DESIGN (2026-06-21, pending review)
+
+**Why.** M9 deploys from a host directory (`docker build` on the box) or a registry
+ref - the flyctl model. The operator's actual workflow is different: work on a project
+repo *inside* a Fletcher session (editing with an agent), then deploy *that* project.
+M9 has no session source, and building on the host is off-workflow. Operator decision
+(2026-06-21): build the project's Dockerfile **inside Fletcher, sandboxed, no host
+Docker**, triggered both by an operator CLI and by an agent MCP tool from inside the
+session. (This is the "Future (M9 v2)" line in the M9 section, now scheduled.)
+
+**Load-bearing unknown - verified (2026-06-21).** A daemonless builder can turn a
+Dockerfile into a deployable image with no Docker daemon: `buildah bud` + `buildah
+push oci-archive` produced a 3.5 MB OCI archive in a privileged container (a
+conservative proxy for the microVM, which has a full kernel + root, so it is *more*
+capable than a container). buildah chosen over buildkit (no daemon to run) and kaniko
+(assumes it owns an ephemeral pod rootfs).
+
+**Architecture (the reuse is the point).** The daemon's `image import` already
+flattens a **rootfs tree + run config** into a deployable ext4 template: inject
+`fletcher-init` -> `appspec.Write` (`/etc/fletcher/app.json`) -> `mkfs.ext4 -d`
+(`cmd/fletcher/image.go` `importImageExt4` / `buildExt4Image`). And M10's
+`publish_image` already moves an image from a session to the daemon over an
+approval-gated channel (`internal/mcp/tools.go` `ApprovalBackend`,
+`session.Manager.CommitImage`). M9 v2 slots between them:
+
+1. **Builder image** (separate small image, not bloating `fletcher-base`): buildah +
+   its deps. A build runs in an **ephemeral build fork** off this image - sandboxed,
+   discarded after, never touches the dev session's disk.
+2. **Build context** is tar'd out of the dev session (the project subdir, e.g.
+   `/workspace/myapp`) - the same export-over-vsock pattern the credential save used -
+   and into the build fork. (Alternative considered: CoW-clone the whole dev session
+   disk so the files are already present - rejected as heavy, ~3.4 GiB, and it drags
+   the dev toolchain into the build.)
+3. **Build** in the fork: `buildah bud` the Dockerfile, then export the flattened
+   rootfs tree + the image's run config (entrypoint/cmd/env/workdir/expose ->
+   `appspec.Spec`).
+4. **Image-out:** ship the rootfs tar + appspec to the daemon over the publish
+   channel; the daemon runs the **existing** flatten tail (`buildExt4Image`) to a
+   template. No host Docker anywhere in the path.
+5. **Deploy:** the template deploys as a published app session via the existing M9
+   entrypoint-mode + `publish` path.
+
+**Triggers (both, per the operator).**
+- **CLI:** `fletcher deploy --from-session <ref> [subdir] [--host ...]` - the operator
+  deploys the project from a session they were working in.
+- **MCP:** a `build_image` / `deploy` tool the agent calls from inside the session,
+  approval-gated like `publish_image` (the approval card names: build `<subdir>` from
+  session `<S>`, deploy as `<name>` at `<host>`).
+
+**Open decisions to confirm before building.**
+- Build location: ephemeral fork + context-tar-in (recommended, light, sandboxed) vs
+  building in the dev session directly (simplest, but pollutes it and needs buildah in
+  `fletcher-base`).
+- Image-out format: a flattened rootfs tar (reuses `buildExt4Image` directly) vs an OCI
+  archive (daemon must assemble layers first - more new code). Rootfs tar recommended.
+- Whether `--from-session` also covers the non-session case (a host dir) or stays
+  session-only alongside today's `deploy <dir>`.
+
+**Status: design only - not built.** Verified the builder; the rest (builder image,
+ephemeral build-fork lifecycle, context export-in, rootfs export-out over vsock, the
+CLI flag, the MCP tool + approval) is the work. Needs hardware testing (real microVM
+build).
+
 ### Milestone 16 - credential seeding ("log in once") - AGENT SEEDING REMOVED (2026-06-18); git seeding kept
 
 **Outcome (2026-06-18): agent login seeding removed.** After the root-cause finding
