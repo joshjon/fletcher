@@ -184,6 +184,9 @@ IMAGE_DIR  := images/fletcher-base
 image: ## Build the fletcher-base OCI image for the host architecture
 	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_DIR)
 
+builder-image: ## Build the fletcher-builder OCI image (session-native Docker builds, M19)
+	docker build -t fletcher-builder:$(IMAGE_TAG) images/fletcher-builder
+
 image-amd64: ## Build fletcher-base for linux/amd64 (cross-platform)
 	docker buildx build --platform linux/amd64 -t $(IMAGE_NAME):$(IMAGE_TAG)-amd64 --load $(IMAGE_DIR)
 

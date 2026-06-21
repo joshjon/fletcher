@@ -1551,7 +1551,7 @@ no state machine, no capture-pane - the bugs those carried are gone with them. T
 parser drops back to skipping `%begin/%end` blocks. Client commit `fletcher-ios`
 aacb967 (supersedes the reverted a9a9d2e/c05ae7f/755c809 attempts).
 
-### Milestone 19 - session-native image build + deploy (M9 v2) - FOUNDATION VERIFIED ON HARDWARE (2026-06-21); orchestration pending
+### Milestone 19 - session-native image build + deploy (M9 v2) - DONE (CLI verified end-to-end on hardware 2026-06-21; MCP tool built)
 
 **Why.** M9 deploys from a host directory (`docker build` on the box) or a registry
 ref - the flyctl model. The operator's actual workflow is different: work on a project
@@ -1627,20 +1627,48 @@ approval-gated channel (`internal/mcp/tools.go` `ApprovalBackend`,
 - Whether `--from-session` also covers the non-session case (a host dir) or stays
   session-only alongside today's `deploy <dir>`.
 
-**Status: foundation verified, orchestration pending.** Done: the `fletcher-builder`
-image, and hardware proof that build + base-pull-via-proxy + rootfs/config export all
-work in a real fork. Remaining (the daemon-side glue, no unknowns left): the
-ephemeral build-fork lifecycle (create from `fletcher-builder`, `open` egress,
-discard after); context export-in (tar the project subdir out of the dev session, in
-to the build fork); a build script (`buildah build --isolation chroot` -> `from` +
-`mount` + `tar` rootfs + `inspect` config); rootfs/config export-out to the daemon;
-wiring to the existing `buildExt4Image` flatten tail -> template -> deploy; the CLI
-`deploy --from-session`; and the approval-gated MCP `build`/`deploy` tool.
+**Shipped + verified end-to-end on hardware (2026-06-21).** A `deploy --from-session`
+of a real project (a Dockerfile with `RUN apk add python3` + a python http.server)
+built in a sandboxed fork and ran as a published app session that served correctly
+over its port. What landed:
+- `internal/imagebuild.FlattenRootfs`: the shared flatten tail (inject guest init +
+  write app run-config + `mkfs.ext4 -d`), extracted from the CLI import so the daemon
+  reuses it.
+- `session.Manager.BuildImageFromSession`: tars the project subdir out of the dev
+  session (over the daemon-internal `m.Exec`, which buffers full stdout - reliable,
+  unlike the CLI exec path), boots an ephemeral `fletcher-builder` fork (context
+  injected via the file-seed channel, `open` egress), runs `buildah build --isolation
+  chroot` + `from`/`mount`/`tar` + `inspect`, reads the rootfs + config back, and
+  flattens to a template. Fork created + discarded within the call.
+- `ImageService.BuildFromSession` RPC + `ImageBuilder` backend wired to the session
+  manager.
+- CLI `fletcher deploy --from-session <session> [subdir]` (builds then creates the
+  published app session, reusing the deploy tail).
+- MCP `build_image` tool: approval-gated, so an agent builds its own session's project
+  (the operator approves, then deploys with `fletcher deploy <name>`).
+
+**Verified along the way:** base-image pulls AND `RUN` package installs (`apk add`)
+both reach registries/mirrors through the daemon egress proxy from the no-NIC build
+fork; `OCIv1.config` is parsed from a raw `buildah inspect` (this buildah's template
+engine lacks the `json` function).
+
+**Follow-ups (not blocking, noted):**
+- The rootfs moves daemon<->fork as base64 over exec, buffered in memory - fine for
+  typical apps; a streaming/volume channel is a v2 optimization for very large images.
+- The MCP tool builds the template; deploying it to a *published* session stays an
+  operator action (CLI). A full agent-initiated deploy (incl. public exposure) is a
+  follow-up if wanted.
+- The daemon extracts the built rootfs as the daemon user (daemon-owned files), fine
+  for app images that run as root - same documented limitation as the registry import.
+- `fletcher-builder` must be imported on a box (like `fletcher-base`):
+  `make builder-image && sudo fletcher image import fletcher-builder:dev --name
+  fletcher-builder --format ext4`.
 
 **Bug found while verifying (separate, worth fixing): `session exec` drops output.**
 Some `fletcher session exec` calls return empty stdout (e.g. `exec <s> -- echo a b c`
 printed nothing) while others succeed, inconsistently - an output-capture race in the
-exec path. The durable-shell (PTY) path is reliable; verification was done through it.
+*CLI* exec path (the daemon-internal `m.Exec` buffers fully and is reliable, which is
+why the build orchestration uses it). The durable-shell (PTY) path is also reliable.
 Not M19-specific; flagged for its own fix.
 
 ### Milestone 16 - credential seeding ("log in once") - AGENT SEEDING REMOVED (2026-06-18); git seeding kept
