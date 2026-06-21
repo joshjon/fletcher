@@ -11,6 +11,13 @@ import (
 	"github.com/joshjon/fletcher/internal/image"
 )
 
+// ImageBuilder builds a project's Dockerfile out of a running session into a
+// template (M19), implemented by the session manager. Returns the template name
+// and the image's lowest EXPOSE.
+type ImageBuilder interface {
+	BuildImageFromSession(ctx context.Context, devRef, subdir, name string, force bool) (resultName string, exposedPort int, err error)
+}
+
 // ImagesService implements fletcherv1connect.ImageServiceHandler: it imports a
 // registry image into a template on the daemon's host, so a remote client can
 // deploy without local docker or filesystem access to the box.
@@ -18,12 +25,37 @@ type ImagesService struct {
 	fletcherv1connect.UnimplementedImageServiceHandler
 	imagesDir string
 	format    string
+	builder   ImageBuilder
 }
 
-// NewImagesService wires the service to the daemon's images directory and
-// snapshot format (server-side import currently supports ext4 / Firecracker).
-func NewImagesService(imagesDir, format string) *ImagesService {
-	return &ImagesService{imagesDir: imagesDir, format: format}
+// NewImagesService wires the service to the daemon's images directory, snapshot
+// format (server-side import currently supports ext4 / Firecracker), and the
+// session-native image builder.
+func NewImagesService(imagesDir, format string, builder ImageBuilder) *ImagesService {
+	return &ImagesService{imagesDir: imagesDir, format: format, builder: builder}
+}
+
+// BuildFromSession builds a session's project Dockerfile into a template (M19).
+func (s *ImagesService) BuildFromSession(ctx context.Context, req *connect.Request[fletcherv1.BuildFromSessionRequest]) (*connect.Response[fletcherv1.BuildFromSessionResponse], error) {
+	if s.format != "ext4" {
+		return nil, errs.New(errs.CategoryFailedPrecondition,
+			"session-native build requires the firecracker runtime (ext4 snapshots)")
+	}
+	if s.builder == nil {
+		return nil, errs.New(errs.CategoryFailedPrecondition, "this daemon cannot build from a session")
+	}
+	ref := req.Msg.GetDevSessionRef()
+	if ref == "" {
+		return nil, errs.New(errs.CategoryInvalidArgument, "dev_session_ref is required")
+	}
+	name, port, err := s.builder.BuildImageFromSession(ctx, ref, req.Msg.GetSubdir(), req.Msg.GetName(), req.Msg.GetForce())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.BuildFromSessionResponse{
+		Name:        name,
+		ExposedPort: uint32(port), //nolint:gosec // port is 0..65535
+	}), nil
 }
 
 // ListImages lists the imported templates so a client can offer a picker.

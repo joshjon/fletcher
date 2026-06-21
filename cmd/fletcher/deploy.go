@@ -44,6 +44,7 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 		Flags: []cli.Flag{
 			socketFlag(),
 			btrfsRootFlag(),
+			&cli.StringFlag{Name: "from-session", Usage: "build the Dockerfile from a running session's workspace instead of a host dir/ref (the positional arg is then the project subdir, e.g. /workspace/myapp); built inside a sandboxed fork, no host docker"},
 			&cli.StringFlag{Name: "name", Usage: "session + template name (default: derived from the image/dir)"},
 			&cli.StringFlag{Name: "host", Usage: "public hostname to serve at over HTTPS, e.g. app.example.com (omit for tunnel-only)"},
 			&cli.IntFlag{Name: "port", Usage: "container port to publish (default: the image's EXPOSE)"},
@@ -54,8 +55,8 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			src := cmd.Args().First()
-			if src == "" {
-				return errors.New("usage: fletcher deploy <dir-or-image-ref> [--host ...]")
+			if src == "" && cmd.String("from-session") == "" {
+				return errors.New("usage: fletcher deploy <dir-or-image-ref> [--host ...]  (or --from-session <session> [subdir])")
 			}
 
 			name, port, err := deployImage(ctx, cmd, src)
@@ -105,10 +106,49 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 // (remote-capable); a local directory with a Dockerfile is built and imported on
 // the host (needs root + docker).
 func deployImage(ctx context.Context, cmd *cli.Command, src string) (name string, port int, err error) {
+	if sess := cmd.String("from-session"); sess != "" {
+		return deployFromSession(ctx, cmd, sess, src)
+	}
 	if isDeployDir(src) {
 		return deployFromDir(ctx, cmd, src)
 	}
 	return deployFromRef(ctx, cmd, src)
+}
+
+// deployFromSession builds a project's Dockerfile out of a running session into a
+// template, entirely inside Fletcher (M19): the daemon tars the project out of
+// the session and builds it with buildah in a sandboxed build fork (no host
+// docker). subdir is the project directory inside the session.
+func deployFromSession(ctx context.Context, cmd *cli.Command, sessRef, subdir string) (string, int, error) {
+	name := cmd.String("name")
+	if name == "" {
+		name = deployName(subdir)
+		if name == "" || name == "." || name == "/" {
+			name = sessRef + "-app"
+		}
+	}
+	fmt.Printf("building %s from session %s in a sandboxed build fork (no host docker)...\n", deploySubdirLabel(subdir), sessRef)
+	resp, err := newImageClient(cmd).BuildFromSession(ctx, connect.NewRequest(&fletcherv1.BuildFromSessionRequest{
+		DevSessionRef: sessRef,
+		Subdir:        subdir,
+		Name:          name,
+		Force:         true,
+	}))
+	if err != nil {
+		return "", 0, err
+	}
+	port := cmd.Int("port")
+	if port == 0 {
+		port = int(resp.Msg.GetExposedPort())
+	}
+	return resp.Msg.GetName(), port, nil
+}
+
+func deploySubdirLabel(subdir string) string {
+	if strings.TrimSpace(subdir) == "" {
+		return "the workspace"
+	}
+	return subdir
 }
 
 // deployFromRef imports a registry ref via the daemon (works from a remote

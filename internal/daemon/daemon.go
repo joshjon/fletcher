@@ -590,6 +590,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		publicIP:         publicEndpointHost(netSetup.EffectivePublicEndpoint),
 		imagesDir:        filepath.Join(snapshotRootDir(cfg), "images"),
 		snapshotKind:     driverKind(cfg.SnapshotKind),
+		imageBuilder:     sessionMgr,
 		secrets:          secretsStore,
 		approvals:        approvalSvc,
 		push:             deviceTokens,
@@ -699,6 +700,8 @@ type connectDeps struct {
 	// server-side into the daemon's snapshot root.
 	imagesDir    string
 	snapshotKind string
+	// imageBuilder builds a session's project Dockerfile into a template (M19).
+	imageBuilder api.ImageBuilder
 	// settingsDefaults maps each setting key to the daemon's resolved default,
 	// so `fletcher settings list` shows the effective value, not just "(default)".
 	settingsDefaults map[string]string
@@ -1063,7 +1066,7 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	mux.Handle(modelsPath, modelsHandler)
 
 	imagesPath, imagesHandler := fletcherv1connect.NewImageServiceHandler(
-		api.NewImagesService(deps.imagesDir, deps.snapshotKind), interceptors,
+		api.NewImagesService(deps.imagesDir, deps.snapshotKind, deps.imageBuilder), interceptors,
 	)
 	mux.Handle(imagesPath, imagesHandler)
 

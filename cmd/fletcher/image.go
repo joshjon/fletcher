@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,7 +19,7 @@ import (
 	"github.com/joshjon/fletcher/internal/appspec"
 	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
 	"github.com/joshjon/fletcher/internal/image"
-	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestagent"
+	"github.com/joshjon/fletcher/internal/imagebuild"
 	"github.com/joshjon/fletcher/internal/settings"
 )
 
@@ -435,23 +434,16 @@ func importImageExt4(ctx context.Context, root, ref, name string, force bool) er
 	if err := exportDockerRootfs(ctx, ref, staging); err != nil {
 		return err
 	}
-	// Inject the guest agent as the microVM init (init=/sbin/fletcher-init).
-	initDest := filepath.Join(staging, guestagent.InitPath)
-	if err := os.MkdirAll(filepath.Dir(initDest), 0o755); err != nil { //nolint:gosec // standard /sbin perms inside the rootfs
-		return fmt.Errorf("create init dir in rootfs: %w", err)
-	}
-	if err := guestagent.WriteTo(initDest); err != nil {
-		return fmt.Errorf("inject guest agent: %w", err)
-	}
 	// Capture the image's run config so a session created with --app can run the
 	// image's own app on boot (M9). Best-effort: a failure just means app mode is
 	// unavailable for this template, not that the import fails.
-	if spec, cerr := dockerImageConfig(ctx, ref); cerr != nil {
+	spec, cerr := dockerImageConfig(ctx, ref)
+	if cerr != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not read image run config (app mode unavailable): %v\n", cerr)
-	} else if werr := appspec.Write(spec, filepath.Join(staging, appspec.Path)); werr != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not write app spec: %v\n", werr)
 	}
-	if err := buildExt4Image(ctx, staging, target); err != nil {
+	// Inject the guest init + run-config and pack the ext4 (shared with the
+	// daemon's session-native build).
+	if err := imagebuild.FlattenRootfs(ctx, staging, target, spec); err != nil {
 		_ = os.Remove(target)
 		return err
 	}
@@ -531,58 +523,6 @@ func dockerImageDigest(ctx context.Context, ref string) string {
 		}
 	}
 	return ""
-}
-
-// buildExt4Image packs the staging rootfs tree into an ext4 image at target.
-// The image is sized to the populated bytes plus working headroom (1 GiB
-// floor); mkfs.ext4 -d preserves ownership, permissions and symlinks.
-func buildExt4Image(ctx context.Context, stagingDir, target string) error {
-	used, err := dirSizeBytes(ctx, stagingDir)
-	if err != nil {
-		return err
-	}
-	// Populated size + 50% + 512 MiB working space, floored at 1 GiB. Dynamic
-	// growth at first boot is a later enhancement.
-	const (
-		mib   = int64(1) << 20
-		floor = int64(1) << 30
-	)
-	size := used + used/2 + 512*mib
-	if size < floor {
-		size = floor
-	}
-	size = (size + mib - 1) / mib * mib // round up to a whole MiB
-
-	truncate := exec.CommandContext(ctx, "truncate", "-s", strconv.FormatInt(size, 10), target) //nolint:gosec // fixed args + the operator's path
-	truncate.Stderr = os.Stderr
-	if err := truncate.Run(); err != nil {
-		return fmt.Errorf("allocate ext4 image: %w", err)
-	}
-	// -F: operate on a plain file; -q: quiet; -d: populate from stagingDir.
-	mkfs := exec.CommandContext(ctx, "mkfs.ext4", "-F", "-q", "-d", stagingDir, target) //nolint:gosec // fixed args + operator paths
-	mkfs.Stdout = os.Stderr
-	mkfs.Stderr = os.Stderr
-	if err := mkfs.Run(); err != nil {
-		return fmt.Errorf("build ext4 rootfs: %w", err)
-	}
-	return nil
-}
-
-// dirSizeBytes returns the apparent size of dir in bytes via `du -sb`.
-func dirSizeBytes(ctx context.Context, dir string) (int64, error) {
-	out, err := exec.CommandContext(ctx, "du", "-sb", dir).Output() //nolint:gosec // dir is our own temp staging path
-	if err != nil {
-		return 0, fmt.Errorf("measure rootfs size: %w", err)
-	}
-	fields := strings.Fields(string(out))
-	if len(fields) == 0 {
-		return 0, fmt.Errorf("measure rootfs size: unexpected du output %q", out)
-	}
-	n, err := strconv.ParseInt(fields[0], 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("parse rootfs size %q: %w", fields[0], err)
-	}
-	return n, nil
 }
 
 // exportDockerRootfs pipes `docker export` of a throwaway container created

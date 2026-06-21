@@ -17,6 +17,31 @@ service ImageService {
   // ListImages lists the imported templates, so a client can offer an image
   // picker instead of a free-text field.
   rpc ListImages(ListImagesRequest) returns (ListImagesResponse) {}
+  // BuildFromSession builds a project's Dockerfile - living in a running
+  // session's workspace - into a deployable template, entirely inside Fletcher
+  // (M19): the daemon tars the project out of the session and builds it with
+  // buildah in an ephemeral, sandboxed build fork (no host Docker). This is the
+  // "work on a repo in a session, then deploy it" path; `deploy` calls it.
+  rpc BuildFromSession(BuildFromSessionRequest) returns (BuildFromSessionResponse) {}
+}
+
+message BuildFromSessionRequest {
+  // dev_session_ref is the session (id or name) holding the project to build.
+  string dev_session_ref = 1;
+  // subdir is the project directory inside the session whose Dockerfile to
+  // build (e.g. "/workspace/myapp"); empty/"." builds the session's cwd root.
+  string subdir = 2;
+  // name is the template name to import the built image as.
+  string name = 3;
+  // force replaces an existing template of the same name.
+  bool force = 4;
+}
+
+message BuildFromSessionResponse {
+  string name = 1;
+  // exposed_port is the built image's lowest EXPOSE (0 if none), a default for
+  // what to publish.
+  uint32 exposed_port = 2;
 }
 
 message ListImagesRequest {}

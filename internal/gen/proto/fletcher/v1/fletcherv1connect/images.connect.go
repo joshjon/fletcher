@@ -37,6 +37,9 @@ const (
 	ImageServiceImportProcedure = "/fletcher.v1.ImageService/Import"
 	// ImageServiceListImagesProcedure is the fully-qualified name of the ImageService's ListImages RPC.
 	ImageServiceListImagesProcedure = "/fletcher.v1.ImageService/ListImages"
+	// ImageServiceBuildFromSessionProcedure is the fully-qualified name of the ImageService's
+	// BuildFromSession RPC.
+	ImageServiceBuildFromSessionProcedure = "/fletcher.v1.ImageService/BuildFromSession"
 )
 
 // ImageServiceClient is a client for the fletcher.v1.ImageService service.
@@ -50,6 +53,12 @@ type ImageServiceClient interface {
 	// ListImages lists the imported templates, so a client can offer an image
 	// picker instead of a free-text field.
 	ListImages(context.Context, *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error)
+	// BuildFromSession builds a project's Dockerfile - living in a running
+	// session's workspace - into a deployable template, entirely inside Fletcher
+	// (M19): the daemon tars the project out of the session and builds it with
+	// buildah in an ephemeral, sandboxed build fork (no host Docker). This is the
+	// "work on a repo in a session, then deploy it" path; `deploy` calls it.
+	BuildFromSession(context.Context, *connect.Request[v1.BuildFromSessionRequest]) (*connect.Response[v1.BuildFromSessionResponse], error)
 }
 
 // NewImageServiceClient constructs a client for the fletcher.v1.ImageService service. By default,
@@ -75,13 +84,20 @@ func NewImageServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(imageServiceMethods.ByName("ListImages")),
 			connect.WithClientOptions(opts...),
 		),
+		buildFromSession: connect.NewClient[v1.BuildFromSessionRequest, v1.BuildFromSessionResponse](
+			httpClient,
+			baseURL+ImageServiceBuildFromSessionProcedure,
+			connect.WithSchema(imageServiceMethods.ByName("BuildFromSession")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // imageServiceClient implements ImageServiceClient.
 type imageServiceClient struct {
-	_import    *connect.Client[v1.ImportRequest, v1.ImportResponse]
-	listImages *connect.Client[v1.ListImagesRequest, v1.ListImagesResponse]
+	_import          *connect.Client[v1.ImportRequest, v1.ImportResponse]
+	listImages       *connect.Client[v1.ListImagesRequest, v1.ListImagesResponse]
+	buildFromSession *connect.Client[v1.BuildFromSessionRequest, v1.BuildFromSessionResponse]
 }
 
 // Import calls fletcher.v1.ImageService.Import.
@@ -92,6 +108,11 @@ func (c *imageServiceClient) Import(ctx context.Context, req *connect.Request[v1
 // ListImages calls fletcher.v1.ImageService.ListImages.
 func (c *imageServiceClient) ListImages(ctx context.Context, req *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error) {
 	return c.listImages.CallUnary(ctx, req)
+}
+
+// BuildFromSession calls fletcher.v1.ImageService.BuildFromSession.
+func (c *imageServiceClient) BuildFromSession(ctx context.Context, req *connect.Request[v1.BuildFromSessionRequest]) (*connect.Response[v1.BuildFromSessionResponse], error) {
+	return c.buildFromSession.CallUnary(ctx, req)
 }
 
 // ImageServiceHandler is an implementation of the fletcher.v1.ImageService service.
@@ -105,6 +126,12 @@ type ImageServiceHandler interface {
 	// ListImages lists the imported templates, so a client can offer an image
 	// picker instead of a free-text field.
 	ListImages(context.Context, *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error)
+	// BuildFromSession builds a project's Dockerfile - living in a running
+	// session's workspace - into a deployable template, entirely inside Fletcher
+	// (M19): the daemon tars the project out of the session and builds it with
+	// buildah in an ephemeral, sandboxed build fork (no host Docker). This is the
+	// "work on a repo in a session, then deploy it" path; `deploy` calls it.
+	BuildFromSession(context.Context, *connect.Request[v1.BuildFromSessionRequest]) (*connect.Response[v1.BuildFromSessionResponse], error)
 }
 
 // NewImageServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -126,12 +153,20 @@ func NewImageServiceHandler(svc ImageServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(imageServiceMethods.ByName("ListImages")),
 		connect.WithHandlerOptions(opts...),
 	)
+	imageServiceBuildFromSessionHandler := connect.NewUnaryHandler(
+		ImageServiceBuildFromSessionProcedure,
+		svc.BuildFromSession,
+		connect.WithSchema(imageServiceMethods.ByName("BuildFromSession")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.ImageService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ImageServiceImportProcedure:
 			imageServiceImportHandler.ServeHTTP(w, r)
 		case ImageServiceListImagesProcedure:
 			imageServiceListImagesHandler.ServeHTTP(w, r)
+		case ImageServiceBuildFromSessionProcedure:
+			imageServiceBuildFromSessionHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -147,4 +182,8 @@ func (UnimplementedImageServiceHandler) Import(context.Context, *connect.Request
 
 func (UnimplementedImageServiceHandler) ListImages(context.Context, *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.ListImages is not implemented"))
+}
+
+func (UnimplementedImageServiceHandler) BuildFromSession(context.Context, *connect.Request[v1.BuildFromSessionRequest]) (*connect.Response[v1.BuildFromSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.BuildFromSession is not implemented"))
 }
