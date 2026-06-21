@@ -1551,7 +1551,7 @@ no state machine, no capture-pane - the bugs those carried are gone with them. T
 parser drops back to skipping `%begin/%end` blocks. Client commit `fletcher-ios`
 aacb967 (supersedes the reverted a9a9d2e/c05ae7f/755c809 attempts).
 
-### Milestone 19 - session-native image build + deploy (M9 v2) - DESIGN (2026-06-21, pending review)
+### Milestone 19 - session-native image build + deploy (M9 v2) - FOUNDATION VERIFIED ON HARDWARE (2026-06-21); orchestration pending
 
 **Why.** M9 deploys from a host directory (`docker build` on the box) or a registry
 ref - the flyctl model. The operator's actual workflow is different: work on a project
@@ -1561,12 +1561,30 @@ M9 has no session source, and building on the host is off-workflow. Operator dec
 Docker**, triggered both by an operator CLI and by an agent MCP tool from inside the
 session. (This is the "Future (M9 v2)" line in the M9 section, now scheduled.)
 
-**Load-bearing unknown - verified (2026-06-21).** A daemonless builder can turn a
-Dockerfile into a deployable image with no Docker daemon: `buildah bud` + `buildah
-push oci-archive` produced a 3.5 MB OCI archive in a privileged container (a
-conservative proxy for the microVM, which has a full kernel + root, so it is *more*
-capable than a container). buildah chosen over buildkit (no daemon to run) and kaniko
-(assumes it owns an ephemeral pod rootfs).
+**Load-bearing unknowns - both verified on real hardware (2026-06-21).** A
+`fletcher-builder` image (`images/fletcher-builder`, buildah + crun + netavark +
+aardvark-dns, vfs storage) was built, imported, and exercised inside a real
+Firecracker fork. The full path works end to end:
+- **Build:** `buildah build --isolation chroot -t <tag> <ctx>` builds a Dockerfile in
+  the fork. chroot isolation is the key - the default crun path fails with `invalid
+  file system type on /sys/fs/cgroup` (the microVM does not present cgroups cleanly);
+  chroot runs RUN steps without crun/cgroups/netns, sharing the fork's namespaces.
+- **Base-image pull through the egress proxy:** `FROM alpine:3.19` pulled successfully
+  with the fork on `--egress open` - the no-NIC fork reaches the registry via the
+  daemon's HTTP(S) proxy. So a build fork needs `open` egress (or an allowlist
+  including the base-image registry).
+- **Export:** `buildah from` + `buildah mount` gives the flattened rootfs path; `tar`
+  it (3.3 MB for the alpine probe), and `buildah inspect -f '{{.OCIv1.Config...}}'`
+  yields the run config (entrypoint/cmd/env/workdir/expose) -> `appspec.Spec`. Exactly
+  the rootfs-tree + run-config the daemon's flatten tail (`buildExt4Image`) consumes.
+buildah chosen over buildkit (a daemon to run) and kaniko (assumes it owns an
+ephemeral pod rootfs). Gotchas baked into the image: `storage.conf` must set
+`runroot`/`graphroot` explicitly (else "runroot must be set"); netavark/aardvark-dns
+must be present even to *create* a build container.
+
+**Build config fixes folded in (2026-06-21).** storage.conf with vfs +
+runroot/graphroot; netavark + aardvark-dns installed; the canonical invocation is
+`buildah build --isolation chroot` on a fork with `open` egress.
 
 **Architecture (the reuse is the point).** The daemon's `image import` already
 flattens a **rootfs tree + run config** into a deployable ext4 template: inject
@@ -1609,10 +1627,21 @@ approval-gated channel (`internal/mcp/tools.go` `ApprovalBackend`,
 - Whether `--from-session` also covers the non-session case (a host dir) or stays
   session-only alongside today's `deploy <dir>`.
 
-**Status: design only - not built.** Verified the builder; the rest (builder image,
-ephemeral build-fork lifecycle, context export-in, rootfs export-out over vsock, the
-CLI flag, the MCP tool + approval) is the work. Needs hardware testing (real microVM
-build).
+**Status: foundation verified, orchestration pending.** Done: the `fletcher-builder`
+image, and hardware proof that build + base-pull-via-proxy + rootfs/config export all
+work in a real fork. Remaining (the daemon-side glue, no unknowns left): the
+ephemeral build-fork lifecycle (create from `fletcher-builder`, `open` egress,
+discard after); context export-in (tar the project subdir out of the dev session, in
+to the build fork); a build script (`buildah build --isolation chroot` -> `from` +
+`mount` + `tar` rootfs + `inspect` config); rootfs/config export-out to the daemon;
+wiring to the existing `buildExt4Image` flatten tail -> template -> deploy; the CLI
+`deploy --from-session`; and the approval-gated MCP `build`/`deploy` tool.
+
+**Bug found while verifying (separate, worth fixing): `session exec` drops output.**
+Some `fletcher session exec` calls return empty stdout (e.g. `exec <s> -- echo a b c`
+printed nothing) while others succeed, inconsistently - an output-capture race in the
+exec path. The durable-shell (PTY) path is reliable; verification was done through it.
+Not M19-specific; flagged for its own fix.
 
 ### Milestone 16 - credential seeding ("log in once") - AGENT SEEDING REMOVED (2026-06-18); git seeding kept
 
