@@ -226,6 +226,9 @@ type ImagePublisher interface {
 	// ImportRegistryImage pulls ref and flattens it into an image template,
 	// returning the template name.
 	ImportRegistryImage(ctx context.Context, ref, name string, force bool) (string, error)
+	// BuildFromSession builds a project's Dockerfile out of a session's
+	// workspace into a template (M19), returning the template name.
+	BuildFromSession(ctx context.Context, sessionRef, subdir, name string, force bool) (string, error)
 }
 
 // CommitImage parameterises an ImagePublisher session commit.
@@ -308,6 +311,18 @@ const (
 	publishWaitDefault = 10 * time.Minute
 	publishWaitMax     = time.Hour
 )
+
+// approvalWait reads the wait_seconds argument, defaulted and clamped.
+func approvalWait(req mcpgo.CallToolRequest) time.Duration {
+	wait := time.Duration(req.GetFloat("wait_seconds", publishWaitDefault.Seconds())) * time.Second
+	if wait <= 0 {
+		wait = publishWaitDefault
+	}
+	if wait > publishWaitMax {
+		wait = publishWaitMax
+	}
+	return wait
+}
 
 // publishImageTool lets an agent publish an image template to the daemon - by
 // committing its own session's disk (the local-first path: nothing leaves the
@@ -405,6 +420,82 @@ func publishImageTool(publisher ImagePublisher, approvals ApprovalBackend) Tool 
 				published, final.ID)), nil
 		},
 	}
+}
+
+// buildImageTool lets an agent build the project it is working on (a Dockerfile
+// in its session's workspace) into a deployable image template, entirely inside
+// Fletcher - the daemon builds it with buildah in a sandboxed fork, no host
+// Docker. Approval-gated like publish_image: the call blocks until the operator
+// decides. The operator then deploys the template (`fletcher deploy <name>`).
+func buildImageTool(publisher ImagePublisher, approvals ApprovalBackend) Tool {
+	return Tool{
+		Spec: mcpgo.NewTool("build_image",
+			mcpgo.WithDescription("Build the project you are working on (a Dockerfile in this session's workspace) into a deployable image template on the Fletcher daemon. The daemon builds it in a sandboxed build fork (no host Docker). Requires human approval: the call blocks until the operator approves or denies. After approval the operator can deploy it with `fletcher deploy <name>`."),
+			mcpgo.WithString("name",
+				mcpgo.Required(),
+				mcpgo.Description("Template name for the built image (lowercase letters, digits, '.', '_', '-')."),
+			),
+			mcpgo.WithString("justification",
+				mcpgo.Required(),
+				mcpgo.Description("What the project is and why to build it - shown to the operator on the approval."),
+			),
+			mcpgo.WithString("session",
+				mcpgo.Required(),
+				mcpgo.Description("This session - pass the value of $FLETCHER_SESSION_NAME."),
+			),
+			mcpgo.WithString("subdir",
+				mcpgo.Description("The project directory in the workspace whose Dockerfile to build (e.g. /workspace/myapp). Defaults to the workspace root."),
+			),
+			mcpgo.WithBoolean("force",
+				mcpgo.Description("Replace an existing template of the same name."),
+			),
+			mcpgo.WithNumber("wait_seconds",
+				mcpgo.Description("How long to block waiting for the operator's decision. Defaults to 600, capped at 3600."),
+			),
+		),
+		Handler: func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+			name := strings.TrimSpace(req.GetString("name", ""))
+			session := strings.TrimSpace(req.GetString("session", ""))
+			justification := strings.TrimSpace(req.GetString("justification", ""))
+			if name == "" || session == "" || justification == "" {
+				return mcpgo.NewToolResultError("name, session, and justification are required"), nil
+			}
+			subdir := strings.TrimSpace(req.GetString("subdir", ""))
+			wait := approvalWait(req)
+
+			created, err := approvals.Create(ctx, approval.CreateParams{
+				Action:        fmt.Sprintf("build image %q from session %q (%s)", name, session, subdirLabel(subdir)),
+				Justification: justification,
+				Requester:     "agent:" + session,
+				TTL:           wait,
+			})
+			if err != nil {
+				return mcpgo.NewToolResultError(err.Error()), nil
+			}
+			final, err := approvals.Wait(ctx, created.ID)
+			if err != nil {
+				return mcpgo.NewToolResultError(fmt.Sprintf("wait for approval %s: %s", created.ID, err)), nil
+			}
+			if final.Status != approval.StatusApproved {
+				return mcpgo.NewToolResultText(fmt.Sprintf(
+					"image not built: approval %s is %s%s", final.ID, final.Status, reasonSuffix(final))), nil
+			}
+			built, err := publisher.BuildFromSession(ctx, session, subdir, name, req.GetBool("force", false))
+			if err != nil {
+				return mcpgo.NewToolResultError(fmt.Sprintf("approval %s approved, but the build failed: %s", final.ID, err)), nil
+			}
+			return mcpgo.NewToolResultText(fmt.Sprintf(
+				"built image %q (approval %s). The operator can deploy it with `fletcher deploy %s`.",
+				built, final.ID, built)), nil
+		},
+	}
+}
+
+func subdirLabel(subdir string) string {
+	if subdir == "" || subdir == "." {
+		return "workspace root"
+	}
+	return subdir
 }
 
 // publishArgs are the parsed and validated arguments of a publish_image call.
@@ -570,6 +661,7 @@ func RegisterBuiltinTools(srv *Server, startedAt time.Time, httpClient *http.Cli
 		srv.RegisterTool(requestApprovalTool(approvals))
 		if publisher != nil {
 			srv.RegisterTool(publishImageTool(publisher, approvals))
+			srv.RegisterTool(buildImageTool(publisher, approvals))
 		}
 	}
 	if reports != nil {

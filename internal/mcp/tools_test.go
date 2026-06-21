@@ -83,6 +83,7 @@ func (s *stubApprovals) Wait(_ context.Context, id string) (approval.Approval, e
 type stubPublisher struct {
 	commits []CommitImage
 	imports []string
+	builds  []string
 }
 
 func (s *stubPublisher) CommitSessionImage(_ context.Context, p CommitImage) (string, error) {
@@ -92,6 +93,11 @@ func (s *stubPublisher) CommitSessionImage(_ context.Context, p CommitImage) (st
 
 func (s *stubPublisher) ImportRegistryImage(_ context.Context, ref, name string, _ bool) (string, error) {
 	s.imports = append(s.imports, ref)
+	return name, nil
+}
+
+func (s *stubPublisher) BuildFromSession(_ context.Context, sessionRef, _, name string, _ bool) (string, error) {
+	s.builds = append(s.builds, sessionRef)
 	return name, nil
 }
 

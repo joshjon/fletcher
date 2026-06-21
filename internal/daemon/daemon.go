@@ -1407,6 +1407,11 @@ func (p *imagePublisher) CommitSessionImage(ctx context.Context, c fletchermcp.C
 	})
 }
 
+func (p *imagePublisher) BuildFromSession(ctx context.Context, sessionRef, subdir, name string, force bool) (string, error) {
+	built, _, err := p.sessions.BuildImageFromSession(ctx, sessionRef, subdir, name, force)
+	return built, err
+}
+
 func (p *imagePublisher) ImportRegistryImage(ctx context.Context, ref, name string, force bool) (string, error) {
 	if p.format != "ext4" {
 		return "", fmt.Errorf("registry image publishing requires the firecracker runtime (ext4 snapshots), not %q", p.format)
