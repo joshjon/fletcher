@@ -166,7 +166,9 @@ func (m *Manager) buildInFork(ctx context.Context, contextGz []byte) ([]byte, ap
 		`ctr=$(buildah from fletcherapp)`,
 		`mnt=$(buildah mount "$ctr")`,
 		"tar -czf " + buildRootfsPath + ` -C "$mnt" .`,
-		"buildah inspect -f '{{json .OCIv1.Config}}' fletcherapp > " + buildConfigPath,
+		// Full inspect JSON; this buildah's template engine lacks the `json`
+		// function, so the daemon parses OCIv1.config out of the raw dump.
+		"buildah inspect fletcherapp > " + buildConfigPath,
 	}, "\n")
 	if res, eerr := m.execIn(ctx, handle, buildScript); eerr != nil {
 		return nil, appspec.Spec{}, 0, fmt.Errorf("run build: %w", eerr)
@@ -190,18 +192,23 @@ func (m *Manager) buildInFork(ctx context.Context, contextGz []byte) ([]byte, ap
 	return rootfsGz, spec, exposedPort, nil
 }
 
-// parseOCIConfig turns a `buildah inspect`d OCI image config into the app launch
-// spec and the image's lowest EXPOSE.
+// parseOCIConfig pulls the app launch spec and the image's lowest EXPOSE out of
+// a raw `buildah inspect` dump (its OCIv1.config object).
 func parseOCIConfig(jsonStr string) (appspec.Spec, int) {
-	var cfg struct {
-		Entrypoint   []string            `json:"Entrypoint"`
-		Cmd          []string            `json:"Cmd"`
-		Env          []string            `json:"Env"`
-		WorkingDir   string              `json:"WorkingDir"`
-		User         string              `json:"User"`
-		ExposedPorts map[string]struct{} `json:"ExposedPorts"`
+	var inspect struct {
+		OCIv1 struct {
+			Config struct {
+				Entrypoint   []string            `json:"Entrypoint"`
+				Cmd          []string            `json:"Cmd"`
+				Env          []string            `json:"Env"`
+				WorkingDir   string              `json:"WorkingDir"`
+				User         string              `json:"User"`
+				ExposedPorts map[string]struct{} `json:"ExposedPorts"`
+			} `json:"config"`
+		} `json:"OCIv1"`
 	}
-	_ = json.Unmarshal([]byte(strings.TrimSpace(jsonStr)), &cfg)
+	_ = json.Unmarshal([]byte(strings.TrimSpace(jsonStr)), &inspect)
+	cfg := inspect.OCIv1.Config
 	spec := appspec.Spec{
 		Entrypoint: cfg.Entrypoint,
 		Cmd:        cfg.Cmd,
