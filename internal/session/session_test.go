@@ -117,6 +117,10 @@ func (r *fakeRuntime) DiscardSession(_ context.Context, _ string) error {
 	return nil
 }
 
+func (r *fakeRuntime) ReclaimOrphans(_ context.Context, _ []string) (int, error) {
+	return 0, nil
+}
+
 // fakeHandle echoes the command back on stdout and counts Stop calls.
 type fakeHandle struct {
 	execs    []string

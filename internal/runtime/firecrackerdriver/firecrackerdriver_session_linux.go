@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -136,6 +137,37 @@ func (d *Driver) DiscardSession(_ context.Context, sessionID string) error {
 		return fmt.Errorf("firecracker: discard session vm dir: %w", err)
 	}
 	return nil
+}
+
+// ReclaimOrphans removes session vmDirs whose id is not in keep - leaked VM
+// state (hibernation snapshots are ~GiB each) from sessions deleted while the
+// daemon was down, an ephemeral build fork that did not clean up, or an older
+// release. keep is the live session ids (all of them, running and hibernated -
+// a hibernated session's snapshot must be retained). Returns how many it
+// reclaimed. Called on boot, when no build forks are in flight.
+func (d *Driver) ReclaimOrphans(_ context.Context, keep []string) (int, error) {
+	keepDirs := make(map[string]bool, len(keep))
+	for _, id := range keep {
+		keepDirs["session-"+sanitiseID(id)] = true
+	}
+	entries, err := os.ReadDir(d.runDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("firecracker: list vm dirs: %w", err)
+	}
+	reclaimed := 0
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || !strings.HasPrefix(name, "session-") || keepDirs[name] {
+			continue
+		}
+		if rerr := os.RemoveAll(filepath.Join(d.runDir, name)); rerr == nil {
+			reclaimed++
+		}
+	}
+	return reclaimed, nil
 }
 
 // fcSession is a running session VM. Satisfies runtime.SessionHandle.

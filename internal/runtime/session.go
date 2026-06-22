@@ -107,4 +107,9 @@ type SessionRuntime interface {
 	// snapshot and runtime sockets) when the session is deleted. The fork is
 	// owned by the snapshot driver and removed separately.
 	DiscardSession(ctx context.Context, sessionID string) error
+	// ReclaimOrphans removes leaked VM state for sessions that no longer exist
+	// (keep is every live session id). Called on boot to recover disk from
+	// sessions deleted while the daemon was down, build forks that crashed, or
+	// older releases. Returns how many it reclaimed.
+	ReclaimOrphans(ctx context.Context, keep []string) (int, error)
 }

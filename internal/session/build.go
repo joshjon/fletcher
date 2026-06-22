@@ -312,7 +312,12 @@ func (m *Manager) buildInFork(ctx context.Context, contextGz []byte, logSink io.
 	if err != nil {
 		return nil, appspec.Spec{}, 0, fmt.Errorf("start build fork: %w", err)
 	}
-	defer func() { _ = handle.Stop(context.WithoutCancel(ctx)) }()
+	defer func() {
+		_ = handle.Stop(context.WithoutCancel(ctx))
+		// Remove the build fork's VM dir (sockets/state) - it is ephemeral and
+		// has no session row, so nothing else cleans it up.
+		_ = m.runtime.DiscardSession(context.WithoutCancel(ctx), buildID)
+	}()
 
 	// Build the Dockerfile and stage the outputs (the verified recipe: chroot
 	// isolation - the microVM has no clean cgroups for crun). --layers + a

@@ -1351,7 +1351,9 @@ func (m *Manager) ReconcileOnBoot(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("reconcile sessions: %w", err)
 	}
+	keep := make([]string, 0, len(rows))
 	for _, r := range rows {
+		keep = append(keep, r.ID)
 		if State(r.State) != StateRunning {
 			continue
 		}
@@ -1359,6 +1361,16 @@ func (m *Manager) ReconcileOnBoot(ctx context.Context) error {
 			return err
 		}
 		m.logger.Info("reset orphaned running session to stopped", slog.String("session_id", r.ID))
+	}
+	// Reclaim leaked on-disk VM state (hibernation snapshots are ~GiB each) for
+	// sessions that no longer exist - deleted while the daemon was down, a
+	// crashed build fork, or an older release that did not clean up.
+	if m.runtime != nil {
+		if n, rerr := m.runtime.ReclaimOrphans(ctx, keep); rerr != nil {
+			m.logger.Warn("reclaim orphaned vm state", slog.String("err", rerr.Error()))
+		} else if n > 0 {
+			m.logger.Info("reclaimed orphaned vm state", slog.Int("count", n))
+		}
 	}
 	return nil
 }
