@@ -1720,6 +1720,50 @@ printed nothing) while others succeed, inconsistently - an output-capture race i
 why the build orchestration uses it). The durable-shell (PTY) path is also reliable.
 Not M19-specific; flagged for its own fix.
 
+### Milestone 20 - build layer caching - DESIGN (2026-06-22, load-bearing unknown verified)
+
+**Why.** M19 builds run in a fresh, discarded fork, so every build re-pulls the base
+image and re-runs every `RUN` step - a real cost for `npm`/`pnpm install` projects. Add
+a persistent layer cache so rebuilds reuse unchanged layers.
+
+**How GitHub does it (the model we follow).** GitHub-*hosted* runners are ephemeral
+(fresh VM per job, destroyed) - like our build fork - so they never persist the build
+env or lock a shared store. Caching is an external **content-addressed, immutable,
+write-once** service (`actions/cache`; for Docker, BuildKit `type=gha`/`type=registry`):
+keys are content digests, an existing key is never overwritten, so concurrent writers
+just "first wins, rest skip" - no locks, worst case redundant work. GitHub-*self-hosted*
+runners instead keep a local cache and run one job at a time (single concurrency).
+
+**Load-bearing unknown - verified on hardware (2026-06-22).** `buildah build --isolation
+chroot --layers --root <persistent> --runroot <persistent>` produces real cache hits in
+the Fletcher fork (vfs + chroot): a second build of an unchanged Dockerfile printed
+`--> Using cache` for every `RUN` layer and reused the base image with no re-pull. So a
+persistent buildah graphroot is all it takes.
+
+**Design (recommended: the self-hosted-runner model - simplest, fits a single box).**
+- A **daemon-owned persistent build-cache ext4** (e.g. `/var/lib/fletcher/buildcache.ext4`,
+  sparse, sized generously), holding buildah's graphroot + runroot. One per box = maximum
+  reuse across all projects.
+- **Attach** it to the ephemeral build fork as a second disk (reuse the existing
+  `SessionSpec.VolumePath` mount, at `/volume`); the build script runs `buildah build
+  --layers --root /volume/storage --runroot /volume/run ...`. The fork stays ephemeral;
+  only the cache disk persists.
+- **Concurrency: serialize builds** (a daemon mutex) so one build writes the cache at a
+  time - the self-hosted model. Fine for a personal box. (The content-addressed
+  *registry* model - a small daemon-run OCI registry reached over a vsock relay, with
+  `--cache-to`/`--cache-from` - is the scale-up path if parallel builds are ever needed;
+  more moving parts, so deferred.)
+- **Space/pruning:** the vfs cache grows; cap the disk and `buildah prune` when over a
+  threshold (or on a timer). Overlay storage would be far more space-efficient but needs
+  FUSE/`/dev/fuse` or kernel-overlay support verified in the microVM - a follow-on.
+- **Invalidation** is buildah's own: a layer is reused only when its parent + the exact
+  instruction match, so editing the Dockerfile or a copied file busts from that step
+  down, exactly like Docker.
+
+**Scope:** ensure/create the cache disk; serialize + attach it to build forks; add
+`--layers --root/--runroot` to the build script; a size cap + prune. Small-to-moderate,
+no new unknowns. Not built yet.
+
 ### Milestone 16 - credential seeding ("log in once") - AGENT SEEDING REMOVED (2026-06-18); git seeding kept
 
 **Outcome (2026-06-18): agent login seeding removed.** After the root-cause finding
