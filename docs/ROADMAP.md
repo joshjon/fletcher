@@ -1920,6 +1920,21 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**Storage: leaked VM state reclaimed (2026-06-22, daemon `c107456`).** A hibernated
+session's Firecracker vmDir (`snapshot.mem`, ~GiB each) leaked on delete-while-down,
+older releases, and M19/M20 build forks (which `StartSession` under their own id but
+never `DiscardSession`). They had piled up to ~34 GiB on the operator's box with no
+visibility. Fix: build forks now discard their vmDir on cleanup, and a boot sweep
+(`runtime.ReclaimOrphans`, called from `ReconcileOnBoot` with all live session ids -
+running and hibernated) removes any vmDir with no live session. Self-healing on every
+start. Verified: reclaimed 18 orphans, 49 GiB -> 15 GiB, live sessions untouched.
+
+**Storage overview/reclaim UI - DEFERRED (operator's Mac is mid-flight on the iOS
+repo).** A unified storage view (usage by category: images, session forks, volumes,
+build cache, hibernate snapshots, free disk) + reclaim actions (clear build cache,
+prune images), in the **iOS app + CLI**. Scoped with the operator (2026-06-22); held
+until the iOS repo is free, then build iOS-first.
+
 With M1-M6 done, the daemon is feature-complete on the thesis (ephemeral jobs +
 durable interactive sessions, both verified on real hardware), which is what
 makes Milestone 7 (the SwiftUI iOS client - the hero) a client deliverable on a
