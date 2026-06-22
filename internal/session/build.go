@@ -36,6 +36,85 @@ const (
 	buildConfigPath = "/opt/app-config.json"
 )
 
+// buildRecord is the status of one detached build (M19).
+type buildRecord struct {
+	state       string // "building" | "succeeded" | "failed"
+	name        string
+	exposedPort int
+	errMsg      string
+	updated     time.Time
+}
+
+// buildStateBuilding etc. are the buildRecord.state values reported to clients.
+const (
+	buildStateBuilding  = "building"
+	buildStateSucceeded = "succeeded"
+	buildStateFailed    = "failed"
+)
+
+// StartBuildFromSession kicks off BuildImageFromSession DETACHED from the caller
+// and returns a build id immediately, so a mobile client can poll GetBuildStatus
+// and survive being backgrounded mid-build (builds take minutes). The build runs
+// on its own context with a generous timeout, so a dropped client connection
+// does not abort it. Obvious input errors are returned synchronously.
+func (m *Manager) StartBuildFromSession(ctx context.Context, devRef, subdir, imageName string, force bool) (string, error) {
+	if err := m.requireRuntime(); err != nil {
+		return "", err
+	}
+	if !validImageName(strings.TrimSpace(imageName)) {
+		return "", errs.Newf(errs.CategoryInvalidArgument,
+			"invalid image name %q (lowercase letters, digits, '.', '_', '-')", imageName)
+	}
+	id, err := typeid.WithPrefix("build")
+	if err != nil {
+		return "", fmt.Errorf("generate build id: %w", err)
+	}
+	buildID := id.String()
+
+	m.buildsMu.Lock()
+	m.sweepBuildsLocked()
+	m.builds[buildID] = &buildRecord{state: buildStateBuilding, updated: time.Now()}
+	m.buildsMu.Unlock()
+
+	go func() {
+		// Detached: own context (not the request's), with a ceiling so a wedged
+		// build cannot run forever.
+		bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
+		defer cancel()
+		name, port, berr := m.BuildImageFromSession(bctx, devRef, subdir, imageName, force)
+		m.buildsMu.Lock()
+		if berr != nil {
+			m.builds[buildID] = &buildRecord{state: buildStateFailed, errMsg: berr.Error(), updated: time.Now()}
+		} else {
+			m.builds[buildID] = &buildRecord{state: buildStateSucceeded, name: name, exposedPort: port, updated: time.Now()}
+		}
+		m.buildsMu.Unlock()
+	}()
+	return buildID, nil
+}
+
+// BuildStatus reports a detached build's state. An unknown id (e.g. the daemon
+// restarted, or it aged out) is reported as failed so the client stops polling.
+func (m *Manager) BuildStatus(buildID string) (state, name string, exposedPort int, errMsg string) {
+	m.buildsMu.Lock()
+	defer m.buildsMu.Unlock()
+	rec, ok := m.builds[buildID]
+	if !ok {
+		return buildStateFailed, "", 0, "build not found (it may have expired or the daemon restarted); try again"
+	}
+	return rec.state, rec.name, rec.exposedPort, rec.errMsg
+}
+
+// sweepBuildsLocked drops terminal build records older than an hour so the map
+// does not grow unbounded. Caller holds buildsMu.
+func (m *Manager) sweepBuildsLocked() {
+	for id, rec := range m.builds {
+		if rec.state != buildStateBuilding && time.Since(rec.updated) > time.Hour {
+			delete(m.builds, id)
+		}
+	}
+}
+
 // BuildImageFromSession builds a project's Dockerfile into a deployable template,
 // entirely inside Fletcher (M19): it tars the project subdir out of the dev
 // session, builds it with buildah in an ephemeral, sandboxed build fork (no host

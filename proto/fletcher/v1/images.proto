@@ -20,9 +20,17 @@ service ImageService {
   // BuildFromSession builds a project's Dockerfile - living in a running
   // session's workspace - into a deployable template, entirely inside Fletcher
   // (M19): the daemon tars the project out of the session and builds it with
-  // buildah in an ephemeral, sandboxed build fork (no host Docker). This is the
-  // "work on a repo in a session, then deploy it" path; `deploy` calls it.
+  // buildah in an ephemeral, sandboxed build fork (no host Docker). Blocks for
+  // the whole build - used by the CLI `deploy`, where blocking is fine.
   rpc BuildFromSession(BuildFromSessionRequest) returns (BuildFromSessionResponse) {}
+  // StartBuildFromSession kicks off the same build but runs it DETACHED from the
+  // request and returns a build id immediately, so a mobile client can poll
+  // GetBuildStatus and survive being backgrounded mid-build (a build can take
+  // minutes). The build keeps running even if this call's connection drops.
+  rpc StartBuildFromSession(StartBuildFromSessionRequest) returns (StartBuildFromSessionResponse) {}
+  // GetBuildStatus reports a detached build's current state (building / succeeded
+  // / failed) so a client can poll to completion and recover after a reconnect.
+  rpc GetBuildStatus(GetBuildStatusRequest) returns (GetBuildStatusResponse) {}
 }
 
 message BuildFromSessionRequest {
@@ -42,6 +50,35 @@ message BuildFromSessionResponse {
   // exposed_port is the built image's lowest EXPOSE (0 if none), a default for
   // what to publish.
   uint32 exposed_port = 2;
+}
+
+// StartBuildFromSessionRequest mirrors BuildFromSessionRequest; a distinct type
+// is required because the two RPCs cannot share a request message.
+message StartBuildFromSessionRequest {
+  string dev_session_ref = 1;
+  string subdir = 2;
+  string name = 3;
+  bool force = 4;
+}
+
+message StartBuildFromSessionResponse {
+  // build_id identifies the detached build; poll GetBuildStatus with it.
+  string build_id = 1;
+}
+
+message GetBuildStatusRequest {
+  string build_id = 1;
+}
+
+message GetBuildStatusResponse {
+  // state is "building", "succeeded", or "failed". An unknown build_id (e.g. the
+  // daemon restarted) is reported as "failed" with an error.
+  string state = 1;
+  // name + exposed_port are set when state is "succeeded".
+  string name = 2;
+  uint32 exposed_port = 3;
+  // error is set when state is "failed".
+  string error = 4;
 }
 
 message ListImagesRequest {}

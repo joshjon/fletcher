@@ -12,10 +12,13 @@ import (
 )
 
 // ImageBuilder builds a project's Dockerfile out of a running session into a
-// template (M19), implemented by the session manager. Returns the template name
-// and the image's lowest EXPOSE.
+// template (M19), implemented by the session manager. BuildImageFromSession
+// blocks (the CLI path); StartBuildFromSession runs it detached and is polled
+// via BuildStatus (the mobile path, robust to backgrounding).
 type ImageBuilder interface {
 	BuildImageFromSession(ctx context.Context, devRef, subdir, name string, force bool) (resultName string, exposedPort int, err error)
+	StartBuildFromSession(ctx context.Context, devRef, subdir, name string, force bool) (buildID string, err error)
+	BuildStatus(buildID string) (state, name string, exposedPort int, errMsg string)
 }
 
 // ImagesService implements fletcherv1connect.ImageServiceHandler: it imports a
@@ -55,6 +58,42 @@ func (s *ImagesService) BuildFromSession(ctx context.Context, req *connect.Reque
 	return connect.NewResponse(&fletcherv1.BuildFromSessionResponse{
 		Name:        name,
 		ExposedPort: uint32(port), //nolint:gosec // port is 0..65535
+	}), nil
+}
+
+// StartBuildFromSession kicks off a detached build and returns its id to poll.
+func (s *ImagesService) StartBuildFromSession(ctx context.Context, req *connect.Request[fletcherv1.StartBuildFromSessionRequest]) (*connect.Response[fletcherv1.StartBuildFromSessionResponse], error) {
+	if s.format != "ext4" {
+		return nil, errs.New(errs.CategoryFailedPrecondition,
+			"session-native build requires the firecracker runtime (ext4 snapshots)")
+	}
+	if s.builder == nil {
+		return nil, errs.New(errs.CategoryFailedPrecondition, "this daemon cannot build from a session")
+	}
+	if req.Msg.GetDevSessionRef() == "" {
+		return nil, errs.New(errs.CategoryInvalidArgument, "dev_session_ref is required")
+	}
+	buildID, err := s.builder.StartBuildFromSession(ctx, req.Msg.GetDevSessionRef(), req.Msg.GetSubdir(), req.Msg.GetName(), req.Msg.GetForce())
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.StartBuildFromSessionResponse{BuildId: buildID}), nil
+}
+
+// GetBuildStatus reports a detached build's current state for polling.
+func (s *ImagesService) GetBuildStatus(_ context.Context, req *connect.Request[fletcherv1.GetBuildStatusRequest]) (*connect.Response[fletcherv1.GetBuildStatusResponse], error) {
+	if s.builder == nil {
+		return nil, errs.New(errs.CategoryFailedPrecondition, "this daemon cannot build from a session")
+	}
+	if req.Msg.GetBuildId() == "" {
+		return nil, errs.New(errs.CategoryInvalidArgument, "build_id is required")
+	}
+	state, name, port, errMsg := s.builder.BuildStatus(req.Msg.GetBuildId())
+	return connect.NewResponse(&fletcherv1.GetBuildStatusResponse{
+		State:       state,
+		Name:        name,
+		ExposedPort: uint32(port), //nolint:gosec // port is 0..65535
+		Error:       errMsg,
 	}), nil
 }
 

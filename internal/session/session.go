@@ -137,6 +137,12 @@ type Manager struct {
 	lastAppRestarts map[string]int64
 	crashLoopWarned map[string]time.Time
 
+	// builds tracks detached session-native builds (M19) by build id, so a
+	// mobile client can start a build and poll its status across reconnects.
+	// In-memory: a daemon restart loses in-flight builds (the client retries).
+	buildsMu sync.Mutex
+	builds   map[string]*buildRecord
+
 	// startLocks serialises Start per session id so concurrent wakes (e.g.
 	// several inbound connections to a published port at once) boot at most one
 	// VM. A sync.Map's zero value is ready to use.
@@ -215,6 +221,7 @@ func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRunti
 
 		lastAppRestarts: make(map[string]int64),
 		crashLoopWarned: make(map[string]time.Time),
+		builds:          make(map[string]*buildRecord),
 	}
 	m.opts.Store(&opts)
 	return m

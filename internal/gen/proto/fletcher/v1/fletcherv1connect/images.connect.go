@@ -40,6 +40,12 @@ const (
 	// ImageServiceBuildFromSessionProcedure is the fully-qualified name of the ImageService's
 	// BuildFromSession RPC.
 	ImageServiceBuildFromSessionProcedure = "/fletcher.v1.ImageService/BuildFromSession"
+	// ImageServiceStartBuildFromSessionProcedure is the fully-qualified name of the ImageService's
+	// StartBuildFromSession RPC.
+	ImageServiceStartBuildFromSessionProcedure = "/fletcher.v1.ImageService/StartBuildFromSession"
+	// ImageServiceGetBuildStatusProcedure is the fully-qualified name of the ImageService's
+	// GetBuildStatus RPC.
+	ImageServiceGetBuildStatusProcedure = "/fletcher.v1.ImageService/GetBuildStatus"
 )
 
 // ImageServiceClient is a client for the fletcher.v1.ImageService service.
@@ -56,9 +62,17 @@ type ImageServiceClient interface {
 	// BuildFromSession builds a project's Dockerfile - living in a running
 	// session's workspace - into a deployable template, entirely inside Fletcher
 	// (M19): the daemon tars the project out of the session and builds it with
-	// buildah in an ephemeral, sandboxed build fork (no host Docker). This is the
-	// "work on a repo in a session, then deploy it" path; `deploy` calls it.
+	// buildah in an ephemeral, sandboxed build fork (no host Docker). Blocks for
+	// the whole build - used by the CLI `deploy`, where blocking is fine.
 	BuildFromSession(context.Context, *connect.Request[v1.BuildFromSessionRequest]) (*connect.Response[v1.BuildFromSessionResponse], error)
+	// StartBuildFromSession kicks off the same build but runs it DETACHED from the
+	// request and returns a build id immediately, so a mobile client can poll
+	// GetBuildStatus and survive being backgrounded mid-build (a build can take
+	// minutes). The build keeps running even if this call's connection drops.
+	StartBuildFromSession(context.Context, *connect.Request[v1.StartBuildFromSessionRequest]) (*connect.Response[v1.StartBuildFromSessionResponse], error)
+	// GetBuildStatus reports a detached build's current state (building / succeeded
+	// / failed) so a client can poll to completion and recover after a reconnect.
+	GetBuildStatus(context.Context, *connect.Request[v1.GetBuildStatusRequest]) (*connect.Response[v1.GetBuildStatusResponse], error)
 }
 
 // NewImageServiceClient constructs a client for the fletcher.v1.ImageService service. By default,
@@ -90,14 +104,28 @@ func NewImageServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(imageServiceMethods.ByName("BuildFromSession")),
 			connect.WithClientOptions(opts...),
 		),
+		startBuildFromSession: connect.NewClient[v1.StartBuildFromSessionRequest, v1.StartBuildFromSessionResponse](
+			httpClient,
+			baseURL+ImageServiceStartBuildFromSessionProcedure,
+			connect.WithSchema(imageServiceMethods.ByName("StartBuildFromSession")),
+			connect.WithClientOptions(opts...),
+		),
+		getBuildStatus: connect.NewClient[v1.GetBuildStatusRequest, v1.GetBuildStatusResponse](
+			httpClient,
+			baseURL+ImageServiceGetBuildStatusProcedure,
+			connect.WithSchema(imageServiceMethods.ByName("GetBuildStatus")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // imageServiceClient implements ImageServiceClient.
 type imageServiceClient struct {
-	_import          *connect.Client[v1.ImportRequest, v1.ImportResponse]
-	listImages       *connect.Client[v1.ListImagesRequest, v1.ListImagesResponse]
-	buildFromSession *connect.Client[v1.BuildFromSessionRequest, v1.BuildFromSessionResponse]
+	_import               *connect.Client[v1.ImportRequest, v1.ImportResponse]
+	listImages            *connect.Client[v1.ListImagesRequest, v1.ListImagesResponse]
+	buildFromSession      *connect.Client[v1.BuildFromSessionRequest, v1.BuildFromSessionResponse]
+	startBuildFromSession *connect.Client[v1.StartBuildFromSessionRequest, v1.StartBuildFromSessionResponse]
+	getBuildStatus        *connect.Client[v1.GetBuildStatusRequest, v1.GetBuildStatusResponse]
 }
 
 // Import calls fletcher.v1.ImageService.Import.
@@ -115,6 +143,16 @@ func (c *imageServiceClient) BuildFromSession(ctx context.Context, req *connect.
 	return c.buildFromSession.CallUnary(ctx, req)
 }
 
+// StartBuildFromSession calls fletcher.v1.ImageService.StartBuildFromSession.
+func (c *imageServiceClient) StartBuildFromSession(ctx context.Context, req *connect.Request[v1.StartBuildFromSessionRequest]) (*connect.Response[v1.StartBuildFromSessionResponse], error) {
+	return c.startBuildFromSession.CallUnary(ctx, req)
+}
+
+// GetBuildStatus calls fletcher.v1.ImageService.GetBuildStatus.
+func (c *imageServiceClient) GetBuildStatus(ctx context.Context, req *connect.Request[v1.GetBuildStatusRequest]) (*connect.Response[v1.GetBuildStatusResponse], error) {
+	return c.getBuildStatus.CallUnary(ctx, req)
+}
+
 // ImageServiceHandler is an implementation of the fletcher.v1.ImageService service.
 type ImageServiceHandler interface {
 	// Import pulls a Docker image from a registry and flattens it into a template
@@ -129,9 +167,17 @@ type ImageServiceHandler interface {
 	// BuildFromSession builds a project's Dockerfile - living in a running
 	// session's workspace - into a deployable template, entirely inside Fletcher
 	// (M19): the daemon tars the project out of the session and builds it with
-	// buildah in an ephemeral, sandboxed build fork (no host Docker). This is the
-	// "work on a repo in a session, then deploy it" path; `deploy` calls it.
+	// buildah in an ephemeral, sandboxed build fork (no host Docker). Blocks for
+	// the whole build - used by the CLI `deploy`, where blocking is fine.
 	BuildFromSession(context.Context, *connect.Request[v1.BuildFromSessionRequest]) (*connect.Response[v1.BuildFromSessionResponse], error)
+	// StartBuildFromSession kicks off the same build but runs it DETACHED from the
+	// request and returns a build id immediately, so a mobile client can poll
+	// GetBuildStatus and survive being backgrounded mid-build (a build can take
+	// minutes). The build keeps running even if this call's connection drops.
+	StartBuildFromSession(context.Context, *connect.Request[v1.StartBuildFromSessionRequest]) (*connect.Response[v1.StartBuildFromSessionResponse], error)
+	// GetBuildStatus reports a detached build's current state (building / succeeded
+	// / failed) so a client can poll to completion and recover after a reconnect.
+	GetBuildStatus(context.Context, *connect.Request[v1.GetBuildStatusRequest]) (*connect.Response[v1.GetBuildStatusResponse], error)
 }
 
 // NewImageServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -159,6 +205,18 @@ func NewImageServiceHandler(svc ImageServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(imageServiceMethods.ByName("BuildFromSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	imageServiceStartBuildFromSessionHandler := connect.NewUnaryHandler(
+		ImageServiceStartBuildFromSessionProcedure,
+		svc.StartBuildFromSession,
+		connect.WithSchema(imageServiceMethods.ByName("StartBuildFromSession")),
+		connect.WithHandlerOptions(opts...),
+	)
+	imageServiceGetBuildStatusHandler := connect.NewUnaryHandler(
+		ImageServiceGetBuildStatusProcedure,
+		svc.GetBuildStatus,
+		connect.WithSchema(imageServiceMethods.ByName("GetBuildStatus")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.ImageService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ImageServiceImportProcedure:
@@ -167,6 +225,10 @@ func NewImageServiceHandler(svc ImageServiceHandler, opts ...connect.HandlerOpti
 			imageServiceListImagesHandler.ServeHTTP(w, r)
 		case ImageServiceBuildFromSessionProcedure:
 			imageServiceBuildFromSessionHandler.ServeHTTP(w, r)
+		case ImageServiceStartBuildFromSessionProcedure:
+			imageServiceStartBuildFromSessionHandler.ServeHTTP(w, r)
+		case ImageServiceGetBuildStatusProcedure:
+			imageServiceGetBuildStatusHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -186,4 +248,12 @@ func (UnimplementedImageServiceHandler) ListImages(context.Context, *connect.Req
 
 func (UnimplementedImageServiceHandler) BuildFromSession(context.Context, *connect.Request[v1.BuildFromSessionRequest]) (*connect.Response[v1.BuildFromSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.BuildFromSession is not implemented"))
+}
+
+func (UnimplementedImageServiceHandler) StartBuildFromSession(context.Context, *connect.Request[v1.StartBuildFromSessionRequest]) (*connect.Response[v1.StartBuildFromSessionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.StartBuildFromSession is not implemented"))
+}
+
+func (UnimplementedImageServiceHandler) GetBuildStatus(context.Context, *connect.Request[v1.GetBuildStatusRequest]) (*connect.Response[v1.GetBuildStatusResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.GetBuildStatus is not implemented"))
 }
