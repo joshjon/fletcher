@@ -1656,13 +1656,31 @@ engine lacks the `json` function).
 - The rootfs moves daemon<->fork as base64 over exec, buffered in memory - fine for
   typical apps; a streaming/volume channel is a v2 optimization for very large images.
 - The MCP tool builds the template; deploying it to a *published* session stays an
-  operator action (CLI). A full agent-initiated deploy (incl. public exposure) is a
-  follow-up if wanted.
+  operator action (the iOS deploy sheet or CLI). A full agent-initiated deploy (incl.
+  public exposure) is a follow-up if wanted.
 - The daemon extracts the built rootfs as the daemon user (daemon-owned files), fine
   for app images that run as root - same documented limitation as the registry import.
 - `fletcher-builder` must be imported on a box (like `fletcher-base`):
   `make builder-image && sudo fletcher image import fletcher-builder:dev --name
   fletcher-builder --format ext4`.
+
+**iOS surface (the priority surface) - shipped, pending Xcode build (2026-06-22).** M19
+was first built CLI-first; the operator flagged that the iOS app is where the work
+happens, so the build/deploy is now reachable from the app (`fletcher-ios` 3a064be):
+- a "Build & deploy this project" action in the session info sheet, which opens the
+  deploy wizard pre-targeted at that session;
+- a third "Session" source in `NewDeploymentSheet` (pick a running session + project
+  subdir); `DeploymentModel` gains a `fromSession` source + a `building` phase, reusing
+  the existing import -> create -> publish orchestration (a build is just a longer
+  resolve-image step, the same shape as a registry deploy);
+- regenerated `ImageService` Swift stubs for `BuildFromSession`.
+The agent path already surfaces in the app via approvals (the `build_image` MCP tool's
+approval card). **Known limitation / robustness follow-up:** the build runs over a
+unary RPC tied to the request, so a long build can hit the RPC timeout or abort if the
+app is backgrounded mid-build (same property as the existing registry deploy). The
+robust fix is a *detached* build observed via the events stream (M13/M14) - the
+app-appropriate async model - tracked as the next step for this feature. Build untested
+from Linux; verify in Xcode.
 
 **Bug found while verifying (separate, worth fixing): `session exec` drops output.**
 Some `fletcher session exec` calls return empty stdout (e.g. `exec <s> -- echo a b c`
