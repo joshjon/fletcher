@@ -1720,7 +1720,20 @@ printed nothing) while others succeed, inconsistently - an output-capture race i
 why the build orchestration uses it). The durable-shell (PTY) path is also reliable.
 Not M19-specific; flagged for its own fix.
 
-### Milestone 20 - build layer caching - DESIGN (2026-06-22, load-bearing unknown verified)
+### Milestone 20 - build layer caching - DONE (verified on hardware 2026-06-22)
+
+**Shipped (daemon `e4cf34f`).** A daemon-owned persistent buildah layer cache: a sparse
+ext4 disk (`buildcache.ext4` by the images dir, created on first build, 40 GiB cap,
+reset if real usage passes 30 GiB) attached to each ephemeral build fork as its
+`/volume` disk. The build runs `buildah build --layers --root /volume/storage --runroot
+/run/buildah ...`, so layers persist between builds; the runroot stays on tmpfs so locks
+reset. Builds serialise on `buildCacheMu` (one writer at a time - the self-hosted-runner
+model). Verified: a node project (npm install express/react/typescript/vite/webpack/
+eslint) built cold in 64s, then warm in 21s (~3x), reusing a 2.7 GiB cache. iOS needed
+nothing - builds just get faster. The original design + the deferred concurrent
+content-addressed-registry path are below.
+
+
 
 **Why.** M19 builds run in a fresh, discarded fork, so every build re-pulls the base
 image and re-runs every `RUN` step - a real cost for `npm`/`pnpm install` projects. Add
