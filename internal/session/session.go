@@ -143,6 +143,12 @@ type Manager struct {
 	buildsMu sync.Mutex
 	builds   map[string]*buildRecord
 
+	// buildCacheMu serialises builds so only one writes the shared persistent
+	// buildah layer cache (M20) at a time - the GitHub self-hosted-runner model
+	// (local cache + single concurrency), which avoids a shared-mutable-store
+	// race without locking the cache itself.
+	buildCacheMu sync.Mutex
+
 	// startLocks serialises Start per session id so concurrent wakes (e.g.
 	// several inbound connections to a published port at once) boot at most one
 	// VM. A sync.Map's zero value is ready to use.

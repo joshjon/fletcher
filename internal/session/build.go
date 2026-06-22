@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.jetify.com/typeid"
@@ -42,6 +43,16 @@ const (
 	// real build (e.g. a pnpm install) runs out of space fast. The grown image
 	// is sparse, so this costs only the build's actual usage on the host.
 	buildForkSizeBytes = 20 * (int64(1) << 30) // 20 GiB
+
+	// The persistent buildah layer cache (M20): a daemon-owned ext4 disk
+	// attached to each build fork so layers survive between builds. Sparse and
+	// capped; reset (one cold build) if it grows past the reset threshold, so a
+	// runaway cache can never fill the host. buildah's graphroot lives on it;
+	// the runroot stays on ephemeral tmpfs so stale locks reset each boot.
+	buildCacheSizeBytes  = 40 * (int64(1) << 30) // 40 GiB sparse cap
+	buildCacheResetBytes = 30 * (int64(1) << 30) // recreate when real usage exceeds this
+	buildCacheGraphroot  = "/volume/storage"     // /volume is the attached cache disk
+	buildCacheRunroot    = "/run/buildah"
 )
 
 // buildStateBuilding etc. are the buildRecord.state values reported to clients.
@@ -261,6 +272,16 @@ func (m *Manager) buildImageFromSession(ctx context.Context, devRef, subdir, ima
 // and the image's run config. The fork is created and discarded entirely within
 // this call.
 func (m *Manager) buildInFork(ctx context.Context, contextGz []byte, logSink io.Writer) ([]byte, appspec.Spec, int, error) {
+	// Serialise builds: one at a time writes the shared persistent layer cache
+	// (M20, the self-hosted-runner model). A queued build's caller just waits.
+	m.buildCacheMu.Lock()
+	defer m.buildCacheMu.Unlock()
+
+	cachePath, err := m.ensureBuildCache(ctx)
+	if err != nil {
+		return nil, appspec.Spec{}, 0, err
+	}
+
 	id, err := typeid.WithPrefix(idPrefix)
 	if err != nil {
 		return nil, appspec.Spec{}, 0, fmt.Errorf("generate build id: %w", err)
@@ -284,7 +305,9 @@ func (m *Manager) buildInFork(ctx context.Context, contextGz []byte, logSink io.
 		RootfsPath:   fork.Path,
 		Env:          m.sessionEnv("off", buildID, "build"),
 		EgressPolicy: "open",
-		Credentials:  []runtime.CredentialFile{{Path: buildContextPath, Mode: 0o644, Data: contextGz}},
+		// Attach the persistent layer cache as the fork's /volume disk (M20).
+		VolumePath:  cachePath,
+		Credentials: []runtime.CredentialFile{{Path: buildContextPath, Mode: 0o644, Data: contextGz}},
 	})
 	if err != nil {
 		return nil, appspec.Spec{}, 0, fmt.Errorf("start build fork: %w", err)
@@ -292,18 +315,22 @@ func (m *Manager) buildInFork(ctx context.Context, contextGz []byte, logSink io.
 	defer func() { _ = handle.Stop(context.WithoutCancel(ctx)) }()
 
 	// Build the Dockerfile and stage the outputs (the verified recipe: chroot
-	// isolation - the microVM has no clean cgroups for crun).
+	// isolation - the microVM has no clean cgroups for crun). --layers + a
+	// graphroot on the persistent cache disk (/volume) reuse unchanged layers
+	// across builds; the runroot stays on ephemeral tmpfs so locks reset.
+	bh := "buildah --root " + buildCacheGraphroot + " --runroot " + buildCacheRunroot
 	buildScript := strings.Join([]string{
 		"set -e",
+		"mkdir -p " + buildCacheGraphroot + " " + buildCacheRunroot,
 		"rm -rf /opt/ctx && mkdir -p /opt/ctx",
 		"tar -xzf " + buildContextPath + " -C /opt/ctx",
-		"buildah build --isolation chroot -t fletcherapp /opt/ctx",
-		`ctr=$(buildah from fletcherapp)`,
-		`mnt=$(buildah mount "$ctr")`,
+		bh + " build --isolation chroot --layers -t fletcherapp /opt/ctx",
+		`ctr=$(` + bh + ` from fletcherapp)`,
+		`mnt=$(` + bh + ` mount "$ctr")`,
 		"tar -czf " + buildRootfsPath + ` -C "$mnt" .`,
 		// Full inspect JSON; this buildah's template engine lacks the `json`
 		// function, so the daemon parses OCIv1.config out of the raw dump.
-		"buildah inspect fletcherapp > " + buildConfigPath,
+		bh + " inspect fletcherapp > " + buildConfigPath,
 	}, "\n")
 	// Run the build with output going both to a buffer (for the error tail) and,
 	// when a sink is set, live to the build record so a client can stream it.
@@ -371,6 +398,56 @@ func parseOCIConfig(jsonStr string) (appspec.Spec, int) {
 		}
 	}
 	return spec, best
+}
+
+// buildCachePath is the persistent build cache disk, alongside the images dir.
+func (m *Manager) buildCachePath() string {
+	if m.opt().ImagesDir == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(m.opt().ImagesDir), "buildcache.ext4")
+}
+
+// ensureBuildCache returns the path to the persistent layer-cache ext4 disk,
+// creating it if missing and resetting it (one cold build) if it has grown past
+// the reset threshold. Caller holds buildCacheMu, so there is no concurrent use.
+func (m *Manager) ensureBuildCache(ctx context.Context) (string, error) {
+	path := m.buildCachePath()
+	if path == "" {
+		return "", errs.New(errs.CategoryFailedPrecondition, "the daemon has no images directory configured")
+	}
+	if info, err := os.Stat(path); err == nil {
+		if allocatedBytes(info) <= buildCacheResetBytes {
+			return path, nil
+		}
+		m.logger.Info("resetting oversized build cache", "path", path)
+		if rerr := os.Remove(path); rerr != nil {
+			return "", fmt.Errorf("reset build cache: %w", rerr)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := exec.CommandContext(ctx, "truncate", "-s", strconv.FormatInt(buildCacheSizeBytes, 10), path).Run(); err != nil { //nolint:gosec // daemon-owned path
+		return "", fmt.Errorf("allocate build cache: %w", err)
+	}
+	// -F: a plain file; -q: quiet. A journaled fs, so an unclean fork shutdown
+	// replays on next mount - no fsck needed.
+	mkfs := exec.CommandContext(ctx, "mkfs.ext4", "-F", "-q", path) //nolint:gosec // daemon-owned path
+	mkfs.Stderr = os.Stderr
+	if err := mkfs.Run(); err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("format build cache: %w", err)
+	}
+	return path, nil
+}
+
+// allocatedBytes is the real on-disk size of a (sparse) file - its allocated
+// blocks, not its apparent length.
+func allocatedBytes(info os.FileInfo) int64 {
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		return st.Blocks * 512
+	}
+	return info.Size()
 }
 
 // growExt4 grows the ext4 image at path to sizeBytes (the file is sparse, so
