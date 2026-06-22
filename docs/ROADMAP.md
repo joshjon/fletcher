@@ -1693,6 +1693,26 @@ approval card).
 
 Build untested from Linux; verify in Xcode.
 
+**Build UX hardening (2026-06-22, from real-repo testing).** Four issues surfaced
+deploying an actual node/pnpm project from the app:
+- *"No space left on device."* The ephemeral build fork inherited the builder
+  template's ~1 GiB disk (~720 MiB free) and buildah's vfs storage duplicates every
+  layer, so a real `pnpm`/`npm install` ran out. Fix: grow the fork's ext4 to 20 GiB
+  before boot (`truncate` + `e2fsck` + `resize2fs`); the image is sparse so it costs
+  only actual usage. Verified on hardware: a chunky `npm install` (react/typescript/
+  vite/webpack/eslint/jest/...) now builds and deploys.
+- *No build logs / "just wait".* The daemon now captures the buildah output into the
+  detached build record (last 256 KB) and returns it in `GetBuildStatus.log`; the app
+  shows the **live, scrollable, selectable** build log instead of a spinner.
+- *Failure logs unreadable/uncopyable in a narrow modal.* The failure screen is
+  rebuilt full-width with the error + full log, selectable, and a **Copy log** button.
+- *Fully blocks the app.* A **"Run in background"** button dismisses the build sheet;
+  the detached daemon build + the unstructured deploy Task finish on their own (the
+  session/image appears when ready). Follow-up: a background *failure* is silent
+  (surfacing it wants a completion notification).
+Commits: daemon `d8466fb` (+ the space-fix commit), `fletcher-ios` (live log + copy +
+background).
+
 **Bug found while verifying (separate, worth fixing): `session exec` drops output.**
 Some `fletcher session exec` calls return empty stdout (e.g. `exec <s> -- echo a b c`
 printed nothing) while others succeed, inconsistently - an output-capture race in the
