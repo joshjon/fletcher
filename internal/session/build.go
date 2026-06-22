@@ -6,11 +6,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.jetify.com/typeid"
@@ -42,21 +44,53 @@ const (
 	buildForkSizeBytes = 20 * (int64(1) << 30) // 20 GiB
 )
 
-// buildRecord is the status of one detached build (M19).
-type buildRecord struct {
-	state       string // "building" | "succeeded" | "failed"
-	name        string
-	exposedPort int
-	errMsg      string
-	updated     time.Time
-}
-
 // buildStateBuilding etc. are the buildRecord.state values reported to clients.
 const (
 	buildStateBuilding  = "building"
 	buildStateSucceeded = "succeeded"
 	buildStateFailed    = "failed"
 )
+
+// buildLogCap bounds how much build output a status response carries (the tail
+// is what matters for live progress and failure diagnosis).
+const buildLogCap = 256 * 1024
+
+// buildRecord is the status of one detached build (M19). It guards its own
+// fields so the build goroutine can append to the log while a client polls.
+type buildRecord struct {
+	mu          sync.Mutex
+	state       string // "building" | "succeeded" | "failed"
+	name        string
+	exposedPort int
+	errMsg      string
+	log         []byte
+	updated     time.Time
+}
+
+// Write appends build output to the record's log (an io.Writer for the build's
+// stdout/stderr), keeping only the last buildLogCap bytes.
+func (r *buildRecord) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.log = append(r.log, p...)
+	if len(r.log) > buildLogCap {
+		r.log = r.log[len(r.log)-buildLogCap:]
+	}
+	r.updated = time.Now()
+	return len(p), nil
+}
+
+func (r *buildRecord) finish(state, name string, port int, errMsg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.state, r.name, r.exposedPort, r.errMsg, r.updated = state, name, port, errMsg, time.Now()
+}
+
+func (r *buildRecord) snapshot() (state, name string, port int, errMsg, log string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state, r.name, r.exposedPort, r.errMsg, string(r.log)
+}
 
 // StartBuildFromSession kicks off BuildImageFromSession DETACHED from the caller
 // and returns a build id immediately, so a mobile client can poll GetBuildStatus
@@ -77,9 +111,10 @@ func (m *Manager) StartBuildFromSession(ctx context.Context, devRef, subdir, ima
 	}
 	buildID := id.String()
 
+	rec := &buildRecord{state: buildStateBuilding, updated: time.Now()}
 	m.buildsMu.Lock()
 	m.sweepBuildsLocked()
-	m.builds[buildID] = &buildRecord{state: buildStateBuilding, updated: time.Now()}
+	m.builds[buildID] = rec
 	m.buildsMu.Unlock()
 
 	go func() {
@@ -87,35 +122,38 @@ func (m *Manager) StartBuildFromSession(ctx context.Context, devRef, subdir, ima
 		// build cannot run forever.
 		bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
 		defer cancel()
-		name, port, berr := m.BuildImageFromSession(bctx, devRef, subdir, imageName, force)
-		m.buildsMu.Lock()
+		name, port, berr := m.buildImageFromSession(bctx, devRef, subdir, imageName, force, rec)
 		if berr != nil {
-			m.builds[buildID] = &buildRecord{state: buildStateFailed, errMsg: berr.Error(), updated: time.Now()}
+			rec.finish(buildStateFailed, "", 0, berr.Error())
 		} else {
-			m.builds[buildID] = &buildRecord{state: buildStateSucceeded, name: name, exposedPort: port, updated: time.Now()}
+			rec.finish(buildStateSucceeded, name, port, "")
 		}
-		m.buildsMu.Unlock()
 	}()
 	return buildID, nil
 }
 
-// BuildStatus reports a detached build's state. An unknown id (e.g. the daemon
-// restarted, or it aged out) is reported as failed so the client stops polling.
-func (m *Manager) BuildStatus(buildID string) (state, name string, exposedPort int, errMsg string) {
+// BuildStatus reports a detached build's state and log tail. An unknown id (e.g.
+// the daemon restarted, or it aged out) is reported as failed so the client
+// stops polling.
+func (m *Manager) BuildStatus(buildID string) (state, name string, exposedPort int, errMsg, log string) {
 	m.buildsMu.Lock()
-	defer m.buildsMu.Unlock()
 	rec, ok := m.builds[buildID]
+	m.buildsMu.Unlock()
 	if !ok {
-		return buildStateFailed, "", 0, "build not found (it may have expired or the daemon restarted); try again"
+		return buildStateFailed, "", 0, "build not found (it may have expired or the daemon restarted); try again", ""
 	}
-	return rec.state, rec.name, rec.exposedPort, rec.errMsg
+	return rec.snapshot()
 }
 
 // sweepBuildsLocked drops terminal build records older than an hour so the map
 // does not grow unbounded. Caller holds buildsMu.
 func (m *Manager) sweepBuildsLocked() {
 	for id, rec := range m.builds {
-		if rec.state != buildStateBuilding && time.Since(rec.updated) > time.Hour {
+		state, _, _, _, _ := rec.snapshot()
+		rec.mu.Lock()
+		old := time.Since(rec.updated) > time.Hour
+		rec.mu.Unlock()
+		if state != buildStateBuilding && old {
 			delete(m.builds, id)
 		}
 	}
@@ -129,6 +167,12 @@ func (m *Manager) sweepBuildsLocked() {
 // and is discarded when the build finishes. Returns the template name and the
 // image's lowest EXPOSE.
 func (m *Manager) BuildImageFromSession(ctx context.Context, devRef, subdir, imageName string, force bool) (string, int, error) {
+	return m.buildImageFromSession(ctx, devRef, subdir, imageName, force, nil)
+}
+
+// buildImageFromSession is the core build; logSink (when non-nil) receives the
+// live build output so the detached path can stream it to a polling client.
+func (m *Manager) buildImageFromSession(ctx context.Context, devRef, subdir, imageName string, force bool, logSink io.Writer) (string, int, error) {
 	if err := m.requireRuntime(); err != nil {
 		return "", 0, err
 	}
@@ -169,7 +213,7 @@ func (m *Manager) BuildImageFromSession(ctx context.Context, devRef, subdir, ima
 
 	// 2-4. Build the Dockerfile in a sandboxed, ephemeral fork and read back the
 	// flattened rootfs + run config.
-	rootfsGz, spec, exposedPort, err := m.buildInFork(ctx, contextGz)
+	rootfsGz, spec, exposedPort, err := m.buildInFork(ctx, contextGz, logSink)
 	if err != nil {
 		return "", 0, err
 	}
@@ -216,7 +260,7 @@ func (m *Manager) BuildImageFromSession(ctx context.Context, devRef, subdir, ima
 // runs the buildah build, and reads back the flattened rootfs (.tar.gz bytes)
 // and the image's run config. The fork is created and discarded entirely within
 // this call.
-func (m *Manager) buildInFork(ctx context.Context, contextGz []byte) ([]byte, appspec.Spec, int, error) {
+func (m *Manager) buildInFork(ctx context.Context, contextGz []byte, logSink io.Writer) ([]byte, appspec.Spec, int, error) {
 	id, err := typeid.WithPrefix(idPrefix)
 	if err != nil {
 		return nil, appspec.Spec{}, 0, fmt.Errorf("generate build id: %w", err)
@@ -261,10 +305,18 @@ func (m *Manager) buildInFork(ctx context.Context, contextGz []byte) ([]byte, ap
 		// function, so the daemon parses OCIv1.config out of the raw dump.
 		"buildah inspect fletcherapp > " + buildConfigPath,
 	}, "\n")
-	if res, eerr := m.execIn(ctx, handle, buildScript); eerr != nil {
+	// Run the build with output going both to a buffer (for the error tail) and,
+	// when a sink is set, live to the build record so a client can stream it.
+	// stdout+stderr share one writer so the log reads in order.
+	var buildOut strings.Builder
+	var out io.Writer = &buildOut
+	if logSink != nil {
+		out = io.MultiWriter(&buildOut, logSink)
+	}
+	if res, eerr := handle.Exec(ctx, runtime.Spec{Command: buildScript}, out, out); eerr != nil {
 		return nil, appspec.Spec{}, 0, fmt.Errorf("run build: %w", eerr)
 	} else if res.ExitCode != 0 {
-		return nil, appspec.Spec{}, 0, errs.Newf(errs.CategoryInvalidArgument, "docker build failed:\n%s", tailLines(res.Stdout+res.Stderr, 30))
+		return nil, appspec.Spec{}, 0, errs.Newf(errs.CategoryInvalidArgument, "docker build failed:\n%s", tailLines(buildOut.String(), 40))
 	}
 
 	rootfsRes, err := m.execIn(ctx, handle, "base64 -w0 "+buildRootfsPath)

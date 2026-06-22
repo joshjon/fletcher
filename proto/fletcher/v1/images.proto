@@ -79,6 +79,10 @@ message GetBuildStatusResponse {
   uint32 exposed_port = 3;
   // error is set when state is "failed".
   string error = 4;
+  // log is the build output so far (the buildah/Docker build stream), so a
+  // client can show live progress and let the user read/copy a failure. Capped
+  // to the tail to bound the response.
+  string log = 5;
 }
 
 message ListImagesRequest {}

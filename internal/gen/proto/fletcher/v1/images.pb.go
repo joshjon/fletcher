@@ -316,7 +316,11 @@ type GetBuildStatusResponse struct {
 	Name        string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	ExposedPort uint32 `protobuf:"varint,3,opt,name=exposed_port,json=exposedPort,proto3" json:"exposed_port,omitempty"`
 	// error is set when state is "failed".
-	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	Error string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	// log is the build output so far (the buildah/Docker build stream), so a
+	// client can show live progress and let the user read/copy a failure. Capped
+	// to the tail to bound the response.
+	Log           string `protobuf:"bytes,5,opt,name=log,proto3" json:"log,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -375,6 +379,13 @@ func (x *GetBuildStatusResponse) GetExposedPort() uint32 {
 func (x *GetBuildStatusResponse) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+func (x *GetBuildStatusResponse) GetLog() string {
+	if x != nil {
+		return x.Log
 	}
 	return ""
 }
@@ -724,12 +735,13 @@ const file_fletcher_v1_images_proto_rawDesc = "" +
 	"\x1dStartBuildFromSessionResponse\x12\x19\n" +
 	"\bbuild_id\x18\x01 \x01(\tR\abuildId\"2\n" +
 	"\x15GetBuildStatusRequest\x12\x19\n" +
-	"\bbuild_id\x18\x01 \x01(\tR\abuildId\"{\n" +
+	"\bbuild_id\x18\x01 \x01(\tR\abuildId\"\x8d\x01\n" +
 	"\x16GetBuildStatusResponse\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\tR\x05state\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
 	"\fexposed_port\x18\x03 \x01(\rR\vexposedPort\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\x13\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12\x10\n" +
+	"\x03log\x18\x05 \x01(\tR\x03log\"\x13\n" +
 	"\x11ListImagesRequest\"@\n" +
 	"\x12ListImagesResponse\x12*\n" +
 	"\x06images\x18\x01 \x03(\v2\x12.fletcher.v1.ImageR\x06images\"\xc7\x01\n" +

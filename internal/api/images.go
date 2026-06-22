@@ -18,7 +18,7 @@ import (
 type ImageBuilder interface {
 	BuildImageFromSession(ctx context.Context, devRef, subdir, name string, force bool) (resultName string, exposedPort int, err error)
 	StartBuildFromSession(ctx context.Context, devRef, subdir, name string, force bool) (buildID string, err error)
-	BuildStatus(buildID string) (state, name string, exposedPort int, errMsg string)
+	BuildStatus(buildID string) (state, name string, exposedPort int, errMsg, log string)
 }
 
 // ImagesService implements fletcherv1connect.ImageServiceHandler: it imports a
@@ -88,12 +88,13 @@ func (s *ImagesService) GetBuildStatus(_ context.Context, req *connect.Request[f
 	if req.Msg.GetBuildId() == "" {
 		return nil, errs.New(errs.CategoryInvalidArgument, "build_id is required")
 	}
-	state, name, port, errMsg := s.builder.BuildStatus(req.Msg.GetBuildId())
+	state, name, port, errMsg, log := s.builder.BuildStatus(req.Msg.GetBuildId())
 	return connect.NewResponse(&fletcherv1.GetBuildStatusResponse{
 		State:       state,
 		Name:        name,
 		ExposedPort: uint32(port), //nolint:gosec // port is 0..65535
 		Error:       errMsg,
+		Log:         log,
 	}), nil
 }
 
