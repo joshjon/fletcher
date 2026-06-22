@@ -34,6 +34,12 @@ const (
 	// reads back over exec.
 	buildRootfsPath = "/opt/rootfs.tar.gz"
 	buildConfigPath = "/opt/app-config.json"
+	// buildForkSizeBytes is how large the ephemeral build fork's root disk is
+	// grown to before boot. The builder template is ~1 GiB (leaving only a few
+	// hundred MiB free), and buildah's vfs storage duplicates every layer, so a
+	// real build (e.g. a pnpm install) runs out of space fast. The grown image
+	// is sparse, so this costs only the build's actual usage on the host.
+	buildForkSizeBytes = 20 * (int64(1) << 30) // 20 GiB
 )
 
 // buildRecord is the status of one detached build (M19).
@@ -223,6 +229,12 @@ func (m *Manager) buildInFork(ctx context.Context, contextGz []byte) ([]byte, ap
 	}
 	defer func() { _ = m.snapshot.Delete(context.WithoutCancel(ctx), fork.ID) }()
 
+	// Grow the fork's disk so a real build has room (the template is small and
+	// vfs storage is space-hungry); the grown image is sparse.
+	if err := growExt4(ctx, fork.Path, buildForkSizeBytes); err != nil {
+		return nil, appspec.Spec{}, 0, fmt.Errorf("size build fork: %w", err)
+	}
+
 	handle, err := m.runtime.StartSession(ctx, runtime.SessionSpec{
 		SessionID:    buildID,
 		RootfsPath:   fork.Path,
@@ -307,6 +319,22 @@ func parseOCIConfig(jsonStr string) (appspec.Spec, int) {
 		}
 	}
 	return spec, best
+}
+
+// growExt4 grows the ext4 image at path to sizeBytes (the file is sparse, so
+// this is cheap) and resizes the filesystem to fill it. The image must be
+// unmounted - it is, here, before the fork boots.
+func growExt4(ctx context.Context, path string, sizeBytes int64) error {
+	if err := exec.CommandContext(ctx, "truncate", "-s", strconv.FormatInt(sizeBytes, 10), path).Run(); err != nil { //nolint:gosec // path is the daemon-owned fork file
+		return fmt.Errorf("grow fork file: %w", err)
+	}
+	// resize2fs requires a clean fs; force-check the freshly-cloned image first.
+	// e2fsck exits non-zero when it *corrects* issues, which is not a failure here.
+	_ = exec.CommandContext(ctx, "e2fsck", "-fy", path).Run()                                 //nolint:gosec // path is the daemon-owned fork file
+	if out, err := exec.CommandContext(ctx, "resize2fs", path).CombinedOutput(); err != nil { //nolint:gosec // path is the daemon-owned fork file
+		return fmt.Errorf("resize fork fs: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // extractTarGz extracts a gzip tar archive's bytes into dir via `tar -xzf -`.
