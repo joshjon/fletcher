@@ -1675,12 +1675,23 @@ happens, so the build/deploy is now reachable from the app (`fletcher-ios` 3a064
   resolve-image step, the same shape as a registry deploy);
 - regenerated `ImageService` Swift stubs for `BuildFromSession`.
 The agent path already surfaces in the app via approvals (the `build_image` MCP tool's
-approval card). **Known limitation / robustness follow-up:** the build runs over a
-unary RPC tied to the request, so a long build can hit the RPC timeout or abort if the
-app is backgrounded mid-build (same property as the existing registry deploy). The
-robust fix is a *detached* build observed via the events stream (M13/M14) - the
-app-appropriate async model - tracked as the next step for this feature. Build untested
-from Linux; verify in Xcode.
+approval card).
+
+**Gaps closed (2026-06-22, `fletcher-ios` d327198 + daemon 86e6471).**
+- *Backgrounding robustness.* A build can take minutes; a unary RPC tied to the request
+  aborts if the app backgrounds. Added a **detached** daemon path:
+  `StartBuildFromSession` runs the build in a goroutine on its own context
+  (`context.WithoutCancel` + 30m ceiling) and returns a build id; `GetBuildStatus`
+  reports building/succeeded/failed from an in-memory registry (swept after 1h; a daemon
+  restart loses in-flight builds and the client retries). The iOS `DeploymentModel` now
+  starts the build then **polls every 2s** to completion, tolerating a few transient
+  poll failures - so it survives backgrounding (the next poll on resume picks the status
+  back up). The blocking `BuildFromSession` RPC stays for the CLI.
+- *Standalone build-only.* A "Build only (don't deploy)" toggle on the Session source:
+  produces the template and stops (no session created), hiding the run-time sections;
+  the image is then deployable later from the deploy screen.
+
+Build untested from Linux; verify in Xcode.
 
 **Bug found while verifying (separate, worth fixing): `session exec` drops output.**
 Some `fletcher session exec` calls return empty stdout (e.g. `exec <s> -- echo a b c`
