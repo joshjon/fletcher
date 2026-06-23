@@ -1777,11 +1777,31 @@ persistent buildah graphroot is all it takes.
 `--layers --root/--runroot` to the build script; a size cap + prune. Small-to-moderate,
 no new unknowns. Not built yet.
 
-### Milestone 21 - session file transfer (in/out) - PLANNED (designed 2026-06-23)
+### Milestone 21 - session file transfer (in/out) - DONE (daemon `e536611` + iOS `0c00100`; daemon/CLI verified on hardware 2026-06-23, iOS pending Xcode build)
 
 Move files in and out of a session/deploy from the apps and CLI. Decided with the
 operator (2026-06-23): the primary surface is a pair of first-class streaming RPCs
 (iOS-first); SFTP over the SSH broker rides along as a complementary power-user track.
+
+**Shipped.** `UploadFile`/`DownloadFile` streaming RPCs; the guest `RequestWriteFile`
+(two-phase: readiness ack -> raw bytes -> result with bytes-written + sha256, atomic
+temp+rename, chown to the login user) and `RequestReadFile` (size/mode header -> raw
+bytes); `fcSession.WriteFile/ReadFile`; `Manager.UploadFile/DownloadFile` (running
+session required); the API handlers; `fletcher session cp` (scp-style); and the iOS/Mac
+`FilesSection` (`.fileImporter` upload, `.fileExporter` download) on the session/deploy
+detail, shown only while running. Verified on hardware: a 50 KB binary up and down with
+matching sha256, directory targets, clean missing-file error. **SFTP track: already
+worked** over the broker (Debian's default sftp subsystem) - verified an sftp put/get
+round-trip over `fletcher session ssh`; the base image now sets `internal-sftp`
+explicitly (path-independent), effective on the next `fletcher-base` republish.
+
+Notes / deferred: errors on the streaming RPCs surface as connect code `unknown`
+(the `ErrorInterceptor` is unary-only - a pre-existing limit shared with shell/logs/
+proxy; the message is still clear). The whole file is held in memory on each side (fine
+for config/data files; stream-from-disk + a size cap are follow-ons). The iOS upload
+uses mode 0644 (the picker has no unix mode); the CLI preserves the local file's mode.
+Deferred follow-ons: a remote file browser (`ListDir` RPC + navigable picker) and
+stopped-session offline transfer via the ext4 `debugfs` path.
 
 **Why RPCs, not a direct route.** The client never gets a route into VM-land (DESIGN
 §5, two planes never touch): bytes flow client -> daemon (over WireGuard) -> vsock ->

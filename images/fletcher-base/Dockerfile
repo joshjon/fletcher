@@ -43,6 +43,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Never bake SSH host keys; the VM generates its own on first boot.
 RUN rm -f /etc/ssh/ssh_host_*_key*
 
+# Serve SFTP in-process (internal-sftp) so `scp`/`sftp` work over the brokered
+# SSH relay (`fletcher session ssh`) for bulk/recursive transfers, alongside the
+# daemon's UploadFile/DownloadFile RPCs. Replaces Debian's default Subsystem
+# line (which points at the external sftp-server binary) so it does not depend on
+# that path. SFTP already works with the default; this just makes it explicit and
+# path-independent.
+RUN sed -i 's|^#\?[[:space:]]*Subsystem[[:space:]]\+sftp[[:space:]]\+.*|Subsystem sftp internal-sftp|' /etc/ssh/sshd_config
+
 # Durable interactive shells: the guest wraps the session shell in tmux so a
 # client detach (app backgrounded, navigated away, tunnel dropped) leaves the
 # REPL - and any agent running in it - alive to reattach. This config keeps tmux
