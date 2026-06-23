@@ -69,6 +69,9 @@ type Session struct {
 	// session (empty when none). The volume outlives forks and the session.
 	VolumeID   string
 	VolumeName string
+	// EnvVars are the user-set environment variables injected at boot. A secret
+	// var carries only its Name and SecretName (never the secret's value).
+	EnvVars []EnvVar
 }
 
 // ErrNotFound is returned when a session ref matches nothing.
@@ -167,6 +170,11 @@ type Manager struct {
 	// events receives session lifecycle events for live clients. nil disables
 	// it. Set once at startup via SetEvents, before serving.
 	events events.Sink
+
+	// secrets resolves stored-secret references for secret env vars. nil when the
+	// daemon has no secret store; secret env vars then fail fast. Set once at
+	// startup via SetSecrets, before serving.
+	secrets SecretResolver
 }
 
 // VolumeResolver resolves persistent volumes for attachment and boot
@@ -280,6 +288,13 @@ func (m *Manager) sessionEnv(gateway, id, name string) []string {
 	)
 }
 
+// sessionEnvWith is sessionEnv plus the resolved user env vars, appended last.
+// Reserved names are rejected at validation, so user vars cannot shadow the
+// base/gateway/identity env even though they come after it.
+func (m *Manager) sessionEnvWith(gateway, id, name string, userEnv []string) []string {
+	return append(m.sessionEnv(gateway, id, name), userEnv...)
+}
+
 // resolveGateway canonicalises a gateway value to "on"/"off"; empty uses the
 // configured default, and anything other than "off" is "on".
 func resolveGateway(v, def string) string {
@@ -311,7 +326,7 @@ func (m *Manager) requireRuntime() error {
 // egressPolicy is "none"|"allowlist"|"open"; empty resolves to the manager's
 // configured default. volumeRef, when non-empty, attaches that persistent
 // volume (mounted at /volume in the guest) for the session's lifetime.
-func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool, volumeRef string, credentials []string) (Session, error) {
+func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool, volumeRef string, credentials []string, envVars []EnvVar) (Session, error) {
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
@@ -353,6 +368,13 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		return Session{}, err
 	}
 
+	// Validate, resolve secret references, and marshal for persistence before
+	// allocating a fork, so a bad name or missing secret fails fast.
+	userEnv, envJSON, err := m.prepareEnv(ctx, envVars)
+	if err != nil {
+		return Session{}, err
+	}
+
 	id, err := typeid.WithPrefix(idPrefix)
 	if err != nil {
 		return Session{}, fmt.Errorf("generate session id: %w", err)
@@ -367,7 +389,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 	handle, err := m.runtime.StartSession(ctx, runtime.SessionSpec{
 		SessionID:    sessionID,
 		RootfsPath:   fork.Path,
-		Env:          m.sessionEnv(gateway, sessionID, name),
+		Env:          m.sessionEnvWith(gateway, sessionID, name, userEnv),
 		EgressPolicy: egressPolicy,
 		RunApp:       runApp,
 		VolumePath:   volumePath,
@@ -392,6 +414,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		Gateway:      gateway,
 		RunApp:       boolToInt(runApp),
 		VolumeID:     nilIfEmptyStr(volumeID),
+		EnvVars:      envJSON,
 	})
 	if err != nil {
 		_ = handle.Stop(context.WithoutCancel(ctx))
@@ -485,10 +508,14 @@ func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	userEnv, err := m.resolveEnvVars(ctx, parseEnvVars(row.EnvVars))
+	if err != nil {
+		return Session{}, err
+	}
 	handle, err := m.runtime.StartSession(ctx, runtime.SessionSpec{
 		SessionID:    row.ID,
 		RootfsPath:   row.ForkPath,
-		Env:          m.sessionEnv(row.Gateway, row.ID, row.Name),
+		Env:          m.sessionEnvWith(row.Gateway, row.ID, row.Name, userEnv),
 		EgressPolicy: row.EgressPolicy,
 		RunApp:       row.RunApp != 0,
 		VolumePath:   volumePath,
@@ -708,10 +735,28 @@ func (m *Manager) AppRestartCount(ctx context.Context, ref string) (int64, bool)
 // empty value leaves that field unchanged). Both are baked into the fork at VM
 // boot, so a change to a running session takes effect on its next start;
 // restartRequired reports whether the session is currently running.
-func (m *Manager) UpdateSession(ctx context.Context, ref, egressPolicy, gateway string) (Session, bool, error) {
+func (m *Manager) UpdateSession(ctx context.Context, ref, egressPolicy, gateway string, envVars []EnvVar, updateEnv bool) (Session, bool, error) {
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return Session{}, false, err
+	}
+
+	if updateEnv {
+		if err := validateEnvVars(envVars); err != nil {
+			return Session{}, false, err
+		}
+		envJSON, err := marshalEnvVars(envVars)
+		if err != nil {
+			return Session{}, false, err
+		}
+		if err := m.q.UpdateSessionEnv(ctx, sqliteq.UpdateSessionEnvParams{
+			EnvVars:   envJSON,
+			UpdatedAt: time.Now().Unix(),
+			ID:        row.ID,
+		}); err != nil {
+			return Session{}, false, err
+		}
+		row.EnvVars = envJSON
 	}
 
 	newEgress := row.EgressPolicy
@@ -1079,6 +1124,10 @@ func (m *Manager) SetVolumes(v VolumeResolver) { m.volumes = v }
 // SetEvents wires the event sink session lifecycle changes publish to.
 // Called once at startup before serving.
 func (m *Manager) SetEvents(sink events.Sink) { m.events = sink }
+
+// SetSecrets wires the secret store used to resolve secret env-var references.
+// Set once at startup, before serving.
+func (m *Manager) SetSecrets(s SecretResolver) { m.secrets = s }
 
 // publishEvent emits a session lifecycle event when a sink is wired.
 func (m *Manager) publishEvent(action, id, name string) {
@@ -1651,6 +1700,7 @@ func sessionFromRow(r sqliteq.Session) Session {
 		RunApp:       r.RunApp != 0,
 		Gateway:      r.Gateway,
 		HasRollback:  r.PrevForkID != nil,
+		EnvVars:      parseEnvVars(r.EnvVars),
 	}
 	if r.VolumeID != nil {
 		s.VolumeID = *r.VolumeID

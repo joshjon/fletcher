@@ -41,7 +41,7 @@ Examples:
   sudo fletcher deploy ./myapp --host app.example.com                 # local Dockerfile (host-only)
 
 The port defaults to the image's EXPOSE; set --port if the image declares none.`,
-		Flags: []cli.Flag{
+		Flags: append([]cli.Flag{
 			socketFlag(),
 			btrfsRootFlag(),
 			&cli.StringFlag{Name: "from-session", Usage: "build the Dockerfile from a running session's workspace instead of a host dir/ref (the positional arg is then the project subdir, e.g. /workspace/myapp); built inside a sandboxed fork, no host docker"},
@@ -52,7 +52,7 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 			&cli.StringFlag{Name: "egress", Usage: "fork network egress: none | allowlist | open (default: the daemon's setting)"},
 			&cli.StringFlag{Name: "gateway", Usage: "model gateway: on | off (default: the daemon's setting)"},
 			&cli.StringFlag{Name: "volume", Usage: "persistent volume (id or name) to attach, mounted at /volume in the guest; survives redeploys"},
-		},
+		}, envVarFlags()...),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			src := cmd.Args().First()
 			if src == "" && cmd.String("from-session") == "" {
@@ -67,6 +67,11 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 				return errors.New("could not determine the app's port from the image; pass --port")
 			}
 
+			envVars, err := parseEnvVarFlags(cmd)
+			if err != nil {
+				return err
+			}
+
 			client := newSessionsClient(cmd)
 			if _, err := client.CreateSession(ctx, connect.NewRequest(&fletcherv1.CreateSessionRequest{
 				Name:         name,
@@ -75,6 +80,7 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 				Gateway:      cmd.String("gateway"),
 				RunApp:       true,
 				Volume:       cmd.String("volume"),
+				EnvVars:      envVars,
 			})); err != nil {
 				return fmt.Errorf("create session %q (delete an existing one with `fletcher session delete %s`, or pass --name): %w", name, name, err)
 			}

@@ -113,6 +113,26 @@ message Session {
   // volume is the name of the persistent volume attached to this session
   // (mounted at /volume in the guest), empty when none.
   string volume = 14;
+  // env_vars are the user-set environment variables injected into the session's
+  // app/process at boot. Populated by GetSession. A secret var carries only its
+  // name and secret_name (never the secret's value).
+  repeated EnvVar env_vars = 15;
+}
+
+// EnvVar is one user-set environment variable injected into a session's
+// app/process. Exactly one source is set: value for a plain literal, or
+// secret_name to reference a stored secret (SecretService) resolved at boot.
+// A secret's value is never carried in responses - only its name.
+message EnvVar {
+  // name is the environment variable name (a valid shell identifier). Names the
+  // daemon owns (e.g. HTTP_PROXY, FLETCHER_*, and the gateway's keys) are
+  // reserved and rejected.
+  string name = 1;
+  // value is the literal value for a plain variable. Empty for a secret.
+  string value = 2;
+  // secret_name references a stored secret by name (SecretService). When set,
+  // the variable is secret and value is ignored on input / omitted on output.
+  string secret_name = 3;
 }
 
 // DeployInfo is the image-derived detail shown on a deploy's detail screen.
@@ -143,6 +163,9 @@ message CreateSessionRequest {
   // session's fork so it boots already authenticated. Empty uses the daemon's
   // default_credential setting (which may also be empty, for no login).
   repeated string credentials = 7;
+  // env_vars are user-set environment variables injected into the session's
+  // app/process at boot (plain values, or references to stored secrets).
+  repeated EnvVar env_vars = 8;
 }
 
 message CreateSessionResponse {
@@ -195,6 +218,14 @@ message UpdateSessionRequest {
   string egress_policy = 2;
   // gateway is "on" | "off"; empty leaves it unchanged.
   string gateway = 3;
+  // env_vars replaces the session's user-set environment variables when
+  // update_env_vars is true (an empty list then clears them). Ignored when
+  // update_env_vars is false, so an egress/gateway-only update leaves env alone.
+  repeated EnvVar env_vars = 4;
+  // update_env_vars selects whether env_vars is applied (it disambiguates "leave
+  // env unchanged" from "set env to empty"). Applied at the next VM boot, like
+  // egress_policy/gateway (restart_required reports that).
+  bool update_env_vars = 5;
 }
 
 message UpdateSessionResponse {

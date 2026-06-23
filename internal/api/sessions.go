@@ -19,13 +19,13 @@ import (
 // SessionsBackend is what the SessionService handler needs from the session
 // manager.
 type SessionsBackend interface {
-	Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool, volumeRef string, credentials []string) (session.Session, error)
+	Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool, volumeRef string, credentials []string, envVars []session.EnvVar) (session.Session, error)
 	Get(ctx context.Context, ref string) (session.Session, error)
 	List(ctx context.Context) ([]session.Session, error)
 	Start(ctx context.Context, ref string) (session.Session, error)
 	Stop(ctx context.Context, ref string) (session.Session, error)
 	Delete(ctx context.Context, ref string) (bool, error)
-	UpdateSession(ctx context.Context, ref, egressPolicy, gateway string) (session.Session, bool, error)
+	UpdateSession(ctx context.Context, ref, egressPolicy, gateway string, envVars []session.EnvVar, updateEnv bool) (session.Session, bool, error)
 	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
 	Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error)
 	DialSSH(ctx context.Context, ref string) (net.Conn, error)
@@ -112,7 +112,7 @@ func NewSessionsService(backend SessionsBackend, deps SessionsDeps) *SessionsSer
 // CreateSession provisions a session and boots its VM. Categorised errors
 // (e.g. a duplicate name) map to the wire code via the ErrorInterceptor.
 func (s *SessionsService) CreateSession(ctx context.Context, req *connect.Request[fletcherv1.CreateSessionRequest]) (*connect.Response[fletcherv1.CreateSessionResponse], error) {
-	sess, err := s.backend.Create(ctx, req.Msg.GetName(), req.Msg.GetImage(), req.Msg.GetEgressPolicy(), req.Msg.GetGateway(), req.Msg.GetRunApp(), req.Msg.GetVolume(), req.Msg.GetCredentials())
+	sess, err := s.backend.Create(ctx, req.Msg.GetName(), req.Msg.GetImage(), req.Msg.GetEgressPolicy(), req.Msg.GetGateway(), req.Msg.GetRunApp(), req.Msg.GetVolume(), req.Msg.GetCredentials(), envVarsFromProto(req.Msg.GetEnvVars()))
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func (s *SessionsService) DeleteSession(ctx context.Context, req *connect.Reques
 // a field unchanged); restart_required flags that a running session needs a
 // restart for the change to take effect.
 func (s *SessionsService) UpdateSession(ctx context.Context, req *connect.Request[fletcherv1.UpdateSessionRequest]) (*connect.Response[fletcherv1.UpdateSessionResponse], error) {
-	sess, restartRequired, err := s.backend.UpdateSession(ctx, req.Msg.GetRef(), req.Msg.GetEgressPolicy(), req.Msg.GetGateway())
+	sess, restartRequired, err := s.backend.UpdateSession(ctx, req.Msg.GetRef(), req.Msg.GetEgressPolicy(), req.Msg.GetGateway(), envVarsFromProto(req.Msg.GetEnvVars()), req.Msg.GetUpdateEnvVars())
 	if err != nil {
 		return nil, err
 	}
@@ -523,6 +523,7 @@ func sessionToProto(s session.Session) *fletcherv1.Session {
 		RunApp:       s.RunApp,
 		HasRollback:  s.HasRollback,
 		Volume:       s.VolumeName,
+		EnvVars:      envVarsToProto(s.EnvVars),
 	}
 	if p.Volume == "" {
 		// Name lookup is best-effort; the id is still actionable.
@@ -533,6 +534,36 @@ func sessionToProto(s session.Session) *fletcherv1.Session {
 		p.LastUsedAt = &v
 	}
 	return p
+}
+
+// envVarsFromProto maps request env vars to the domain type. A var with a
+// secret_name is a secret reference (its value, if any, is ignored).
+func envVarsFromProto(p []*fletcherv1.EnvVar) []session.EnvVar {
+	if len(p) == 0 {
+		return nil
+	}
+	out := make([]session.EnvVar, 0, len(p))
+	for _, v := range p {
+		ev := session.EnvVar{Name: v.GetName(), SecretName: v.GetSecretName()}
+		if ev.SecretName == "" {
+			ev.Value = v.GetValue()
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+// envVarsToProto maps domain env vars to the response type. Secret vars carry
+// only their name and secret_name (the value is never stored, so never set).
+func envVarsToProto(v []session.EnvVar) []*fletcherv1.EnvVar {
+	if len(v) == 0 {
+		return nil
+	}
+	out := make([]*fletcherv1.EnvVar, 0, len(v))
+	for _, e := range v {
+		out = append(out, &fletcherv1.EnvVar{Name: e.Name, Value: e.Value, SecretName: e.SecretName})
+	}
+	return out
 }
 
 func stateToProto(s session.State) fletcherv1.SessionState {

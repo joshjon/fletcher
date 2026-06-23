@@ -41,6 +41,7 @@ func sessionCmd() *cli.Command {
 			sessionRedeployCmd(),
 			sessionRollbackCmd(),
 			sessionUpdateCmd(),
+			sessionEnvCmd(),
 			sessionCommitCmd(),
 		},
 	}
@@ -272,7 +273,7 @@ func sessionCreateCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "create",
 		Usage: "create a session and boot its VM",
-		Flags: []cli.Flag{
+		Flags: append([]cli.Flag{
 			socketFlag(),
 			outputFlag(),
 			&cli.StringFlag{Name: "name", Usage: "unique session name", Required: true},
@@ -282,8 +283,12 @@ func sessionCreateCmd() *cli.Command {
 			&cli.BoolFlag{Name: "app", Usage: "run the image's own app (its entrypoint) on boot, instead of a bare environment"},
 			&cli.StringFlag{Name: "volume", Usage: "persistent volume (id or name) to attach, mounted at /volume in the guest (create one with `fletcher volume create`)"},
 			&cli.StringSliceFlag{Name: "credential", Usage: "seed the saved git login into the new session so it can clone private repos: git (save one with `fletcher credential git`)"},
-		},
+		}, envVarFlags()...),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			envVars, err := parseEnvVarFlags(cmd)
+			if err != nil {
+				return err
+			}
 			client := newSessionsClient(cmd)
 			resp, err := client.CreateSession(ctx, connect.NewRequest(&fletcherv1.CreateSessionRequest{
 				Name:         cmd.String("name"),
@@ -293,6 +298,7 @@ func sessionCreateCmd() *cli.Command {
 				RunApp:       cmd.Bool("app"),
 				Volume:       cmd.String("volume"),
 				Credentials:  cmd.StringSlice("credential"),
+				EnvVars:      envVars,
 			}))
 			if err != nil {
 				return err

@@ -519,6 +519,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	volumeMgr := volume.NewManager(queries, volumeProvisioner, logger)
 	sessionMgr.SetVolumes(volumeMgr)
 	sessionMgr.SetEvents(eventBus)
+	sessionMgr.SetSecrets(secretsStore)
 	supervisor.SetEvents(eventBus)
 
 	// publish_image backend: agents commit their session's fork (or import a

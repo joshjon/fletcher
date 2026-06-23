@@ -1,8 +1,8 @@
 -- name: CreateSession :one
 INSERT INTO sessions (
-    id, name, image, state, fork_id, fork_path, created_at, updated_at, egress_policy, gateway, run_app, volume_id
+    id, name, image, state, fork_id, fork_path, created_at, updated_at, egress_policy, gateway, run_app, volume_id, env_vars
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
 RETURNING *;
 
@@ -44,4 +44,9 @@ WHERE id = ?;
 -- name: UpdateSessionPolicy :exec
 UPDATE sessions
 SET egress_policy = ?, gateway = ?, updated_at = ?
+WHERE id = ?;
+
+-- name: UpdateSessionEnv :exec
+UPDATE sessions
+SET env_vars = ?, updated_at = ?
 WHERE id = ?;

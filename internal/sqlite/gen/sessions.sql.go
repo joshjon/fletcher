@@ -22,11 +22,11 @@ func (q *Queries) CountSessions(ctx context.Context) (int64, error) {
 
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (
-    id, name, image, state, fork_id, fork_path, created_at, updated_at, egress_policy, gateway, run_app, volume_id
+    id, name, image, state, fork_id, fork_path, created_at, updated_at, egress_policy, gateway, run_app, volume_id, env_vars
 ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id
+RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id, env_vars
 `
 
 type CreateSessionParams struct {
@@ -42,6 +42,7 @@ type CreateSessionParams struct {
 	Gateway      string
 	RunApp       int64
 	VolumeID     *string
+	EnvVars      string
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error) {
@@ -58,6 +59,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		arg.Gateway,
 		arg.RunApp,
 		arg.VolumeID,
+		arg.EnvVars,
 	)
 	var i Session
 	err := row.Scan(
@@ -76,6 +78,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.PrevForkID,
 		&i.PrevForkPath,
 		&i.VolumeID,
+		&i.EnvVars,
 	)
 	return i, err
 }
@@ -93,7 +96,7 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) (int64, error) {
 }
 
 const getSessionByRef = `-- name: GetSessionByRef :one
-SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id FROM sessions
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id, env_vars FROM sessions
 WHERE id = ?1 OR name = ?1
 LIMIT 1
 `
@@ -117,12 +120,13 @@ func (q *Queries) GetSessionByRef(ctx context.Context, ref string) (Session, err
 		&i.PrevForkID,
 		&i.PrevForkPath,
 		&i.VolumeID,
+		&i.EnvVars,
 	)
 	return i, err
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id FROM sessions
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id, env_vars FROM sessions
 ORDER BY created_at DESC
 `
 
@@ -151,6 +155,7 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 			&i.PrevForkID,
 			&i.PrevForkPath,
 			&i.VolumeID,
+			&i.EnvVars,
 		); err != nil {
 			return nil, err
 		}
@@ -179,6 +184,23 @@ type TouchSessionParams struct {
 
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
 	_, err := q.db.ExecContext(ctx, touchSession, arg.LastUsedAt, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const updateSessionEnv = `-- name: UpdateSessionEnv :exec
+UPDATE sessions
+SET env_vars = ?, updated_at = ?
+WHERE id = ?
+`
+
+type UpdateSessionEnvParams struct {
+	EnvVars   string
+	UpdatedAt int64
+	ID        string
+}
+
+func (q *Queries) UpdateSessionEnv(ctx context.Context, arg UpdateSessionEnvParams) error {
+	_, err := q.db.ExecContext(ctx, updateSessionEnv, arg.EnvVars, arg.UpdatedAt, arg.ID)
 	return err
 }
 

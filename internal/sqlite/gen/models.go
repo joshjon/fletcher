@@ -98,6 +98,7 @@ type Session struct {
 	PrevForkID   *string
 	PrevForkPath *string
 	VolumeID     *string
+	EnvVars      string
 }
 
 type Setting struct {

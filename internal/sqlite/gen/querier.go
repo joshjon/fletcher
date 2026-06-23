@@ -67,6 +67,7 @@ type Querier interface {
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateJobSchedule(ctx context.Context, arg UpdateJobScheduleParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
+	UpdateSessionEnv(ctx context.Context, arg UpdateSessionEnvParams) error
 	UpdateSessionFork(ctx context.Context, arg UpdateSessionForkParams) error
 	UpdateSessionForks(ctx context.Context, arg UpdateSessionForksParams) error
 	UpdateSessionPolicy(ctx context.Context, arg UpdateSessionPolicyParams) error
