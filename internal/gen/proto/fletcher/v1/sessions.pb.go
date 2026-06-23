@@ -2363,6 +2363,414 @@ func (x *ProxySessionResponse) GetData() []byte {
 	return nil
 }
 
+type UploadFileRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Msg:
+	//
+	//	*UploadFileRequest_Start
+	//	*UploadFileRequest_Chunk
+	Msg           isUploadFileRequest_Msg `protobuf_oneof:"msg"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadFileRequest) Reset() {
+	*x = UploadFileRequest{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadFileRequest) ProtoMessage() {}
+
+func (x *UploadFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadFileRequest.ProtoReflect.Descriptor instead.
+func (*UploadFileRequest) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *UploadFileRequest) GetMsg() isUploadFileRequest_Msg {
+	if x != nil {
+		return x.Msg
+	}
+	return nil
+}
+
+func (x *UploadFileRequest) GetStart() *UploadStart {
+	if x != nil {
+		if x, ok := x.Msg.(*UploadFileRequest_Start); ok {
+			return x.Start
+		}
+	}
+	return nil
+}
+
+func (x *UploadFileRequest) GetChunk() []byte {
+	if x != nil {
+		if x, ok := x.Msg.(*UploadFileRequest_Chunk); ok {
+			return x.Chunk
+		}
+	}
+	return nil
+}
+
+type isUploadFileRequest_Msg interface {
+	isUploadFileRequest_Msg()
+}
+
+type UploadFileRequest_Start struct {
+	// start opens the transfer; must be the first message on the stream.
+	Start *UploadStart `protobuf:"bytes,1,opt,name=start,proto3,oneof"`
+}
+
+type UploadFileRequest_Chunk struct {
+	// chunk carries a slice of the file's bytes, in order.
+	Chunk []byte `protobuf:"bytes,2,opt,name=chunk,proto3,oneof"`
+}
+
+func (*UploadFileRequest_Start) isUploadFileRequest_Msg() {}
+
+func (*UploadFileRequest_Chunk) isUploadFileRequest_Msg() {}
+
+type UploadStart struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ref is a session ID or name; the session must be running.
+	Ref string `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
+	// path is the destination inside the guest. An absolute path is used as-is; a
+	// relative path resolves under the login user's home.
+	Path string `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	// mode is the destination file's unix permission bits (0 uses 0644). The
+	// execute bit is honoured, so an uploaded binary can be made runnable.
+	Mode uint32 `protobuf:"varint,3,opt,name=mode,proto3" json:"mode,omitempty"`
+	// size is the file's total length in bytes. The client declares it up front
+	// (it knows the source size) so the daemon streams exactly this many bytes to
+	// the guest; a short or long stream is reported as an error.
+	Size          int64 `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadStart) Reset() {
+	*x = UploadStart{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadStart) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadStart) ProtoMessage() {}
+
+func (x *UploadStart) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadStart.ProtoReflect.Descriptor instead.
+func (*UploadStart) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *UploadStart) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *UploadStart) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *UploadStart) GetMode() uint32 {
+	if x != nil {
+		return x.Mode
+	}
+	return 0
+}
+
+func (x *UploadStart) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+type UploadFileResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// bytes_written is the number of bytes landed in the file.
+	BytesWritten int64 `protobuf:"varint,1,opt,name=bytes_written,json=bytesWritten,proto3" json:"bytes_written,omitempty"`
+	// sha256 is the hex SHA-256 of the written file, so the client can verify
+	// integrity end to end.
+	Sha256        string `protobuf:"bytes,2,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadFileResponse) Reset() {
+	*x = UploadFileResponse{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadFileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadFileResponse) ProtoMessage() {}
+
+func (x *UploadFileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadFileResponse.ProtoReflect.Descriptor instead.
+func (*UploadFileResponse) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *UploadFileResponse) GetBytesWritten() int64 {
+	if x != nil {
+		return x.BytesWritten
+	}
+	return 0
+}
+
+func (x *UploadFileResponse) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+type DownloadFileRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ref is a session ID or name; the session must be running.
+	Ref string `protobuf:"bytes,1,opt,name=ref,proto3" json:"ref,omitempty"`
+	// path is the source inside the guest. Absolute is used as-is; relative
+	// resolves under the login user's home.
+	Path          string `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadFileRequest) Reset() {
+	*x = DownloadFileRequest{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadFileRequest) ProtoMessage() {}
+
+func (x *DownloadFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadFileRequest.ProtoReflect.Descriptor instead.
+func (*DownloadFileRequest) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *DownloadFileRequest) GetRef() string {
+	if x != nil {
+		return x.Ref
+	}
+	return ""
+}
+
+func (x *DownloadFileRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+type DownloadFileResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Msg:
+	//
+	//	*DownloadFileResponse_Info
+	//	*DownloadFileResponse_Chunk
+	Msg           isDownloadFileResponse_Msg `protobuf_oneof:"msg"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DownloadFileResponse) Reset() {
+	*x = DownloadFileResponse{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DownloadFileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DownloadFileResponse) ProtoMessage() {}
+
+func (x *DownloadFileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DownloadFileResponse.ProtoReflect.Descriptor instead.
+func (*DownloadFileResponse) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *DownloadFileResponse) GetMsg() isDownloadFileResponse_Msg {
+	if x != nil {
+		return x.Msg
+	}
+	return nil
+}
+
+func (x *DownloadFileResponse) GetInfo() *FileInfo {
+	if x != nil {
+		if x, ok := x.Msg.(*DownloadFileResponse_Info); ok {
+			return x.Info
+		}
+	}
+	return nil
+}
+
+func (x *DownloadFileResponse) GetChunk() []byte {
+	if x != nil {
+		if x, ok := x.Msg.(*DownloadFileResponse_Chunk); ok {
+			return x.Chunk
+		}
+	}
+	return nil
+}
+
+type isDownloadFileResponse_Msg interface {
+	isDownloadFileResponse_Msg()
+}
+
+type DownloadFileResponse_Info struct {
+	// info is the file's size and mode; the first message on the stream.
+	Info *FileInfo `protobuf:"bytes,1,opt,name=info,proto3,oneof"`
+}
+
+type DownloadFileResponse_Chunk struct {
+	// chunk carries a slice of the file's bytes, in order.
+	Chunk []byte `protobuf:"bytes,2,opt,name=chunk,proto3,oneof"`
+}
+
+func (*DownloadFileResponse_Info) isDownloadFileResponse_Msg() {}
+
+func (*DownloadFileResponse_Chunk) isDownloadFileResponse_Msg() {}
+
+type FileInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// size is the file's total length in bytes.
+	Size int64 `protobuf:"varint,1,opt,name=size,proto3" json:"size,omitempty"`
+	// mode is the file's unix permission bits.
+	Mode          uint32 `protobuf:"varint,2,opt,name=mode,proto3" json:"mode,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FileInfo) Reset() {
+	*x = FileInfo{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FileInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FileInfo) ProtoMessage() {}
+
+func (x *FileInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FileInfo.ProtoReflect.Descriptor instead.
+func (*FileInfo) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *FileInfo) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *FileInfo) GetMode() uint32 {
+	if x != nil {
+		return x.Mode
+	}
+	return 0
+}
+
 // PublishedPort is a port a session serves, brokered by the daemon (the
 // preview-proxy pattern, for an arbitrary port). It is reachable over the
 // WireGuard tunnel at tunnel_port; public/host drive public exposure.
@@ -2396,7 +2804,7 @@ type PublishedPort struct {
 
 func (x *PublishedPort) Reset() {
 	*x = PublishedPort{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[38]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2408,7 +2816,7 @@ func (x *PublishedPort) String() string {
 func (*PublishedPort) ProtoMessage() {}
 
 func (x *PublishedPort) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[38]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2421,7 +2829,7 @@ func (x *PublishedPort) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishedPort.ProtoReflect.Descriptor instead.
 func (*PublishedPort) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{38}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *PublishedPort) GetId() string {
@@ -2513,7 +2921,7 @@ type PublishPortRequest struct {
 
 func (x *PublishPortRequest) Reset() {
 	*x = PublishPortRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[39]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2525,7 +2933,7 @@ func (x *PublishPortRequest) String() string {
 func (*PublishPortRequest) ProtoMessage() {}
 
 func (x *PublishPortRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[39]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2538,7 +2946,7 @@ func (x *PublishPortRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishPortRequest.ProtoReflect.Descriptor instead.
 func (*PublishPortRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{39}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *PublishPortRequest) GetRef() string {
@@ -2589,7 +2997,7 @@ type PublishPortResponse struct {
 
 func (x *PublishPortResponse) Reset() {
 	*x = PublishPortResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[40]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2601,7 +3009,7 @@ func (x *PublishPortResponse) String() string {
 func (*PublishPortResponse) ProtoMessage() {}
 
 func (x *PublishPortResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[40]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2614,7 +3022,7 @@ func (x *PublishPortResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishPortResponse.ProtoReflect.Descriptor instead.
 func (*PublishPortResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{40}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *PublishPortResponse) GetPort() *PublishedPort {
@@ -2641,7 +3049,7 @@ type UnpublishPortRequest struct {
 
 func (x *UnpublishPortRequest) Reset() {
 	*x = UnpublishPortRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[41]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2653,7 +3061,7 @@ func (x *UnpublishPortRequest) String() string {
 func (*UnpublishPortRequest) ProtoMessage() {}
 
 func (x *UnpublishPortRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[41]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2666,7 +3074,7 @@ func (x *UnpublishPortRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnpublishPortRequest.ProtoReflect.Descriptor instead.
 func (*UnpublishPortRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{41}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *UnpublishPortRequest) GetRef() string {
@@ -2691,7 +3099,7 @@ type UnpublishPortResponse struct {
 
 func (x *UnpublishPortResponse) Reset() {
 	*x = UnpublishPortResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[42]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2703,7 +3111,7 @@ func (x *UnpublishPortResponse) String() string {
 func (*UnpublishPortResponse) ProtoMessage() {}
 
 func (x *UnpublishPortResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[42]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2716,7 +3124,7 @@ func (x *UnpublishPortResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnpublishPortResponse.ProtoReflect.Descriptor instead.
 func (*UnpublishPortResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{42}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{48}
 }
 
 type ListPortsRequest struct {
@@ -2728,7 +3136,7 @@ type ListPortsRequest struct {
 
 func (x *ListPortsRequest) Reset() {
 	*x = ListPortsRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[43]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2740,7 +3148,7 @@ func (x *ListPortsRequest) String() string {
 func (*ListPortsRequest) ProtoMessage() {}
 
 func (x *ListPortsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[43]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2753,7 +3161,7 @@ func (x *ListPortsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPortsRequest.ProtoReflect.Descriptor instead.
 func (*ListPortsRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{43}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ListPortsRequest) GetRef() string {
@@ -2775,7 +3183,7 @@ type ListPortsResponse struct {
 
 func (x *ListPortsResponse) Reset() {
 	*x = ListPortsResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[44]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2787,7 +3195,7 @@ func (x *ListPortsResponse) String() string {
 func (*ListPortsResponse) ProtoMessage() {}
 
 func (x *ListPortsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[44]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2800,7 +3208,7 @@ func (x *ListPortsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPortsResponse.ProtoReflect.Descriptor instead.
 func (*ListPortsResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{44}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ListPortsResponse) GetPorts() []*PublishedPort {
@@ -2968,7 +3376,29 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\tProxyOpen\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\"*\n" +
 	"\x14ProxySessionResponse\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\fR\x04data\"\xa2\x02\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\"d\n" +
+	"\x11UploadFileRequest\x120\n" +
+	"\x05start\x18\x01 \x01(\v2\x18.fletcher.v1.UploadStartH\x00R\x05start\x12\x16\n" +
+	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x05\n" +
+	"\x03msg\"[\n" +
+	"\vUploadStart\x12\x10\n" +
+	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
+	"\x04mode\x18\x03 \x01(\rR\x04mode\x12\x12\n" +
+	"\x04size\x18\x04 \x01(\x03R\x04size\"Q\n" +
+	"\x12UploadFileResponse\x12#\n" +
+	"\rbytes_written\x18\x01 \x01(\x03R\fbytesWritten\x12\x16\n" +
+	"\x06sha256\x18\x02 \x01(\tR\x06sha256\";\n" +
+	"\x13DownloadFileRequest\x12\x10\n" +
+	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x12\n" +
+	"\x04path\x18\x02 \x01(\tR\x04path\"b\n" +
+	"\x14DownloadFileResponse\x12+\n" +
+	"\x04info\x18\x01 \x01(\v2\x15.fletcher.v1.FileInfoH\x00R\x04info\x12\x16\n" +
+	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x05\n" +
+	"\x03msg\"2\n" +
+	"\bFileInfo\x12\x12\n" +
+	"\x04size\x18\x01 \x01(\x03R\x04size\x12\x12\n" +
+	"\x04mode\x18\x02 \x01(\rR\x04mode\"\xa2\x02\n" +
 	"\rPublishedPort\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -3009,7 +3439,7 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\fSessionState\x12\x1d\n" +
 	"\x19SESSION_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SESSION_STATE_RUNNING\x10\x01\x12\x19\n" +
-	"\x15SESSION_STATE_STOPPED\x10\x022\xc2\r\n" +
+	"\x15SESSION_STATE_STOPPED\x10\x022\xee\x0e\n" +
 	"\x0eSessionService\x12X\n" +
 	"\rCreateSession\x12!.fletcher.v1.CreateSessionRequest\x1a\".fletcher.v1.CreateSessionResponse\"\x00\x12O\n" +
 	"\n" +
@@ -3030,7 +3460,10 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\x0eGetSessionLogs\x12\".fletcher.v1.GetSessionLogsRequest\x1a#.fletcher.v1.GetSessionLogsResponse\"\x00\x12f\n" +
 	"\x11StreamSessionLogs\x12%.fletcher.v1.StreamSessionLogsRequest\x1a&.fletcher.v1.StreamSessionLogsResponse\"\x000\x01\x12g\n" +
 	"\x12CommitSessionImage\x12&.fletcher.v1.CommitSessionImageRequest\x1a'.fletcher.v1.CommitSessionImageResponse\"\x00\x12^\n" +
-	"\x0fRollbackSession\x12#.fletcher.v1.RollbackSessionRequest\x1a$.fletcher.v1.RollbackSessionResponse\"\x00B\xb4\x01\n" +
+	"\x0fRollbackSession\x12#.fletcher.v1.RollbackSessionRequest\x1a$.fletcher.v1.RollbackSessionResponse\"\x00\x12Q\n" +
+	"\n" +
+	"UploadFile\x12\x1e.fletcher.v1.UploadFileRequest\x1a\x1f.fletcher.v1.UploadFileResponse\"\x00(\x01\x12W\n" +
+	"\fDownloadFile\x12 .fletcher.v1.DownloadFileRequest\x1a!.fletcher.v1.DownloadFileResponse\"\x000\x01B\xb4\x01\n" +
 	"\x0fcom.fletcher.v1B\rSessionsProtoP\x01ZEgithub.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1\xa2\x02\x03FXX\xaa\x02\vFletcher.V1\xca\x02\vFletcher\\V1\xe2\x02\x17Fletcher\\V1\\GPBMetadata\xea\x02\fFletcher::V1b\x06proto3"
 
 var (
@@ -3046,7 +3479,7 @@ func file_fletcher_v1_sessions_proto_rawDescGZIP() []byte {
 }
 
 var file_fletcher_v1_sessions_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_fletcher_v1_sessions_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
+var file_fletcher_v1_sessions_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
 var file_fletcher_v1_sessions_proto_goTypes = []any{
 	(SessionState)(0),                  // 0: fletcher.v1.SessionState
 	(*Session)(nil),                    // 1: fletcher.v1.Session
@@ -3087,13 +3520,19 @@ var file_fletcher_v1_sessions_proto_goTypes = []any{
 	(*ProxySessionRequest)(nil),        // 36: fletcher.v1.ProxySessionRequest
 	(*ProxyOpen)(nil),                  // 37: fletcher.v1.ProxyOpen
 	(*ProxySessionResponse)(nil),       // 38: fletcher.v1.ProxySessionResponse
-	(*PublishedPort)(nil),              // 39: fletcher.v1.PublishedPort
-	(*PublishPortRequest)(nil),         // 40: fletcher.v1.PublishPortRequest
-	(*PublishPortResponse)(nil),        // 41: fletcher.v1.PublishPortResponse
-	(*UnpublishPortRequest)(nil),       // 42: fletcher.v1.UnpublishPortRequest
-	(*UnpublishPortResponse)(nil),      // 43: fletcher.v1.UnpublishPortResponse
-	(*ListPortsRequest)(nil),           // 44: fletcher.v1.ListPortsRequest
-	(*ListPortsResponse)(nil),          // 45: fletcher.v1.ListPortsResponse
+	(*UploadFileRequest)(nil),          // 39: fletcher.v1.UploadFileRequest
+	(*UploadStart)(nil),                // 40: fletcher.v1.UploadStart
+	(*UploadFileResponse)(nil),         // 41: fletcher.v1.UploadFileResponse
+	(*DownloadFileRequest)(nil),        // 42: fletcher.v1.DownloadFileRequest
+	(*DownloadFileResponse)(nil),       // 43: fletcher.v1.DownloadFileResponse
+	(*FileInfo)(nil),                   // 44: fletcher.v1.FileInfo
+	(*PublishedPort)(nil),              // 45: fletcher.v1.PublishedPort
+	(*PublishPortRequest)(nil),         // 46: fletcher.v1.PublishPortRequest
+	(*PublishPortResponse)(nil),        // 47: fletcher.v1.PublishPortResponse
+	(*UnpublishPortRequest)(nil),       // 48: fletcher.v1.UnpublishPortRequest
+	(*UnpublishPortResponse)(nil),      // 49: fletcher.v1.UnpublishPortResponse
+	(*ListPortsRequest)(nil),           // 50: fletcher.v1.ListPortsRequest
+	(*ListPortsResponse)(nil),          // 51: fletcher.v1.ListPortsResponse
 }
 var file_fletcher_v1_sessions_proto_depIdxs = []int32{
 	0,  // 0: fletcher.v1.Session.state:type_name -> fletcher.v1.SessionState
@@ -3113,51 +3552,57 @@ var file_fletcher_v1_sessions_proto_depIdxs = []int32{
 	33, // 14: fletcher.v1.ShellSessionRequest.start:type_name -> fletcher.v1.ShellStart
 	34, // 15: fletcher.v1.ShellSessionRequest.resize:type_name -> fletcher.v1.ShellResize
 	37, // 16: fletcher.v1.ProxySessionRequest.open:type_name -> fletcher.v1.ProxyOpen
-	39, // 17: fletcher.v1.PublishPortResponse.port:type_name -> fletcher.v1.PublishedPort
-	39, // 18: fletcher.v1.ListPortsResponse.ports:type_name -> fletcher.v1.PublishedPort
-	4,  // 19: fletcher.v1.SessionService.CreateSession:input_type -> fletcher.v1.CreateSessionRequest
-	6,  // 20: fletcher.v1.SessionService.GetSession:input_type -> fletcher.v1.GetSessionRequest
-	8,  // 21: fletcher.v1.SessionService.ListSessions:input_type -> fletcher.v1.ListSessionsRequest
-	10, // 22: fletcher.v1.SessionService.StartSession:input_type -> fletcher.v1.StartSessionRequest
-	12, // 23: fletcher.v1.SessionService.StopSession:input_type -> fletcher.v1.StopSessionRequest
-	14, // 24: fletcher.v1.SessionService.DeleteSession:input_type -> fletcher.v1.DeleteSessionRequest
-	16, // 25: fletcher.v1.SessionService.UpdateSession:input_type -> fletcher.v1.UpdateSessionRequest
-	18, // 26: fletcher.v1.SessionService.ExecSession:input_type -> fletcher.v1.ExecSessionRequest
-	32, // 27: fletcher.v1.SessionService.ShellSession:input_type -> fletcher.v1.ShellSessionRequest
-	36, // 28: fletcher.v1.SessionService.ProxySession:input_type -> fletcher.v1.ProxySessionRequest
-	40, // 29: fletcher.v1.SessionService.PublishPort:input_type -> fletcher.v1.PublishPortRequest
-	42, // 30: fletcher.v1.SessionService.UnpublishPort:input_type -> fletcher.v1.UnpublishPortRequest
-	44, // 31: fletcher.v1.SessionService.ListPorts:input_type -> fletcher.v1.ListPortsRequest
-	20, // 32: fletcher.v1.SessionService.RestartSession:input_type -> fletcher.v1.RestartSessionRequest
-	22, // 33: fletcher.v1.SessionService.RedeploySession:input_type -> fletcher.v1.RedeploySessionRequest
-	28, // 34: fletcher.v1.SessionService.GetSessionLogs:input_type -> fletcher.v1.GetSessionLogsRequest
-	30, // 35: fletcher.v1.SessionService.StreamSessionLogs:input_type -> fletcher.v1.StreamSessionLogsRequest
-	24, // 36: fletcher.v1.SessionService.CommitSessionImage:input_type -> fletcher.v1.CommitSessionImageRequest
-	26, // 37: fletcher.v1.SessionService.RollbackSession:input_type -> fletcher.v1.RollbackSessionRequest
-	5,  // 38: fletcher.v1.SessionService.CreateSession:output_type -> fletcher.v1.CreateSessionResponse
-	7,  // 39: fletcher.v1.SessionService.GetSession:output_type -> fletcher.v1.GetSessionResponse
-	9,  // 40: fletcher.v1.SessionService.ListSessions:output_type -> fletcher.v1.ListSessionsResponse
-	11, // 41: fletcher.v1.SessionService.StartSession:output_type -> fletcher.v1.StartSessionResponse
-	13, // 42: fletcher.v1.SessionService.StopSession:output_type -> fletcher.v1.StopSessionResponse
-	15, // 43: fletcher.v1.SessionService.DeleteSession:output_type -> fletcher.v1.DeleteSessionResponse
-	17, // 44: fletcher.v1.SessionService.UpdateSession:output_type -> fletcher.v1.UpdateSessionResponse
-	19, // 45: fletcher.v1.SessionService.ExecSession:output_type -> fletcher.v1.ExecSessionResponse
-	35, // 46: fletcher.v1.SessionService.ShellSession:output_type -> fletcher.v1.ShellSessionResponse
-	38, // 47: fletcher.v1.SessionService.ProxySession:output_type -> fletcher.v1.ProxySessionResponse
-	41, // 48: fletcher.v1.SessionService.PublishPort:output_type -> fletcher.v1.PublishPortResponse
-	43, // 49: fletcher.v1.SessionService.UnpublishPort:output_type -> fletcher.v1.UnpublishPortResponse
-	45, // 50: fletcher.v1.SessionService.ListPorts:output_type -> fletcher.v1.ListPortsResponse
-	21, // 51: fletcher.v1.SessionService.RestartSession:output_type -> fletcher.v1.RestartSessionResponse
-	23, // 52: fletcher.v1.SessionService.RedeploySession:output_type -> fletcher.v1.RedeploySessionResponse
-	29, // 53: fletcher.v1.SessionService.GetSessionLogs:output_type -> fletcher.v1.GetSessionLogsResponse
-	31, // 54: fletcher.v1.SessionService.StreamSessionLogs:output_type -> fletcher.v1.StreamSessionLogsResponse
-	25, // 55: fletcher.v1.SessionService.CommitSessionImage:output_type -> fletcher.v1.CommitSessionImageResponse
-	27, // 56: fletcher.v1.SessionService.RollbackSession:output_type -> fletcher.v1.RollbackSessionResponse
-	38, // [38:57] is the sub-list for method output_type
-	19, // [19:38] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	40, // 17: fletcher.v1.UploadFileRequest.start:type_name -> fletcher.v1.UploadStart
+	44, // 18: fletcher.v1.DownloadFileResponse.info:type_name -> fletcher.v1.FileInfo
+	45, // 19: fletcher.v1.PublishPortResponse.port:type_name -> fletcher.v1.PublishedPort
+	45, // 20: fletcher.v1.ListPortsResponse.ports:type_name -> fletcher.v1.PublishedPort
+	4,  // 21: fletcher.v1.SessionService.CreateSession:input_type -> fletcher.v1.CreateSessionRequest
+	6,  // 22: fletcher.v1.SessionService.GetSession:input_type -> fletcher.v1.GetSessionRequest
+	8,  // 23: fletcher.v1.SessionService.ListSessions:input_type -> fletcher.v1.ListSessionsRequest
+	10, // 24: fletcher.v1.SessionService.StartSession:input_type -> fletcher.v1.StartSessionRequest
+	12, // 25: fletcher.v1.SessionService.StopSession:input_type -> fletcher.v1.StopSessionRequest
+	14, // 26: fletcher.v1.SessionService.DeleteSession:input_type -> fletcher.v1.DeleteSessionRequest
+	16, // 27: fletcher.v1.SessionService.UpdateSession:input_type -> fletcher.v1.UpdateSessionRequest
+	18, // 28: fletcher.v1.SessionService.ExecSession:input_type -> fletcher.v1.ExecSessionRequest
+	32, // 29: fletcher.v1.SessionService.ShellSession:input_type -> fletcher.v1.ShellSessionRequest
+	36, // 30: fletcher.v1.SessionService.ProxySession:input_type -> fletcher.v1.ProxySessionRequest
+	46, // 31: fletcher.v1.SessionService.PublishPort:input_type -> fletcher.v1.PublishPortRequest
+	48, // 32: fletcher.v1.SessionService.UnpublishPort:input_type -> fletcher.v1.UnpublishPortRequest
+	50, // 33: fletcher.v1.SessionService.ListPorts:input_type -> fletcher.v1.ListPortsRequest
+	20, // 34: fletcher.v1.SessionService.RestartSession:input_type -> fletcher.v1.RestartSessionRequest
+	22, // 35: fletcher.v1.SessionService.RedeploySession:input_type -> fletcher.v1.RedeploySessionRequest
+	28, // 36: fletcher.v1.SessionService.GetSessionLogs:input_type -> fletcher.v1.GetSessionLogsRequest
+	30, // 37: fletcher.v1.SessionService.StreamSessionLogs:input_type -> fletcher.v1.StreamSessionLogsRequest
+	24, // 38: fletcher.v1.SessionService.CommitSessionImage:input_type -> fletcher.v1.CommitSessionImageRequest
+	26, // 39: fletcher.v1.SessionService.RollbackSession:input_type -> fletcher.v1.RollbackSessionRequest
+	39, // 40: fletcher.v1.SessionService.UploadFile:input_type -> fletcher.v1.UploadFileRequest
+	42, // 41: fletcher.v1.SessionService.DownloadFile:input_type -> fletcher.v1.DownloadFileRequest
+	5,  // 42: fletcher.v1.SessionService.CreateSession:output_type -> fletcher.v1.CreateSessionResponse
+	7,  // 43: fletcher.v1.SessionService.GetSession:output_type -> fletcher.v1.GetSessionResponse
+	9,  // 44: fletcher.v1.SessionService.ListSessions:output_type -> fletcher.v1.ListSessionsResponse
+	11, // 45: fletcher.v1.SessionService.StartSession:output_type -> fletcher.v1.StartSessionResponse
+	13, // 46: fletcher.v1.SessionService.StopSession:output_type -> fletcher.v1.StopSessionResponse
+	15, // 47: fletcher.v1.SessionService.DeleteSession:output_type -> fletcher.v1.DeleteSessionResponse
+	17, // 48: fletcher.v1.SessionService.UpdateSession:output_type -> fletcher.v1.UpdateSessionResponse
+	19, // 49: fletcher.v1.SessionService.ExecSession:output_type -> fletcher.v1.ExecSessionResponse
+	35, // 50: fletcher.v1.SessionService.ShellSession:output_type -> fletcher.v1.ShellSessionResponse
+	38, // 51: fletcher.v1.SessionService.ProxySession:output_type -> fletcher.v1.ProxySessionResponse
+	47, // 52: fletcher.v1.SessionService.PublishPort:output_type -> fletcher.v1.PublishPortResponse
+	49, // 53: fletcher.v1.SessionService.UnpublishPort:output_type -> fletcher.v1.UnpublishPortResponse
+	51, // 54: fletcher.v1.SessionService.ListPorts:output_type -> fletcher.v1.ListPortsResponse
+	21, // 55: fletcher.v1.SessionService.RestartSession:output_type -> fletcher.v1.RestartSessionResponse
+	23, // 56: fletcher.v1.SessionService.RedeploySession:output_type -> fletcher.v1.RedeploySessionResponse
+	29, // 57: fletcher.v1.SessionService.GetSessionLogs:output_type -> fletcher.v1.GetSessionLogsResponse
+	31, // 58: fletcher.v1.SessionService.StreamSessionLogs:output_type -> fletcher.v1.StreamSessionLogsResponse
+	25, // 59: fletcher.v1.SessionService.CommitSessionImage:output_type -> fletcher.v1.CommitSessionImageResponse
+	27, // 60: fletcher.v1.SessionService.RollbackSession:output_type -> fletcher.v1.RollbackSessionResponse
+	41, // 61: fletcher.v1.SessionService.UploadFile:output_type -> fletcher.v1.UploadFileResponse
+	43, // 62: fletcher.v1.SessionService.DownloadFile:output_type -> fletcher.v1.DownloadFileResponse
+	42, // [42:63] is the sub-list for method output_type
+	21, // [21:42] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_fletcher_v1_sessions_proto_init() }
@@ -3179,13 +3624,21 @@ func file_fletcher_v1_sessions_proto_init() {
 		(*ProxySessionRequest_Open)(nil),
 		(*ProxySessionRequest_Data)(nil),
 	}
+	file_fletcher_v1_sessions_proto_msgTypes[38].OneofWrappers = []any{
+		(*UploadFileRequest_Start)(nil),
+		(*UploadFileRequest_Chunk)(nil),
+	}
+	file_fletcher_v1_sessions_proto_msgTypes[42].OneofWrappers = []any{
+		(*DownloadFileResponse_Info)(nil),
+		(*DownloadFileResponse_Chunk)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fletcher_v1_sessions_proto_rawDesc), len(file_fletcher_v1_sessions_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   45,
+			NumMessages:   51,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

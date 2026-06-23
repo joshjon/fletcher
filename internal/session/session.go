@@ -647,6 +647,63 @@ func (m *Manager) Exec(ctx context.Context, ref, command string) (ExecResult, er
 	return ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: res.ExitCode}, nil
 }
 
+// UploadFile streams content (size bytes) into a running session's fork at path,
+// writing it atomically and handing it to the login user. mode is the file's
+// permission bits (0 uses 0644). Returns the bytes written and the content hash.
+func (m *Manager) UploadFile(ctx context.Context, ref, path string, mode uint32, size int64, content io.Reader) (runtime.FileWriteResult, error) {
+	if strings.TrimSpace(path) == "" {
+		return runtime.FileWriteResult{}, errs.New(errs.CategoryInvalidArgument, "destination path is required")
+	}
+	if size < 0 {
+		return runtime.FileWriteResult{}, errs.New(errs.CategoryInvalidArgument, "size must not be negative")
+	}
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return runtime.FileWriteResult{}, err
+	}
+	handle := m.getHandle(row.ID)
+	if handle == nil || State(row.State) != StateRunning {
+		return runtime.FileWriteResult{}, errs.Newf(errs.CategoryFailedPrecondition,
+			"session %q is not running; start it with `fletcher session start`", row.Name)
+	}
+
+	m.markBusy(row.ID)
+	defer m.unmarkBusy(row.ID)
+
+	res, err := handle.WriteFile(ctx, runtime.FileWriteSpec{Path: path, Mode: mode, Size: size}, content)
+	if err != nil {
+		return runtime.FileWriteResult{}, fmt.Errorf("upload to session: %w", err)
+	}
+	m.touch(ctx, row.ID)
+	return res, nil
+}
+
+// DownloadFile streams a running session's file at path to w. onInfo is called
+// with the file's size and mode before any bytes are written.
+func (m *Manager) DownloadFile(ctx context.Context, ref, path string, onInfo func(runtime.FileReadResult) error, w io.Writer) error {
+	if strings.TrimSpace(path) == "" {
+		return errs.New(errs.CategoryInvalidArgument, "source path is required")
+	}
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return err
+	}
+	handle := m.getHandle(row.ID)
+	if handle == nil || State(row.State) != StateRunning {
+		return errs.Newf(errs.CategoryFailedPrecondition,
+			"session %q is not running; start it with `fletcher session start`", row.Name)
+	}
+
+	m.markBusy(row.ID)
+	defer m.unmarkBusy(row.ID)
+
+	if err := handle.ReadFile(ctx, path, onInfo, w); err != nil {
+		return fmt.Errorf("download from session: %w", err)
+	}
+	m.touch(ctx, row.ID)
+	return nil
+}
+
 // appLogPath is where a run_app session's supervisor writes the app's merged
 // stdout/stderr inside the guest.
 const appLogPath = "/var/log/fletcher-app.log"

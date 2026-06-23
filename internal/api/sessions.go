@@ -27,6 +27,8 @@ type SessionsBackend interface {
 	Delete(ctx context.Context, ref string) (bool, error)
 	UpdateSession(ctx context.Context, ref, egressPolicy, gateway string, envVars []session.EnvVar, updateEnv bool) (session.Session, bool, error)
 	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
+	UploadFile(ctx context.Context, ref, path string, mode uint32, size int64, content io.Reader) (runtime.FileWriteResult, error)
+	DownloadFile(ctx context.Context, ref, path string, onInfo func(runtime.FileReadResult) error, w io.Writer) error
 	Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error)
 	DialSSH(ctx context.Context, ref string) (net.Conn, error)
 	Publish(ctx context.Context, ref string, guestPort int, name string, public bool, host string) (session.PublishedPort, error)
@@ -309,6 +311,80 @@ func (s *SessionsService) StreamSessionLogs(ctx context.Context, req *connect.Re
 		return len(p), nil
 	})
 	return s.backend.StreamLogs(ctx, req.Msg.GetRef(), int(req.Msg.GetTailLines()), req.Msg.GetFollow(), w)
+}
+
+// UploadFile streams a client file into a running session's fork. The first
+// message must carry an UploadStart (ref + path + mode + size); later messages
+// carry the file's bytes, which the daemon relays to the guest.
+func (s *SessionsService) UploadFile(ctx context.Context, stream *connect.ClientStream[fletcherv1.UploadFileRequest]) (*connect.Response[fletcherv1.UploadFileResponse], error) {
+	if !stream.Receive() {
+		if err := stream.Err(); err != nil {
+			return nil, err
+		}
+		return nil, errs.New(errs.CategoryInvalidArgument, "upload stream closed before the start message")
+	}
+	start := stream.Msg().GetStart()
+	if start == nil || start.GetRef() == "" {
+		return nil, errs.New(errs.CategoryInvalidArgument, "first upload message must carry start with a session ref")
+	}
+	res, err := s.backend.UploadFile(ctx, start.GetRef(), start.GetPath(), start.GetMode(), start.GetSize(),
+		&uploadStreamReader{stream: stream})
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.UploadFileResponse{
+		BytesWritten: res.BytesWritten,
+		Sha256:       res.Sha256,
+	}), nil
+}
+
+// uploadStreamReader adapts the client's chunk messages to an io.Reader the
+// backend streams into the guest. The start message was already consumed; the
+// rest carry chunk bytes (a stray non-chunk message reads as zero bytes).
+type uploadStreamReader struct {
+	stream *connect.ClientStream[fletcherv1.UploadFileRequest]
+	buf    []byte
+	err    error
+}
+
+func (r *uploadStreamReader) Read(p []byte) (int, error) {
+	for len(r.buf) == 0 {
+		if r.err != nil {
+			return 0, r.err
+		}
+		if !r.stream.Receive() {
+			r.err = r.stream.Err()
+			if r.err == nil {
+				r.err = io.EOF
+			}
+			return 0, r.err
+		}
+		r.buf = r.stream.Msg().GetChunk()
+	}
+	n := copy(p, r.buf)
+	r.buf = r.buf[n:]
+	return n, nil
+}
+
+// DownloadFile streams a running session's file to the client: a FileInfo
+// message (size + mode) first, then the file's bytes as chunk messages.
+func (s *SessionsService) DownloadFile(ctx context.Context, req *connect.Request[fletcherv1.DownloadFileRequest], stream *connect.ServerStream[fletcherv1.DownloadFileResponse]) error {
+	onInfo := func(info runtime.FileReadResult) error {
+		return stream.Send(&fletcherv1.DownloadFileResponse{
+			Msg: &fletcherv1.DownloadFileResponse_Info{
+				Info: &fletcherv1.FileInfo{Size: info.Size, Mode: info.Mode},
+			},
+		})
+	}
+	w := writerFunc(func(p []byte) (int, error) {
+		if err := stream.Send(&fletcherv1.DownloadFileResponse{
+			Msg: &fletcherv1.DownloadFileResponse_Chunk{Chunk: append([]byte(nil), p...)},
+		}); err != nil {
+			return 0, err
+		}
+		return len(p), nil
+	})
+	return s.backend.DownloadFile(ctx, req.Msg.GetRef(), req.Msg.GetPath(), onInfo, w)
 }
 
 // ExecSession runs a command in a running session and returns its output.

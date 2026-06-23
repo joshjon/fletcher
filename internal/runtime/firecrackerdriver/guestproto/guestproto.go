@@ -117,7 +117,50 @@ const (
 	// RequestStat asks the guest for a liveness sample (Stat); the host uses it
 	// to tell a working session from an idle one before auto-stopping.
 	RequestStat RequestKind = "stat"
+	// RequestWriteFile uploads a file into the guest fork. The host sends the
+	// Request (Kind + File), the guest acks readiness with a FileResult (Error
+	// set if it cannot open the destination), then the host streams File.Size
+	// raw bytes and the guest replies with a final FileResult (BytesWritten +
+	// Sha256, or Error). The write is atomic (temp file + rename) and the file is
+	// handed to the login user.
+	RequestWriteFile RequestKind = "write_file"
+	// RequestReadFile downloads a file out of the guest fork. The host sends the
+	// Request (Kind + File.Path), the guest replies with a FileResult (Size +
+	// Mode, or Error), then streams that many raw bytes.
+	RequestReadFile RequestKind = "read_file"
 )
+
+// FileSpec names a file to transfer and, for a write, how many bytes follow.
+type FileSpec struct {
+	// Path is the file inside the guest. Absolute is used as-is; relative
+	// resolves under the login user's home.
+	Path string `json:"path"`
+	// Mode is the destination's unix permission bits for a write (0 uses 0644).
+	Mode uint32 `json:"mode,omitempty"`
+	// Size is the number of raw bytes that follow the request, for a write.
+	Size int64 `json:"size,omitempty"`
+}
+
+// FileResult is the guest's reply to a file transfer. For a read it carries the
+// file's size and mode; for a write, the bytes written and the content hash.
+// Error is non-empty when the operation failed.
+type FileResult struct {
+	Size         int64  `json:"size,omitempty"`
+	Mode         uint32 `json:"mode,omitempty"`
+	BytesWritten int64  `json:"bytesWritten,omitempty"`
+	Sha256       string `json:"sha256,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
+// WriteFileResult sends a FileResult as a length-prefixed JSON message.
+func WriteFileResult(w io.Writer, r FileResult) error { return writeJSON(w, r) }
+
+// ReadFileResult reads a FileResult written by WriteFileResult.
+func ReadFileResult(r io.Reader) (FileResult, error) {
+	var fr FileResult
+	err := readJSON(r, &fr)
+	return fr, err
+}
 
 // Stat is the guest's liveness sample, returned for a RequestStat.
 type Stat struct {
@@ -179,6 +222,7 @@ type Request struct {
 	Kind  RequestKind `json:"kind"`
 	Spec  Spec        `json:"spec,omitempty"`
 	Shell ShellSpec   `json:"shell,omitempty"`
+	File  FileSpec    `json:"file,omitempty"`
 }
 
 // Frame kinds. KindStdout/KindStderr/KindExit flow guest->host; KindStdin and

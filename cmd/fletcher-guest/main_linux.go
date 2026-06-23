@@ -12,6 +12,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -398,10 +400,131 @@ func serveControl(conn net.Conn) {
 		if err := guestproto.WriteStat(conn, guestproto.Stat{Load1: loadAvg1(), AppRestarts: appRestarts.Load()}); err != nil {
 			fmt.Fprintf(os.Stderr, "fletcher-guest: write stat: %v\n", err)
 		}
+	case guestproto.RequestWriteFile:
+		writeUpload(conn, req.File)
+	case guestproto.RequestReadFile:
+		readDownload(conn, req.File)
 	case guestproto.RequestShutdown:
 		shutdown() // resets the VM; does not return
 	default:
 		fmt.Fprintf(os.Stderr, "fletcher-guest: unknown request kind %q\n", req.Kind)
+	}
+}
+
+// resolveGuestPath makes a transfer path absolute: an absolute path is used
+// as-is; a relative one resolves under the login user's home (where the agent
+// lives), or /root when there is no login user.
+func resolveGuestPath(p string, lu loginUser) string {
+	if filepath.IsAbs(p) {
+		return filepath.Clean(p)
+	}
+	home := "/root"
+	if lu.ok {
+		home = lu.home
+	}
+	return filepath.Join(home, p)
+}
+
+// writeUpload handles a RequestWriteFile: ack readiness, stream spec.Size bytes
+// into a temp file in the destination directory, atomically rename it into
+// place, and hand it to the login user. The two-phase ack (FileResult before the
+// bytes) lets the host abort cleanly on a bad path without streaming the upload.
+func writeUpload(conn net.Conn, spec guestproto.FileSpec) {
+	lu := lookupLoginUser()
+	dest := resolveGuestPath(spec.Path, lu)
+	dir := filepath.Dir(dest)
+
+	tmp, err := func() (*os.File, error) {
+		if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // a writable workspace dir inside the fork
+			return nil, err
+		}
+		return os.CreateTemp(dir, ".fletcher-upload-*")
+	}()
+	if err != nil {
+		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: fmt.Sprintf("prepare upload: %v", err)})
+		return
+	}
+	tmpName := tmp.Name()
+	// From here a failure must clean up the temp file.
+	cleanup := func() { _ = tmp.Close(); _ = os.Remove(tmpName) }
+
+	// Ack readiness so the host starts streaming.
+	if err := guestproto.WriteFileResult(conn, guestproto.FileResult{}); err != nil {
+		cleanup()
+		return
+	}
+
+	hash := sha256.New()
+	n, copyErr := io.CopyN(io.MultiWriter(tmp, hash), conn, spec.Size)
+	if copyErr != nil {
+		cleanup()
+		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: fmt.Sprintf("receive upload: %v", copyErr)})
+		return
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: fmt.Sprintf("flush upload: %v", err)})
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: fmt.Sprintf("close upload: %v", err)})
+		return
+	}
+
+	mode := os.FileMode(spec.Mode)
+	if mode == 0 {
+		mode = 0o644
+	}
+	if err := os.Chmod(tmpName, mode); err != nil {
+		_ = os.Remove(tmpName)
+		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: fmt.Sprintf("set mode: %v", err)})
+		return
+	}
+	if lu.ok {
+		_ = os.Chown(tmpName, int(lu.uid), int(lu.gid))
+	}
+	if err := os.Rename(tmpName, dest); err != nil {
+		_ = os.Remove(tmpName)
+		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: fmt.Sprintf("install upload: %v", err)})
+		return
+	}
+	_ = guestproto.WriteFileResult(conn, guestproto.FileResult{
+		BytesWritten: n,
+		Sha256:       hex.EncodeToString(hash.Sum(nil)),
+	})
+}
+
+// readDownload handles a RequestReadFile: reply with the file's size and mode,
+// then stream its bytes. A missing file or a directory is reported in the
+// FileResult error rather than streamed.
+func readDownload(conn net.Conn, spec guestproto.FileSpec) {
+	lu := lookupLoginUser()
+	src := resolveGuestPath(spec.Path, lu)
+
+	f, err := os.Open(src) //nolint:gosec // src is an operator-driven path inside the fork (the sandbox)
+	if err != nil {
+		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: err.Error()})
+		return
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: err.Error()})
+		return
+	}
+	if info.IsDir() {
+		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: fmt.Sprintf("%s is a directory", src)})
+		return
+	}
+	if err := guestproto.WriteFileResult(conn, guestproto.FileResult{
+		Size: info.Size(),
+		Mode: uint32(info.Mode().Perm()),
+	}); err != nil {
+		return
+	}
+	if _, err := io.CopyN(conn, f, info.Size()); err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: stream %s: %v\n", src, err)
 	}
 }
 

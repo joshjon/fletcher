@@ -73,6 +73,17 @@ service SessionService {
   // retired and restarts it - the one-step undo for a bad redeploy. Rolling
   // forward again is the same call (the forks swap each time).
   rpc RollbackSession(RollbackSessionRequest) returns (RollbackSessionResponse) {}
+  // UploadFile streams a file from the client into a running session's fork. The
+  // first client message must carry an UploadStart (ref + path + mode); later
+  // messages carry chunk bytes. The daemon relays them over vsock to the guest,
+  // which writes the file atomically and chowns it to the login user. The VM
+  // stays unroutable - the bytes ride the daemon control channel, not a route
+  // into the VM. Client-streaming: requires HTTP/2.
+  rpc UploadFile(stream UploadFileRequest) returns (UploadFileResponse) {}
+  // DownloadFile streams a file out of a running session's fork to the client.
+  // The first response message carries a FileInfo (size + mode); later messages
+  // carry chunk bytes. Server-streaming: requires HTTP/2.
+  rpc DownloadFile(DownloadFileRequest) returns (stream DownloadFileResponse) {}
 }
 
 enum SessionState {
@@ -395,6 +406,62 @@ message ProxyOpen {
 message ProxySessionResponse {
   // data is opaque bytes from the session's SSH server back to the client.
   bytes data = 1;
+}
+
+message UploadFileRequest {
+  oneof msg {
+    // start opens the transfer; must be the first message on the stream.
+    UploadStart start = 1;
+    // chunk carries a slice of the file's bytes, in order.
+    bytes chunk = 2;
+  }
+}
+
+message UploadStart {
+  // ref is a session ID or name; the session must be running.
+  string ref = 1;
+  // path is the destination inside the guest. An absolute path is used as-is; a
+  // relative path resolves under the login user's home.
+  string path = 2;
+  // mode is the destination file's unix permission bits (0 uses 0644). The
+  // execute bit is honoured, so an uploaded binary can be made runnable.
+  uint32 mode = 3;
+  // size is the file's total length in bytes. The client declares it up front
+  // (it knows the source size) so the daemon streams exactly this many bytes to
+  // the guest; a short or long stream is reported as an error.
+  int64 size = 4;
+}
+
+message UploadFileResponse {
+  // bytes_written is the number of bytes landed in the file.
+  int64 bytes_written = 1;
+  // sha256 is the hex SHA-256 of the written file, so the client can verify
+  // integrity end to end.
+  string sha256 = 2;
+}
+
+message DownloadFileRequest {
+  // ref is a session ID or name; the session must be running.
+  string ref = 1;
+  // path is the source inside the guest. Absolute is used as-is; relative
+  // resolves under the login user's home.
+  string path = 2;
+}
+
+message DownloadFileResponse {
+  oneof msg {
+    // info is the file's size and mode; the first message on the stream.
+    FileInfo info = 1;
+    // chunk carries a slice of the file's bytes, in order.
+    bytes chunk = 2;
+  }
+}
+
+message FileInfo {
+  // size is the file's total length in bytes.
+  int64 size = 1;
+  // mode is the file's unix permission bits.
+  uint32 mode = 2;
 }
 
 // PublishedPort is a port a session serves, brokered by the daemon (the

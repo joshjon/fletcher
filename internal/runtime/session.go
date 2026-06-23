@@ -98,8 +98,39 @@ type SessionHandle interface {
 	// AppRestarts returns how many times the guest's app supervisor has
 	// restarted a run_app session's app since the VM booted (0 otherwise).
 	AppRestarts(ctx context.Context) (int64, error)
+	// WriteFile streams content into the guest at spec.Path (size bytes), writes
+	// it atomically, and hands it to the login user. Returns the bytes written
+	// and the content hash.
+	WriteFile(ctx context.Context, spec FileWriteSpec, content io.Reader) (FileWriteResult, error)
+	// ReadFile streams the guest file at path to w. onInfo is called once with the
+	// file's size and mode before any bytes are written (so the caller can send a
+	// header first); if it returns an error the transfer aborts.
+	ReadFile(ctx context.Context, path string, onInfo func(FileReadResult) error, w io.Writer) error
 	// Stop shuts the VM down cleanly. The fork on disk is untouched.
 	Stop(ctx context.Context) error
+}
+
+// FileWriteSpec describes a file upload into a session's fork.
+type FileWriteSpec struct {
+	// Path is the destination inside the guest (absolute, or relative to the
+	// login user's home).
+	Path string
+	// Mode is the destination's unix permission bits (0 uses 0644).
+	Mode uint32
+	// Size is the number of bytes to read from content.
+	Size int64
+}
+
+// FileWriteResult reports the outcome of a file upload.
+type FileWriteResult struct {
+	BytesWritten int64
+	Sha256       string
+}
+
+// FileReadResult reports a downloaded file's size and mode.
+type FileReadResult struct {
+	Size int64
+	Mode uint32
 }
 
 // SessionRuntime is the optional capability a Driver advertises when it can host

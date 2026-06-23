@@ -158,6 +158,18 @@ func (h *fakeHandle) AppRestarts(_ context.Context) (int64, error) {
 	return h.restarts, nil
 }
 
+func (h *fakeHandle) WriteFile(_ context.Context, spec runtime.FileWriteSpec, content io.Reader) (runtime.FileWriteResult, error) {
+	n, err := io.Copy(io.Discard, io.LimitReader(content, spec.Size))
+	return runtime.FileWriteResult{BytesWritten: n}, err
+}
+
+func (h *fakeHandle) ReadFile(_ context.Context, _ string, onInfo func(runtime.FileReadResult) error, w io.Writer) error {
+	if onInfo != nil {
+		return onInfo(runtime.FileReadResult{Size: 0, Mode: 0o644})
+	}
+	return nil
+}
+
 func (h *fakeHandle) Stop(_ context.Context) error {
 	h.stopped++
 	return nil

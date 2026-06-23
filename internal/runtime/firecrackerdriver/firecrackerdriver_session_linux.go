@@ -17,6 +17,7 @@ import (
 
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 
+	"github.com/joshjon/fletcher/internal/errs"
 	fcruntime "github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestproto"
 )
@@ -297,6 +298,80 @@ func (s *fcSession) Exec(ctx context.Context, spec fcruntime.Spec, stdout, stder
 		return fcruntime.Result{}, err
 	}
 	return fcruntime.Result{ExitCode: code}, nil
+}
+
+// WriteFile uploads content into the guest fork: it sends the request, waits for
+// the guest's readiness ack, streams spec.Size bytes, then reads the final
+// result (bytes written + content hash). Two-phase so a bad destination fails
+// before the upload streams.
+func (s *fcSession) WriteFile(ctx context.Context, spec fcruntime.FileWriteSpec, content io.Reader) (fcruntime.FileWriteResult, error) {
+	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.ControlPort)
+	if err != nil {
+		return fcruntime.FileWriteResult{}, fmt.Errorf("firecracker: connect session: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	// Close the conn when ctx is cancelled so a stalled transfer unblocks.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+
+	req := guestproto.Request{
+		Kind: guestproto.RequestWriteFile,
+		File: guestproto.FileSpec{Path: spec.Path, Mode: spec.Mode, Size: spec.Size},
+	}
+	if err := guestproto.WriteRequest(conn, req); err != nil {
+		return fcruntime.FileWriteResult{}, fmt.Errorf("firecracker: send upload: %w", err)
+	}
+	ack, err := guestproto.ReadFileResult(conn)
+	if err != nil {
+		return fcruntime.FileWriteResult{}, fmt.Errorf("firecracker: upload ack: %w", err)
+	}
+	if ack.Error != "" {
+		return fcruntime.FileWriteResult{}, errs.New(errs.CategoryFailedPrecondition, ack.Error)
+	}
+	if _, err := io.CopyN(conn, content, spec.Size); err != nil {
+		return fcruntime.FileWriteResult{}, fmt.Errorf("firecracker: stream upload: %w", err)
+	}
+	res, err := guestproto.ReadFileResult(conn)
+	if err != nil {
+		return fcruntime.FileWriteResult{}, fmt.Errorf("firecracker: upload result: %w", err)
+	}
+	if res.Error != "" {
+		return fcruntime.FileWriteResult{}, fmt.Errorf("firecracker: guest write failed: %s", res.Error)
+	}
+	return fcruntime.FileWriteResult{BytesWritten: res.BytesWritten, Sha256: res.Sha256}, nil
+}
+
+// ReadFile downloads a guest file: it sends the request, reads the size/mode
+// header (delivered to onInfo), then streams exactly that many bytes to w.
+func (s *fcSession) ReadFile(ctx context.Context, path string, onInfo func(fcruntime.FileReadResult) error, w io.Writer) error {
+	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.ControlPort)
+	if err != nil {
+		return fmt.Errorf("firecracker: connect session: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+
+	req := guestproto.Request{Kind: guestproto.RequestReadFile, File: guestproto.FileSpec{Path: path}}
+	if err := guestproto.WriteRequest(conn, req); err != nil {
+		return fmt.Errorf("firecracker: send download: %w", err)
+	}
+	hdr, err := guestproto.ReadFileResult(conn)
+	if err != nil {
+		return fmt.Errorf("firecracker: download header: %w", err)
+	}
+	if hdr.Error != "" {
+		return errs.New(errs.CategoryNotFound, hdr.Error)
+	}
+	if onInfo != nil {
+		if err := onInfo(fcruntime.FileReadResult{Size: hdr.Size, Mode: hdr.Mode}); err != nil {
+			return err
+		}
+	}
+	if _, err := io.CopyN(w, conn, hdr.Size); err != nil {
+		return fmt.Errorf("firecracker: stream download: %w", err)
+	}
+	return nil
 }
 
 // Shell opens an interactive PTY in the running session VM. It sends the host's

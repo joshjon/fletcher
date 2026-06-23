@@ -90,6 +90,12 @@ const (
 	// SessionServiceRollbackSessionProcedure is the fully-qualified name of the SessionService's
 	// RollbackSession RPC.
 	SessionServiceRollbackSessionProcedure = "/fletcher.v1.SessionService/RollbackSession"
+	// SessionServiceUploadFileProcedure is the fully-qualified name of the SessionService's UploadFile
+	// RPC.
+	SessionServiceUploadFileProcedure = "/fletcher.v1.SessionService/UploadFile"
+	// SessionServiceDownloadFileProcedure is the fully-qualified name of the SessionService's
+	// DownloadFile RPC.
+	SessionServiceDownloadFileProcedure = "/fletcher.v1.SessionService/DownloadFile"
 )
 
 // SessionServiceClient is a client for the fletcher.v1.SessionService service.
@@ -158,6 +164,17 @@ type SessionServiceClient interface {
 	// retired and restarts it - the one-step undo for a bad redeploy. Rolling
 	// forward again is the same call (the forks swap each time).
 	RollbackSession(context.Context, *connect.Request[v1.RollbackSessionRequest]) (*connect.Response[v1.RollbackSessionResponse], error)
+	// UploadFile streams a file from the client into a running session's fork. The
+	// first client message must carry an UploadStart (ref + path + mode); later
+	// messages carry chunk bytes. The daemon relays them over vsock to the guest,
+	// which writes the file atomically and chowns it to the login user. The VM
+	// stays unroutable - the bytes ride the daemon control channel, not a route
+	// into the VM. Client-streaming: requires HTTP/2.
+	UploadFile(context.Context) *connect.ClientStreamForClient[v1.UploadFileRequest, v1.UploadFileResponse]
+	// DownloadFile streams a file out of a running session's fork to the client.
+	// The first response message carries a FileInfo (size + mode); later messages
+	// carry chunk bytes. Server-streaming: requires HTTP/2.
+	DownloadFile(context.Context, *connect.Request[v1.DownloadFileRequest]) (*connect.ServerStreamForClient[v1.DownloadFileResponse], error)
 }
 
 // NewSessionServiceClient constructs a client for the fletcher.v1.SessionService service. By
@@ -285,6 +302,18 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("RollbackSession")),
 			connect.WithClientOptions(opts...),
 		),
+		uploadFile: connect.NewClient[v1.UploadFileRequest, v1.UploadFileResponse](
+			httpClient,
+			baseURL+SessionServiceUploadFileProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("UploadFile")),
+			connect.WithClientOptions(opts...),
+		),
+		downloadFile: connect.NewClient[v1.DownloadFileRequest, v1.DownloadFileResponse](
+			httpClient,
+			baseURL+SessionServiceDownloadFileProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("DownloadFile")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -309,6 +338,8 @@ type sessionServiceClient struct {
 	streamSessionLogs  *connect.Client[v1.StreamSessionLogsRequest, v1.StreamSessionLogsResponse]
 	commitSessionImage *connect.Client[v1.CommitSessionImageRequest, v1.CommitSessionImageResponse]
 	rollbackSession    *connect.Client[v1.RollbackSessionRequest, v1.RollbackSessionResponse]
+	uploadFile         *connect.Client[v1.UploadFileRequest, v1.UploadFileResponse]
+	downloadFile       *connect.Client[v1.DownloadFileRequest, v1.DownloadFileResponse]
 }
 
 // CreateSession calls fletcher.v1.SessionService.CreateSession.
@@ -406,6 +437,16 @@ func (c *sessionServiceClient) RollbackSession(ctx context.Context, req *connect
 	return c.rollbackSession.CallUnary(ctx, req)
 }
 
+// UploadFile calls fletcher.v1.SessionService.UploadFile.
+func (c *sessionServiceClient) UploadFile(ctx context.Context) *connect.ClientStreamForClient[v1.UploadFileRequest, v1.UploadFileResponse] {
+	return c.uploadFile.CallClientStream(ctx)
+}
+
+// DownloadFile calls fletcher.v1.SessionService.DownloadFile.
+func (c *sessionServiceClient) DownloadFile(ctx context.Context, req *connect.Request[v1.DownloadFileRequest]) (*connect.ServerStreamForClient[v1.DownloadFileResponse], error) {
+	return c.downloadFile.CallServerStream(ctx, req)
+}
+
 // SessionServiceHandler is an implementation of the fletcher.v1.SessionService service.
 type SessionServiceHandler interface {
 	// CreateSession provisions a session's persistent fork and boots its VM. The
@@ -472,6 +513,17 @@ type SessionServiceHandler interface {
 	// retired and restarts it - the one-step undo for a bad redeploy. Rolling
 	// forward again is the same call (the forks swap each time).
 	RollbackSession(context.Context, *connect.Request[v1.RollbackSessionRequest]) (*connect.Response[v1.RollbackSessionResponse], error)
+	// UploadFile streams a file from the client into a running session's fork. The
+	// first client message must carry an UploadStart (ref + path + mode); later
+	// messages carry chunk bytes. The daemon relays them over vsock to the guest,
+	// which writes the file atomically and chowns it to the login user. The VM
+	// stays unroutable - the bytes ride the daemon control channel, not a route
+	// into the VM. Client-streaming: requires HTTP/2.
+	UploadFile(context.Context, *connect.ClientStream[v1.UploadFileRequest]) (*connect.Response[v1.UploadFileResponse], error)
+	// DownloadFile streams a file out of a running session's fork to the client.
+	// The first response message carries a FileInfo (size + mode); later messages
+	// carry chunk bytes. Server-streaming: requires HTTP/2.
+	DownloadFile(context.Context, *connect.Request[v1.DownloadFileRequest], *connect.ServerStream[v1.DownloadFileResponse]) error
 }
 
 // NewSessionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -595,6 +647,18 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("RollbackSession")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceUploadFileHandler := connect.NewClientStreamHandler(
+		SessionServiceUploadFileProcedure,
+		svc.UploadFile,
+		connect.WithSchema(sessionServiceMethods.ByName("UploadFile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	sessionServiceDownloadFileHandler := connect.NewServerStreamHandler(
+		SessionServiceDownloadFileProcedure,
+		svc.DownloadFile,
+		connect.WithSchema(sessionServiceMethods.ByName("DownloadFile")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
@@ -635,6 +699,10 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceCommitSessionImageHandler.ServeHTTP(w, r)
 		case SessionServiceRollbackSessionProcedure:
 			sessionServiceRollbackSessionHandler.ServeHTTP(w, r)
+		case SessionServiceUploadFileProcedure:
+			sessionServiceUploadFileHandler.ServeHTTP(w, r)
+		case SessionServiceDownloadFileProcedure:
+			sessionServiceDownloadFileHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -718,4 +786,12 @@ func (UnimplementedSessionServiceHandler) CommitSessionImage(context.Context, *c
 
 func (UnimplementedSessionServiceHandler) RollbackSession(context.Context, *connect.Request[v1.RollbackSessionRequest]) (*connect.Response[v1.RollbackSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.RollbackSession is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) UploadFile(context.Context, *connect.ClientStream[v1.UploadFileRequest]) (*connect.Response[v1.UploadFileResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.UploadFile is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) DownloadFile(context.Context, *connect.Request[v1.DownloadFileRequest], *connect.ServerStream[v1.DownloadFileResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.DownloadFile is not implemented"))
 }
