@@ -85,7 +85,8 @@ const appLogPath = "/var/log/fletcher-app.log"
 // startApp launches the image's own app (captured at import into appspec.Path)
 // under a supervisor that restarts it if it exits, logging to appLogPath. The
 // control server keeps running alongside it so the session is still shell-able.
-func startApp() {
+// appEnv is the user-set session env vars, layered onto the image's own app env.
+func startApp(appEnv []string) {
 	// PID 1 boots with an empty environment, so a relative entrypoint (e.g.
 	// "cat") would never resolve: exec.Command looks argv[0] up in the parent
 	// process's PATH, not the child env. Give init the standard PATH once.
@@ -101,7 +102,7 @@ func startApp() {
 		fmt.Fprintln(os.Stderr, "fletcher-guest: app spec has no command")
 		return
 	}
-	go superviseApp(spec)
+	go superviseApp(spec, appEnv)
 }
 
 // appRestartBackoff is the minimum gap between app restarts, so a crash-looping
@@ -116,14 +117,15 @@ var appRestarts atomic.Int64
 // superviseApp runs the app and restarts it whenever it exits (a deployed server
 // should stay up). Output for the whole boot goes to one log file; image env and
 // working dir are applied, and the image USER if set (else root, what most app
-// images expect).
-func superviseApp(spec appspec.Spec) {
+// images expect). appEnv (the user-set session env vars) is layered on top of
+// the image's own env, so a user var replaces the image's value for that key.
+func superviseApp(spec appspec.Spec, appEnv []string) {
 	argv := spec.Argv()
 	workDir := spec.WorkingDir
 	if workDir == "" {
 		workDir = "/"
 	}
-	env := withDefaults(spec.Env, loginUser{})
+	env := withDefaults(mergeEnv(spec.Env, appEnv), loginUser{})
 
 	_ = os.MkdirAll("/var/log", 0o755) //nolint:gosec // standard log dir perms inside the VM
 	logf, err := os.OpenFile(appLogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
@@ -248,9 +250,8 @@ func serve() {
 	startSSHD()
 	go serveSSHRelay()
 	go servePortRelay()
-	if appMode() {
-		startApp()
-	}
+	// The run_app session's app is launched from applySetup (not here), so it
+	// starts with the user env vars the host delivers in that same setup.
 
 	ln, err := vsock.Listen(guestproto.ControlPort, nil)
 	if err != nil {
@@ -796,6 +797,29 @@ func withDefaults(env []string, lu loginUser) []string {
 	return out
 }
 
+// mergeEnv layers override entries on top of base, so a key set in both is taken
+// from override (override wins) while base-only keys are kept. Used to inject the
+// session's user env vars over the image's own app env.
+func mergeEnv(base, override []string) []string {
+	if len(override) == 0 {
+		return base
+	}
+	overridden := make(map[string]bool, len(override))
+	for _, kv := range override {
+		if k, _, ok := strings.Cut(kv, "="); ok {
+			overridden[k] = true
+		}
+	}
+	out := make([]string, 0, len(base)+len(override))
+	for _, kv := range base {
+		if k, _, ok := strings.Cut(kv, "="); ok && overridden[k] {
+			continue // replaced by an override entry
+		}
+		out = append(out, kv)
+	}
+	return append(out, override...)
+}
+
 func hasKey(env []string, key string) bool {
 	prefix := key + "="
 	for _, e := range env {
@@ -818,14 +842,20 @@ var setupOnce sync.Once
 const sessionEnvFile = "/etc/profile.d/fletcher.sh"
 
 // applySetup handles a RequestSetup: once per guest lifetime it brings up the
-// session's service forwards and writes the gateway/MCP env where login shells
-// pick it up, then acks with a single Exit frame so the host knows the loopback
-// listeners are up before it reports the session ready.
+// session's service forwards, writes the gateway/MCP env where login shells pick
+// it up, seeds any credentials, and launches a run_app session's app (with the
+// user env vars), then acks with a single Exit frame so the host knows the
+// loopback listeners are up before it reports the session ready.
 func applySetup(conn net.Conn, spec guestproto.Spec) {
 	setupOnce.Do(func() {
 		startForwards(spec.Forwards)
 		writeSessionEnv(spec.Env)
 		writeCredentials(spec.Credentials)
+		// Launch the run_app session's app here, not at boot, so it starts with
+		// the user env vars (spec.AppEnv) the host delivers in this same setup.
+		if appMode() {
+			startApp(spec.AppEnv)
+		}
 	})
 	if err := guestproto.WriteFrame(conn, guestproto.KindExit, guestproto.EncodeExit(0)); err != nil {
 		fmt.Fprintf(os.Stderr, "fletcher-guest: ack setup: %v\n", err)

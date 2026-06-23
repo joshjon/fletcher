@@ -1935,6 +1935,41 @@ build cache, hibernate snapshots, free disk) + reclaim actions (clear build cach
 prune images), in the **iOS app + CLI**. Scoped with the operator (2026-06-22); held
 until the iOS repo is free, then build iOS-first.
 
+**User environment variables (plain + secret) - SHIPPED (`c9c3e15`), reaching the
+deployed app FIXED (2026-06-23, verified on hardware).** Sessions/deploys carry
+user-set env vars (plain literal or a reference to an age-encrypted secret resolved at
+boot); validated against the daemon-reserved names, injected after the
+base/gateway/identity env. The original commit wired them into `SessionSpec.Env`, which
+only seeds login shells (`profile.d`) and exec/shell - so a `run_app` deploy's app,
+launched by the guest's `superviseApp` from the image's own `appspec.Env`, never saw
+them. `fletcher session exec ... cat /proc/<app-pid>/environ` now shows the var.
+Three fixes, each a distinct break:
+- The user vars now ride a dedicated `SessionSpec.AppEnv` / `guestproto.Spec.AppEnv`
+  field; the guest layers them over the image's app env (user var wins on a key
+  clash) and launches the app from `applySetup` (so it starts with the env the host
+  just delivered, not at bare boot before setup arrives).
+- A deploy **restart** now cold-boots instead of resuming the hibernation snapshot
+  `Stop` writes - resuming brought the old process tree (and old env) straight back,
+  so a restart never actually re-ran the app. `Manager.Restart` discards the snapshot
+  for `run_app` sessions (interactive sessions keep instant-wake resume); an env
+  change on a stopped session likewise drops its snapshot so the next start re-injects.
+  `Redeploy`/`Rollback` already cold-boot (they swap the fork, invalidating the
+  snapshot identity), so only same-fork restart needed this.
+- **Stale guest init in already-built images - the one that actually bit.** The guest
+  init (`/sbin/fletcher-init`) is baked into a rootfs at image build/import time, and a
+  fork is a plain reflink clone of it, so an image built before this change kept
+  booting an old init that knew nothing of `AppEnv` - `make install` updated the
+  daemon but not the frozen-in init. The init pairs with the host's guestproto wire
+  protocol, so it must track the *daemon*, not the image. Fix: the firecracker driver
+  now refreshes the fork's init to the daemon's embedded copy on every cold boot
+  (`refreshGuestInit`, offline ext4 edit via `e2fsck` + `debugfs`, shared by session
+  cold boot and ephemeral job `Run`). A SHA-256 marker (`/etc/fletcher/init.sha256`)
+  makes the common already-current case a cheap read with no edit, so only a daemon
+  that changed the guest pays the cost, and only on a deliberate cold boot (never the
+  instant-wake hibernation restore). This decouples image lifetime from guest version:
+  a daemon upgrade no longer silently strands every existing image. `guestagent` grew
+  `Bytes()` + `Fingerprint()` for it.
+
 With M1-M6 done, the daemon is feature-complete on the thesis (ephemeral jobs +
 durable interactive sessions, both verified on real hardware), which is what
 makes Milestone 7 (the SwiftUI iOS client - the hero) a client deliverable on a

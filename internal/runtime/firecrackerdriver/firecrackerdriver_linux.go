@@ -209,6 +209,14 @@ func (d *Driver) Run(ctx context.Context, spec fcruntime.Spec, stdout, stderr io
 	}
 	defer func() { _ = os.RemoveAll(vmDir) }()
 
+	// Boot the daemon's current guest init, not whatever the image baked in (the
+	// init tracks the host wire protocol). Best-effort: a refresh failure logs and
+	// runs the rootfs's existing init.
+	if err := d.refreshGuestInit(ctx, rootfs); err != nil {
+		d.logger.Warn("could not refresh guest init before job boot; using the rootfs's existing init",
+			slog.String("job_id", spec.JobID), slog.String("err", err.Error()))
+	}
+
 	apiSock := filepath.Join(vmDir, "fc.sock")
 	vsockUDS := filepath.Join(vmDir, "v.sock")
 

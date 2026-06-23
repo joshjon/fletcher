@@ -390,6 +390,7 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		SessionID:    sessionID,
 		RootfsPath:   fork.Path,
 		Env:          m.sessionEnvWith(gateway, sessionID, name, userEnv),
+		AppEnv:       userEnv,
 		EgressPolicy: egressPolicy,
 		RunApp:       runApp,
 		VolumePath:   volumePath,
@@ -516,6 +517,7 @@ func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 		SessionID:    row.ID,
 		RootfsPath:   row.ForkPath,
 		Env:          m.sessionEnvWith(row.Gateway, row.ID, row.Name, userEnv),
+		AppEnv:       userEnv,
 		EgressPolicy: row.EgressPolicy,
 		RunApp:       row.RunApp != 0,
 		VolumePath:   volumePath,
@@ -654,12 +656,28 @@ const appLogPath = "/var/log/fletcher-app.log"
 const defaultLogTailLines = 200
 
 // Restart stops a running session's VM and starts it again against the same
-// fork. For a run_app (deploy) session this re-runs the image's app.
+// fork. For a run_app (deploy) session this re-runs the image's app, picking up
+// any env or policy change since the last boot.
 func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
-	if _, err := m.Stop(ctx, ref); err != nil {
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
 		return Session{}, err
 	}
-	return m.Start(ctx, ref)
+	if _, err := m.Stop(ctx, row.ID); err != nil {
+		return Session{}, err
+	}
+	// Stop hibernates (snapshots memory), so a plain Start would resume the old
+	// process tree - the app would keep running with its previous environment. A
+	// deploy restart must re-run the app, so drop the snapshot and force a cold
+	// boot, which re-runs setup (and so injects the current env vars). Interactive
+	// sessions keep the instant-wake resume, preserving their in-VM work.
+	if row.RunApp != 0 && m.runtime != nil {
+		if derr := m.runtime.DiscardSession(context.WithoutCancel(ctx), row.ID); derr != nil {
+			m.logger.Warn("discard session vm state for restart",
+				slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+		}
+	}
+	return m.Start(ctx, row.ID)
 }
 
 // StreamLogs tails the session's app log into w. With follow it stays open
@@ -757,6 +775,17 @@ func (m *Manager) UpdateSession(ctx context.Context, ref, egressPolicy, gateway 
 			return Session{}, false, err
 		}
 		row.EnvVars = envJSON
+		// A stopped session may hold a hibernation snapshot whose live process tree
+		// predates this env change; resuming it would ignore the new vars. Drop it
+		// so the next start cold-boots and re-injects the env. A running session has
+		// no snapshot yet (its restart writes one, which Restart then discards), and
+		// discarding its live vmDir would be unsafe, so skip it there.
+		if State(row.State) != StateRunning && m.runtime != nil {
+			if derr := m.runtime.DiscardSession(context.WithoutCancel(ctx), row.ID); derr != nil {
+				m.logger.Warn("discard session vm state after env change",
+					slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+			}
+		}
 	}
 
 	newEgress := row.EgressPolicy

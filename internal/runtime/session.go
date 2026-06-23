@@ -16,6 +16,11 @@ type SessionSpec struct {
 	RootfsPath string
 	// Env is the default environment for commands run in the session.
 	Env []string
+	// AppEnv is the user-set environment injected into a run_app session's app
+	// process, on top of the image's own env (a key here replaces the image's).
+	// Separate from Env, which seeds login shells and exec/shell; this reaches the
+	// deployed app itself.
+	AppEnv []string
 	// EgressPolicy gates the fork's outbound network: "none" | "allowlist" |
 	// "open" (empty is treated as "allowlist"). The driver uses it to pick the
 	// egress proxy socket the fork's HTTP_PROXY reaches, or to deny egress.

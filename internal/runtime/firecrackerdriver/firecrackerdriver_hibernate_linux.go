@@ -127,9 +127,10 @@ func (d *Driver) restoreSession(ctx context.Context, spec fcruntime.SessionSpec,
 	// recreate them. The guest's forwardsOnce already fired at its original cold
 	// boot, so the resent setup is a no-op there - it just rebuilds the host side.
 	effEnv := envForPolicy(spec.EgressPolicy, spec.Env)
-	// No credentials on restore: the fork already holds them (and any token the
-	// session refreshed), so reseeding would clobber a newer login.
-	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv, nil)
+	// No credentials or app env on restore: the guest process is resumed with its
+	// app already supervised (setupOnce fired at cold boot), so the resent setup
+	// is a no-op beyond rebuilding the host-side forward sockets.
+	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv, nil, nil)
 	if ferr != nil {
 		d.logger.Warn("session service forwards not fully re-established after restore; model gateway/MCP may be unreachable in this session",
 			slog.String("session_id", spec.SessionID), slog.String("err", ferr.Error()))

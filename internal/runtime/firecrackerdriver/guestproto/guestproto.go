@@ -69,6 +69,11 @@ type Spec struct {
 	Command string `json:"command"`
 	// Env is the environment ("KEY=value" entries) for the command.
 	Env []string `json:"env"`
+	// AppEnv is extra environment layered onto a run_app session's app process on
+	// top of the image's own env (the user-set env vars). Unlike Env (which seeds
+	// login shells and exec/shell), these reach the deployed app itself; a key
+	// here replaces the same key from the image.
+	AppEnv []string `json:"appEnv,omitempty"`
 	// WorkDir is the working directory; defaults to "/" if empty.
 	WorkDir string `json:"workDir"`
 	// Forwards are loopback services to relay to the host before running.

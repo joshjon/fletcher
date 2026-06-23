@@ -10,6 +10,8 @@
 package guestagent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path"
@@ -36,6 +38,29 @@ func Available() bool {
 	}
 	_ = f.Close()
 	return true
+}
+
+// Bytes returns the embedded guest agent binary.
+func Bytes() ([]byte, error) {
+	if !Available() {
+		return nil, ErrNotBundled
+	}
+	data, err := assetsFS.ReadFile(path.Join(assetDir, binaryName))
+	if err != nil {
+		return nil, fmt.Errorf("read embedded guest agent: %w", err)
+	}
+	return data, nil
+}
+
+// Fingerprint is the hex SHA-256 of the embedded guest agent, used to tell
+// whether a rootfs already carries this exact init before refreshing it.
+func Fingerprint() (string, error) {
+	data, err := Bytes()
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // WriteTo writes the embedded guest agent to dest with mode 0755.
