@@ -1777,6 +1777,50 @@ persistent buildah graphroot is all it takes.
 `--layers --root/--runroot` to the build script; a size cap + prune. Small-to-moderate,
 no new unknowns. Not built yet.
 
+### Milestone 21 - session file transfer (in/out) - PLANNED (designed 2026-06-23)
+
+Move files in and out of a session/deploy from the apps and CLI. Decided with the
+operator (2026-06-23): the primary surface is a pair of first-class streaming RPCs
+(iOS-first); SFTP over the SSH broker rides along as a complementary power-user track.
+
+**Why RPCs, not a direct route.** The client never gets a route into VM-land (DESIGN
+§5, two planes never touch): bytes flow client -> daemon (over WireGuard) -> vsock ->
+the `fletcher-guest` init, which reads/writes the fork. This is the same shape as
+`ShellSession` / `ProxySession` / `StreamSessionLogs`, and it lets the apps use the
+native file pickers + Connect-Swift streaming (no SSH keys, no third-party SFTP lib).
+Rejected as primary: SFTP-only (no built-in SwiftUI SFTP client, fails the iOS-first
+test); an in-guest HTTP/sftp server behind the PortForward relay (extra process, no
+gain); tunneled `exec`/`cat` (not binary-safe, no stdin for upload).
+
+**v1 scope: path-based transfer** (no remote file browser yet - a `ListDir` RPC + a
+navigable picker is a deliberate follow-on). Upload a picked file to a remote path;
+download a typed remote path to Files/Downloads.
+
+Build sequence:
+- **proto:** `UploadFile` (client-stream: first msg `{ref, path, mode}`, then chunks)
+  and `DownloadFile` (server-stream: `{ref, path}` -> chunks) on `SessionService`.
+- **guest:** two new ControlPort `RequestKind`s reusing the exec/shell framing.
+  `RequestWriteFile{path,mode}` consumes streamed bytes into a temp file, `rename`s it
+  into place (atomic), `chown`s to the login user (the `writeCredentialFile` pattern),
+  acks via `KindExit` (+ `KindStderr` on error). `RequestReadFile{path}` streams the
+  file back as `KindStdout` frames then `KindExit`. Relative paths resolve under the
+  login user's home.
+- **daemon:** `SessionHandle.ReadFile/WriteFile` on the firecracker driver; `Manager.
+  UploadFile/DownloadFile`; the two RPC handlers. Auto-wake a stopped session the way
+  `DialPort` does. (Stopped-session offline transfer via the ext4 `debugfs` path -
+  `injectFile`/`cat` - is a possible later optimization; v1 operates on a running VM.)
+- **iOS/Mac (priority surface):** a "Files" affordance on the session/deploy detail -
+  `.fileImporter` to upload, `.fileExporter`/Files to download. Streaming RPCs, which
+  the app already does for shell (bidi) and logs (server-stream).
+- **CLI:** `fletcher session cp <local> <ref>:<path>` and the reverse.
+- **SFTP track (complementary):** enable `internal-sftp` in the guest sshd so
+  `scp`/`sftp` work over `fletcher session ssh` for bulk/desktop transfers. Image
+  change (sshd config) + republish; separate from the RPC work.
+
+Open points to settle during the build: chunk size + the upload end-of-stream marker
+(known-size header vs a terminator frame), an optional SHA-256 integrity check in the
+final ack, and whether to cap transfer size.
+
 ### Milestone 16 - credential seeding ("log in once") - AGENT SEEDING REMOVED (2026-06-18); git seeding kept
 
 **Outcome (2026-06-18): agent login seeding removed.** After the root-cause finding
