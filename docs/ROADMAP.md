@@ -2022,6 +2022,23 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**Crash-inconsistent fork now self-heals on cold boot (2026-06-24, daemon `7470bd6`).**
+A hibernated session could leave its fork's ext4 with bad group-descriptor checksums
+(metadata not fully flushed); the kernel refuses to mount such a filesystem, so the VM
+panicked at boot ("group descriptors corrupted!" -> "Unable to mount root fs") and
+`StartSession` failed with an opaque internal error - the session became unstartable
+(hit on the operator's `dev` session, surfaced from the Mac app as "Action failed /
+internal error"). The cold-boot path now runs `repairRootfs` before boot: `e2fsck -p`
+(a fast no-op on a clean fork, journal replay / minor fixes on a dirty one), escalating
+to a full `e2fsck -fy` when preen gives up (the group-descriptor-checksum case). Cold
+boot only - never the hibernation-restore path, whose resumed guest assumes the on-disk
+state. `refreshGuestInit` dropped its own weaker preen-only fsck (the repair leaves the
+fork consistent for the init debugfs write). Verified: a fork deliberately corrupted
+with bad group-descriptor checksums auto-repairs on cold boot and starts; recovered the
+stuck `dev` session this way. *Open question:* what left the fork inconsistent in the
+first place (unclean hibernation sync vs an interrupted offline edit) - the boot-time
+repair is a safety net regardless, but the sync path is worth an audit.
+
 **Storage: leaked VM state reclaimed (2026-06-22, daemon `c107456`).** A hibernated
 session's Firecracker vmDir (`snapshot.mem`, ~GiB each) leaked on delete-while-down,
 older releases, and M19/M20 build forks (which `StartSession` under their own id but
