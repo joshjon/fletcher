@@ -1800,8 +1800,21 @@ Notes / deferred: errors on the streaming RPCs surface as connect code `unknown`
 proxy; the message is still clear). The whole file is held in memory on each side (fine
 for config/data files; stream-from-disk + a size cap are follow-ons). The iOS upload
 uses mode 0644 (the picker has no unix mode); the CLI preserves the local file's mode.
-Deferred follow-ons: a remote file browser (`ListDir` RPC + navigable picker) and
-stopped-session offline transfer via the ext4 `debugfs` path.
+Deferred follow-on still open: stopped-session offline transfer via the ext4 `debugfs`
+path (for a clean DB swap on a stopped deploy).
+
+**File browser - DONE (daemon `5939180` + iOS `69dd460`; daemon/CLI verified on
+hardware 2026-06-24, iOS pending Xcode build).** A `ListDir` RPC (unary) lists a
+directory inside a running session, served by the guest init in pure Go (`os.ReadDir`,
+symlinks resolved, dirs-first, capped at 10000 entries with a truncated flag). The key
+property: like file transfer it needs no shell, so it works on a distroless/busybox
+image where exec/shell are unavailable - which is the only way to inspect files there.
+CLI `fletcher session ls <ref>[:<path>]` (ls-style output); iOS/Mac a native
+`FileBrowserView` (navigate folders, tap a file to download, upload into the current
+folder) reached from the detail's "Browse files" entry - it subsumed the path-typing
+Files UI. Motivating case: inspecting a deployment's files and a mounted volume at
+`/volume` without sshd in the image. Verified: listed the wc-26-pundit deploy's busybox
+`/app` and home, clean non-directory error.
 
 **Why RPCs, not a direct route.** The client never gets a route into VM-land (DESIGN
 §5, two planes never touch): bytes flow client -> daemon (over WireGuard) -> vsock ->
