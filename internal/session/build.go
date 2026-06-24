@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -422,10 +423,19 @@ func (m *Manager) ensureBuildCache(ctx context.Context) (string, error) {
 		return "", errs.New(errs.CategoryFailedPrecondition, "the daemon has no images directory configured")
 	}
 	if info, err := os.Stat(path); err == nil {
-		if allocatedBytes(info) <= buildCacheResetBytes {
+		oversized := allocatedBytes(info) > buildCacheResetBytes
+		switch {
+		case oversized:
+			m.logger.Info("resetting oversized build cache", "path", path)
+		case !m.buildCacheUsable(ctx, path):
+			// A crash can leave the cache's ext4 corrupt (bad group-descriptor /
+			// bitmap checksums); buildah then writes broken layers and the build
+			// emits an image of empty files. The cache is regenerable, so reset it
+			// rather than feed buildah a corrupt store.
+			m.logger.Warn("build cache filesystem is corrupt; resetting it", "path", path)
+		default:
 			return path, nil
 		}
-		m.logger.Info("resetting oversized build cache", "path", path)
 		if rerr := os.Remove(path); rerr != nil {
 			return "", fmt.Errorf("reset build cache: %w", rerr)
 		}
@@ -444,6 +454,21 @@ func (m *Manager) ensureBuildCache(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("format build cache: %w", err)
 	}
 	return path, nil
+}
+
+// buildCacheUsable reports whether the cache ext4 is consistent enough to feed
+// buildah. e2fsck -p replays the journal and fixes the trivial issues a normal
+// unclean fork shutdown leaves (exit 0/1/2); when it cannot (exit >= 4 - real
+// corruption like bad group-descriptor / bitmap checksums), the cache may hold
+// broken layers, so the caller resets it rather than risk an image of empty
+// files. The caller holds buildCacheMu, so the disk is not in use.
+func (m *Manager) buildCacheUsable(ctx context.Context, path string) bool {
+	err := exec.CommandContext(ctx, "e2fsck", "-p", path).Run() //nolint:gosec // daemon-owned path
+	if err == nil {
+		return true
+	}
+	var ee *exec.ExitError
+	return errors.As(err, &ee) && ee.ExitCode() < 4
 }
 
 // allocatedBytes is the real on-disk size of a (sparse) file - its allocated
