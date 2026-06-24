@@ -33,7 +33,10 @@ func sessionCpCmd() *cli.Command {
 			"login user's home). Examples:\n" +
 			"  fletcher session cp ./app.env mybox:/home/fletcher/app/.env\n" +
 			"  fletcher session cp mybox:/var/log/fletcher-app.log ./app.log",
-		Flags: []cli.Flag{socketFlag()},
+		Flags: []cli.Flag{
+			socketFlag(),
+			&cli.BoolFlag{Name: "recursive", Aliases: []string{"r"}, Usage: "for a remote-to-remote copy, copy a directory and its contents"},
+		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if cmd.Args().Len() != 2 {
 				return errors.New("usage: fletcher session cp <src> <dst>")
@@ -44,7 +47,10 @@ func sessionCpCmd() *cli.Command {
 
 			switch {
 			case srcRemote && dstRemote:
-				return errors.New("both sides are remote; one of <src>/<dst> must be a local path")
+				if srcRef != dstRef {
+					return errors.New("a remote-to-remote copy must stay within one session")
+				}
+				return fileOpCmd(ctx, cmd, srcRef, fletcherv1.FileOpKind_FILE_OP_KIND_COPY, srcPath, dstPath, cmd.Bool("recursive"))
 			case !srcRemote && !dstRemote:
 				return errors.New("neither side is remote; write the session side as <ref>:<path>")
 			case !srcRemote && dstRemote:
@@ -54,6 +60,71 @@ func sessionCpCmd() *cli.Command {
 			}
 		},
 	}
+}
+
+func sessionRmCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "rm",
+		Usage:     "delete a file or directory in a running session",
+		ArgsUsage: "<ref>:<path>",
+		Flags: []cli.Flag{
+			socketFlag(),
+			&cli.BoolFlag{Name: "recursive", Aliases: []string{"r"}, Usage: "delete a directory and its contents"},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			ref, p, remote := splitRemote(cmd.Args().First())
+			if !remote {
+				return errors.New("usage: fletcher session rm <ref>:<path>")
+			}
+			return fileOpCmd(ctx, cmd, ref, fletcherv1.FileOpKind_FILE_OP_KIND_DELETE, p, "", cmd.Bool("recursive"))
+		},
+	}
+}
+
+func sessionMvCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "mv",
+		Usage:     "move or rename a file/directory in a running session",
+		ArgsUsage: "<ref>:<src> <ref>:<dst>",
+		Flags:     []cli.Flag{socketFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.Args().Len() != 2 {
+				return errors.New("usage: fletcher session mv <ref>:<src> <ref>:<dst>")
+			}
+			srcRef, srcPath, srcRemote := splitRemote(cmd.Args().Get(0))
+			dstRef, dstPath, dstRemote := splitRemote(cmd.Args().Get(1))
+			if !srcRemote || !dstRemote {
+				return errors.New("both <src> and <dst> must be remote (<ref>:<path>)")
+			}
+			if srcRef != dstRef {
+				return errors.New("a move must stay within one session")
+			}
+			return fileOpCmd(ctx, cmd, srcRef, fletcherv1.FileOpKind_FILE_OP_KIND_MOVE, srcPath, dstPath, false)
+		},
+	}
+}
+
+// fileOpCmd runs a delete/move/copy and prints a short confirmation.
+func fileOpCmd(ctx context.Context, cmd *cli.Command, ref string, op fletcherv1.FileOpKind, path, dest string, recursive bool) error {
+	client := newSessionsClient(cmd)
+	if _, err := client.FileOp(ctx, connect.NewRequest(&fletcherv1.FileOpRequest{
+		Ref:       ref,
+		Op:        op,
+		Path:      path,
+		Dest:      dest,
+		Recursive: recursive,
+	})); err != nil {
+		return err
+	}
+	switch op {
+	case fletcherv1.FileOpKind_FILE_OP_KIND_DELETE:
+		fmt.Fprintf(os.Stdout, "deleted %s:%s\n", ref, path)
+	case fletcherv1.FileOpKind_FILE_OP_KIND_MOVE:
+		fmt.Fprintf(os.Stdout, "moved %s:%s -> %s:%s\n", ref, path, ref, dest)
+	case fletcherv1.FileOpKind_FILE_OP_KIND_COPY:
+		fmt.Fprintf(os.Stdout, "copied %s:%s -> %s:%s\n", ref, path, ref, dest)
+	}
+	return nil
 }
 
 func sessionLsCmd() *cli.Command {

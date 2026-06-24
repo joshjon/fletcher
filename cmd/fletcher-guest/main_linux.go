@@ -407,6 +407,8 @@ func serveControl(conn net.Conn) {
 		readDownload(conn, req.File)
 	case guestproto.RequestListDir:
 		listDir(conn, req.File)
+	case guestproto.RequestFileOp:
+		fileOp(conn, req.FileOp)
 	case guestproto.RequestShutdown:
 		shutdown() // resets the VM; does not return
 	default:
@@ -529,6 +531,149 @@ func readDownload(conn net.Conn, spec guestproto.FileSpec) {
 	if _, err := io.CopyN(conn, f, info.Size()); err != nil {
 		fmt.Fprintf(os.Stderr, "fletcher-guest: stream %s: %v\n", src, err)
 	}
+}
+
+// fileOp handles a RequestFileOp: a delete, move, or copy in the fork, in pure
+// Go (so it works on an image with no shell). It replies with a FileResult whose
+// Error is set on failure.
+func fileOp(conn net.Conn, spec guestproto.FileOpSpec) {
+	lu := lookupLoginUser()
+	src := resolveGuestPath(spec.Path, lu)
+
+	var err error
+	switch spec.Op {
+	case guestproto.FileOpDelete:
+		err = deletePath(src, spec.Recursive)
+	case guestproto.FileOpMove:
+		err = movePath(src, destPath(resolveGuestPath(spec.Dest, lu), src), lu)
+	case guestproto.FileOpCopy:
+		err = copyPath(src, destPath(resolveGuestPath(spec.Dest, lu), src), spec.Recursive, lu)
+	default:
+		err = fmt.Errorf("unknown file operation %q", spec.Op)
+	}
+
+	res := guestproto.FileResult{}
+	if err != nil {
+		res.Error = err.Error()
+	}
+	_ = guestproto.WriteFileResult(conn, res)
+}
+
+// destPath resolves a move/copy destination: when dst is an existing directory,
+// the source's base name is placed inside it (mirroring `mv`/`cp`).
+func destPath(dst, src string) string {
+	if fi, err := os.Stat(dst); err == nil && fi.IsDir() {
+		return filepath.Join(dst, filepath.Base(src))
+	}
+	return dst
+}
+
+// deletePath removes a file or directory. A directory needs recursive; without
+// it, os.Remove refuses a non-empty directory. Refuses "/" as a guard.
+func deletePath(path string, recursive bool) error {
+	if path == "/" || path == "" {
+		return fmt.Errorf("refusing to delete %q", path)
+	}
+	if recursive {
+		return os.RemoveAll(path)
+	}
+	return os.Remove(path)
+}
+
+// movePath renames src to dst, falling back to copy-then-delete across mounts
+// (os.Rename returns EXDEV when src and dst are on different filesystems, e.g. a
+// volume at /volume vs the root fork).
+func movePath(src, dst string, lu loginUser) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	if err := copyPath(src, dst, true, lu); err != nil {
+		return err
+	}
+	return os.RemoveAll(src)
+}
+
+// copyPath copies a file or (with recursive) a directory tree from src to dst,
+// owning the result as the login user.
+func copyPath(src, dst string, recursive bool, lu loginUser) error {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		if !recursive {
+			return fmt.Errorf("%s is a directory (use recursive)", src)
+		}
+		return copyTree(src, dst, lu)
+	}
+	return copyFile(src, dst, info.Mode().Perm(), lu)
+}
+
+// copyFile copies one regular file's contents and mode, then hands it to the
+// login user.
+func copyFile(src, dst string, mode os.FileMode, lu loginUser) error {
+	in, err := os.Open(src) //nolint:gosec // src is an operator-driven path inside the fork
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil { //nolint:gosec // a dir inside the fork
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode) //nolint:gosec // dst is an operator-driven path inside the fork
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	if lu.ok {
+		_ = os.Chown(dst, int(lu.uid), int(lu.gid))
+	}
+	return nil
+}
+
+// copyTree recursively copies the directory at src to dst.
+func copyTree(src, dst string, lu loginUser) error {
+	return filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, rerr := filepath.Rel(src, p)
+		if rerr != nil {
+			return rerr
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			info, ierr := d.Info()
+			mode := os.FileMode(0o755)
+			if ierr == nil {
+				mode = info.Mode().Perm()
+			}
+			if mkerr := os.MkdirAll(target, mode); mkerr != nil {
+				return mkerr
+			}
+			if lu.ok {
+				_ = os.Chown(target, int(lu.uid), int(lu.gid))
+			}
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return ierr
+		}
+		// Skip non-regular files (sockets, devices); copy regular files.
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		return copyFile(p, target, info.Mode().Perm(), lu)
+	})
 }
 
 // maxDirEntries caps a single directory listing so a pathological directory

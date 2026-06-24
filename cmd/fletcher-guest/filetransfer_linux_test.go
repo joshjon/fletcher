@@ -172,6 +172,78 @@ func TestListDirNotADir(t *testing.T) {
 	}
 }
 
+// TestFileOpDeleteMoveCopy exercises delete, move, and recursive copy via the
+// pipe protocol.
+func TestFileOpDeleteMoveCopy(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, content string) string {
+		p := filepath.Join(root, rel)
+		_ = os.MkdirAll(filepath.Dir(p), 0o755)
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	run := func(spec guestproto.FileOpSpec) guestproto.FileResult {
+		host, guest := net.Pipe()
+		go func() {
+			fileOp(guest, spec)
+			_ = guest.Close()
+		}()
+		res, err := guestproto.ReadFileResult(host)
+		if err != nil {
+			t.Fatalf("read result: %v", err)
+		}
+		return res
+	}
+
+	// delete a file
+	f := write("a.txt", "hi")
+	if res := run(guestproto.FileOpSpec{Op: guestproto.FileOpDelete, Path: f}); res.Error != "" {
+		t.Fatalf("delete: %s", res.Error)
+	}
+	if _, err := os.Stat(f); !os.IsNotExist(err) {
+		t.Fatalf("file still present after delete")
+	}
+
+	// delete a non-empty dir without recursive should fail; with recursive succeed
+	write("d/inner.txt", "x")
+	if res := run(guestproto.FileOpSpec{Op: guestproto.FileOpDelete, Path: filepath.Join(root, "d")}); res.Error == "" {
+		t.Fatalf("non-recursive delete of a non-empty dir should fail")
+	}
+	if res := run(guestproto.FileOpSpec{Op: guestproto.FileOpDelete, Path: filepath.Join(root, "d"), Recursive: true}); res.Error != "" {
+		t.Fatalf("recursive delete: %s", res.Error)
+	}
+
+	// move (rename)
+	src := write("m.txt", "move me")
+	dst := filepath.Join(root, "moved.txt")
+	if res := run(guestproto.FileOpSpec{Op: guestproto.FileOpMove, Path: src, Dest: dst}); res.Error != "" {
+		t.Fatalf("move: %s", res.Error)
+	}
+	if got, _ := os.ReadFile(dst); string(got) != "move me" {
+		t.Fatalf("moved content wrong: %q", got)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Fatalf("source still present after move")
+	}
+
+	// recursive copy of a directory tree
+	write("tree/sub/leaf.txt", "leaf")
+	copyDst := filepath.Join(root, "tree-copy")
+	if res := run(guestproto.FileOpSpec{Op: guestproto.FileOpCopy, Path: filepath.Join(root, "tree"), Dest: copyDst, Recursive: true}); res.Error != "" {
+		t.Fatalf("copy: %s", res.Error)
+	}
+	if got, _ := os.ReadFile(filepath.Join(copyDst, "sub", "leaf.txt")); string(got) != "leaf" {
+		t.Fatalf("copied tree content wrong: %q", got)
+	}
+
+	// guard: refuse to delete "/"
+	if res := run(guestproto.FileOpSpec{Op: guestproto.FileOpDelete, Path: "/", Recursive: true}); res.Error == "" {
+		t.Fatalf("deleting / should be refused")
+	}
+}
+
 // TestReadDownloadMissing reports a missing file in the header error rather than
 // streaming.
 func TestReadDownloadMissing(t *testing.T) {

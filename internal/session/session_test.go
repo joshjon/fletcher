@@ -174,6 +174,10 @@ func (h *fakeHandle) ListDir(_ context.Context, _ string) (runtime.DirListing, e
 	return runtime.DirListing{}, nil
 }
 
+func (h *fakeHandle) FileOp(_ context.Context, _ runtime.FileOpSpec) error {
+	return nil
+}
+
 func (h *fakeHandle) Stop(_ context.Context) error {
 	h.stopped++
 	return nil

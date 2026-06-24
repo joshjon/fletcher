@@ -88,6 +88,10 @@ service SessionService {
   // guest init in pure Go (no shell), so it works on any image - including a
   // distroless one with no /bin/sh, where exec/shell are unavailable.
   rpc ListDir(ListDirRequest) returns (ListDirResponse) {}
+  // FileOp performs a delete, move (rename), or copy inside a running session's
+  // fork. Like the other file RPCs it is served by the guest init in pure Go, so
+  // it works on a shell-less image.
+  rpc FileOp(FileOpRequest) returns (FileOpResponse) {}
 }
 
 enum SessionState {
@@ -485,6 +489,30 @@ message ListDirResponse {
   // and some were omitted.
   bool truncated = 3;
 }
+
+enum FileOpKind {
+  FILE_OP_KIND_UNSPECIFIED = 0;
+  FILE_OP_KIND_DELETE = 1;
+  FILE_OP_KIND_MOVE = 2;
+  FILE_OP_KIND_COPY = 3;
+}
+
+message FileOpRequest {
+  // ref is a session ID or name; the session must be running.
+  string ref = 1;
+  // op is the operation to perform.
+  FileOpKind op = 2;
+  // path is the source (move/copy) or target (delete). Absolute is used as-is; a
+  // relative path resolves under the login user's home.
+  string path = 3;
+  // dest is the destination for a move or copy. If it names an existing
+  // directory, the source's base name is placed inside it.
+  string dest = 4;
+  // recursive allows deleting or copying a directory and its contents.
+  bool recursive = 5;
+}
+
+message FileOpResponse {}
 
 message DirEntry {
   // name is the entry's base name (no path).

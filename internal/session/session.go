@@ -726,6 +726,38 @@ func (m *Manager) ListDir(ctx context.Context, ref, path string) (runtime.DirLis
 	return listing, nil
 }
 
+// FileOp performs a delete, move, or copy inside a running session's fork.
+func (m *Manager) FileOp(ctx context.Context, ref string, spec runtime.FileOpSpec) error {
+	if strings.TrimSpace(spec.Path) == "" {
+		return errs.New(errs.CategoryInvalidArgument, "path is required")
+	}
+	switch spec.Op {
+	case runtime.FileOpDelete:
+	case runtime.FileOpMove, runtime.FileOpCopy:
+		if strings.TrimSpace(spec.Dest) == "" {
+			return errs.New(errs.CategoryInvalidArgument, "destination is required for move/copy")
+		}
+	default:
+		return errs.Newf(errs.CategoryInvalidArgument, "unknown file operation %q", spec.Op)
+	}
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return err
+	}
+	handle := m.getHandle(row.ID)
+	if handle == nil || State(row.State) != StateRunning {
+		return errs.Newf(errs.CategoryFailedPrecondition,
+			"session %q is not running; start it with `fletcher session start`", row.Name)
+	}
+	m.markBusy(row.ID)
+	defer m.unmarkBusy(row.ID)
+	if err := handle.FileOp(ctx, spec); err != nil {
+		return fmt.Errorf("session file operation: %w", err)
+	}
+	m.touch(ctx, row.ID)
+	return nil
+}
+
 // appLogPath is where a run_app session's supervisor writes the app's merged
 // stdout/stderr inside the guest.
 const appLogPath = "/var/log/fletcher-app.log"

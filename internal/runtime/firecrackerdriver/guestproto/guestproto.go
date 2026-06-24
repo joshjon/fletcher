@@ -132,7 +132,33 @@ const (
 	// Request (Kind + File.Path), the guest replies with a DirListing. Served in
 	// pure Go (os.ReadDir), so it works on an image with no shell.
 	RequestListDir RequestKind = "list_dir"
+	// RequestFileOp performs a delete, move, or copy in the guest fork. The host
+	// sends the Request (Kind + FileOp), the guest replies with a FileResult
+	// (Error set on failure). Pure Go, so it works on an image with no shell.
+	RequestFileOp RequestKind = "file_op"
 )
+
+// FileOpKind is the operation a RequestFileOp performs.
+type FileOpKind string
+
+// File operation kinds for FileOpSpec.Op.
+const (
+	FileOpDelete FileOpKind = "delete"
+	FileOpMove   FileOpKind = "move"
+	FileOpCopy   FileOpKind = "copy"
+)
+
+// FileOpSpec parameterises a RequestFileOp.
+type FileOpSpec struct {
+	// Op is the operation: delete, move, or copy.
+	Op FileOpKind `json:"op"`
+	// Path is the source (move/copy) or target (delete).
+	Path string `json:"path"`
+	// Dest is the destination for a move or copy.
+	Dest string `json:"dest,omitempty"`
+	// Recursive allows deleting or copying a directory tree.
+	Recursive bool `json:"recursive,omitempty"`
+}
 
 // DirEntry is one entry in a guest directory listing.
 type DirEntry struct {
@@ -254,10 +280,11 @@ type ShellSpec struct {
 // ephemeral path uses Spec directly; sessions wrap it so the same connection
 // can also carry a clean shutdown or an interactive shell.
 type Request struct {
-	Kind  RequestKind `json:"kind"`
-	Spec  Spec        `json:"spec,omitempty"`
-	Shell ShellSpec   `json:"shell,omitempty"`
-	File  FileSpec    `json:"file,omitempty"`
+	Kind   RequestKind `json:"kind"`
+	Spec   Spec        `json:"spec,omitempty"`
+	Shell  ShellSpec   `json:"shell,omitempty"`
+	File   FileSpec    `json:"file,omitempty"`
+	FileOp FileOpSpec  `json:"fileOp,omitempty"`
 }
 
 // Frame kinds. KindStdout/KindStderr/KindExit flow guest->host; KindStdin and

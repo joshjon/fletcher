@@ -30,6 +30,7 @@ type SessionsBackend interface {
 	UploadFile(ctx context.Context, ref, path string, mode uint32, size int64, content io.Reader) (runtime.FileWriteResult, error)
 	DownloadFile(ctx context.Context, ref, path string, onInfo func(runtime.FileReadResult) error, w io.Writer) error
 	ListDir(ctx context.Context, ref, path string) (runtime.DirListing, error)
+	FileOp(ctx context.Context, ref string, spec runtime.FileOpSpec) error
 	Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error)
 	DialSSH(ctx context.Context, ref string) (net.Conn, error)
 	Publish(ctx context.Context, ref string, guestPort int, name string, public bool, host string) (session.PublishedPort, error)
@@ -412,6 +413,35 @@ func (s *SessionsService) ListDir(ctx context.Context, req *connect.Request[flet
 		Entries:   entries,
 		Truncated: listing.Truncated,
 	}), nil
+}
+
+// FileOp performs a delete, move, or copy inside a running session (served by
+// the guest in pure Go, so it works on a shell-less image).
+func (s *SessionsService) FileOp(ctx context.Context, req *connect.Request[fletcherv1.FileOpRequest]) (*connect.Response[fletcherv1.FileOpResponse], error) {
+	if err := s.backend.FileOp(ctx, req.Msg.GetRef(), runtime.FileOpSpec{
+		Op:        fileOpKindFromProto(req.Msg.GetOp()),
+		Path:      req.Msg.GetPath(),
+		Dest:      req.Msg.GetDest(),
+		Recursive: req.Msg.GetRecursive(),
+	}); err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(&fletcherv1.FileOpResponse{}), nil
+}
+
+// fileOpKindFromProto maps the proto enum to the runtime op string ("" for an
+// unspecified op, which the manager rejects).
+func fileOpKindFromProto(k fletcherv1.FileOpKind) string {
+	switch k {
+	case fletcherv1.FileOpKind_FILE_OP_KIND_DELETE:
+		return runtime.FileOpDelete
+	case fletcherv1.FileOpKind_FILE_OP_KIND_MOVE:
+		return runtime.FileOpMove
+	case fletcherv1.FileOpKind_FILE_OP_KIND_COPY:
+		return runtime.FileOpCopy
+	default:
+		return ""
+	}
 }
 
 // ExecSession runs a command in a running session and returns its output.

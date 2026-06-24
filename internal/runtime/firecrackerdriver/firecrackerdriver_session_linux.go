@@ -412,6 +412,39 @@ func (s *fcSession) ListDir(ctx context.Context, path string) (fcruntime.DirList
 	return out, nil
 }
 
+// FileOp performs a delete, move, or copy in the guest fork (served by the guest
+// in pure Go).
+func (s *fcSession) FileOp(ctx context.Context, spec fcruntime.FileOpSpec) error {
+	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.ControlPort)
+	if err != nil {
+		return fmt.Errorf("firecracker: connect session: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+
+	req := guestproto.Request{
+		Kind: guestproto.RequestFileOp,
+		FileOp: guestproto.FileOpSpec{
+			Op:        guestproto.FileOpKind(spec.Op),
+			Path:      spec.Path,
+			Dest:      spec.Dest,
+			Recursive: spec.Recursive,
+		},
+	}
+	if err := guestproto.WriteRequest(conn, req); err != nil {
+		return fmt.Errorf("firecracker: send file op: %w", err)
+	}
+	res, err := guestproto.ReadFileResult(conn)
+	if err != nil {
+		return fmt.Errorf("firecracker: file op result: %w", err)
+	}
+	if res.Error != "" {
+		return errs.New(errs.CategoryFailedPrecondition, res.Error)
+	}
+	return nil
+}
+
 // Shell opens an interactive PTY in the running session VM. It sends the host's
 // keystrokes (stdin) and window resizes to the guest as frames, and writes the
 // guest's terminal output to stdout, returning the shell's exit code.

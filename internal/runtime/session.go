@@ -109,6 +109,8 @@ type SessionHandle interface {
 	// ListDir lists a directory in the guest fork (pure Go in the guest, so it
 	// works without a shell).
 	ListDir(ctx context.Context, path string) (DirListing, error)
+	// FileOp performs a delete, move, or copy in the guest fork.
+	FileOp(ctx context.Context, spec FileOpSpec) error
 	// Stop shuts the VM down cleanly. The fork on disk is untouched.
 	Stop(ctx context.Context) error
 }
@@ -153,6 +155,25 @@ type DirListing struct {
 	Path      string
 	Entries   []DirEntry
 	Truncated bool
+}
+
+// File operation kinds for FileOpSpec.Op.
+const (
+	FileOpDelete = "delete"
+	FileOpMove   = "move"
+	FileOpCopy   = "copy"
+)
+
+// FileOpSpec parameterises a delete, move, or copy inside a session's fork.
+type FileOpSpec struct {
+	// Op is one of FileOpDelete, FileOpMove, FileOpCopy.
+	Op string
+	// Path is the source (move/copy) or target (delete).
+	Path string
+	// Dest is the destination for a move or copy.
+	Dest string
+	// Recursive allows deleting or copying a directory tree.
+	Recursive bool
 }
 
 // SessionRuntime is the optional capability a Driver advertises when it can host
