@@ -316,7 +316,7 @@ func (s *fcSession) WriteFile(ctx context.Context, spec fcruntime.FileWriteSpec,
 
 	req := guestproto.Request{
 		Kind: guestproto.RequestWriteFile,
-		File: guestproto.FileSpec{Path: spec.Path, Mode: spec.Mode, Size: spec.Size},
+		File: guestproto.FileSpec{Path: spec.Path, Mode: spec.Mode, Size: spec.Size, Overwrite: spec.Overwrite},
 	}
 	if err := guestproto.WriteRequest(conn, req); err != nil {
 		return fcruntime.FileWriteResult{}, fmt.Errorf("firecracker: send upload: %w", err)

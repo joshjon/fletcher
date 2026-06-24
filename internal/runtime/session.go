@@ -124,6 +124,9 @@ type FileWriteSpec struct {
 	Mode uint32
 	// Size is the number of bytes to read from content.
 	Size int64
+	// Overwrite allows replacing an existing file; false fails when the
+	// destination already exists.
+	Overwrite bool
 }
 
 // FileWriteResult reports the outcome of a file upload.

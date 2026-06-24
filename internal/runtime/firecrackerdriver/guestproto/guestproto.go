@@ -200,6 +200,9 @@ type FileSpec struct {
 	Mode uint32 `json:"mode,omitempty"`
 	// Size is the number of raw bytes that follow the request, for a write.
 	Size int64 `json:"size,omitempty"`
+	// Overwrite allows a write to replace an existing file; false fails when the
+	// destination already exists.
+	Overwrite bool `json:"overwrite,omitempty"`
 }
 
 // FileResult is the guest's reply to a file transfer. For a read it carries the

@@ -68,6 +68,54 @@ func TestWriteUploadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestWriteUploadNoClobber checks that an upload to an existing path is refused
+// at the readiness ack unless overwrite is set, and replaces when it is.
+func TestWriteUploadNoClobber(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "exists.txt")
+	if err := os.WriteFile(dest, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// overwrite=false: the ack should carry an "already exists" error and the
+	// file is untouched.
+	host, guest := net.Pipe()
+	go func() {
+		writeUpload(guest, guestproto.FileSpec{Path: dest, Size: 3})
+		_ = guest.Close()
+	}()
+	ack, err := guestproto.ReadFileResult(host)
+	if err != nil {
+		t.Fatalf("read ack: %v", err)
+	}
+	if ack.Error == "" {
+		t.Fatalf("expected an 'already exists' error without overwrite")
+	}
+	_ = host.Close()
+	if got, _ := os.ReadFile(dest); string(got) != "original" {
+		t.Fatalf("file changed despite refused upload: %q", got)
+	}
+
+	// overwrite=true: replaces the file.
+	payload := []byte("NEW")
+	host2, guest2 := net.Pipe()
+	go func() {
+		writeUpload(guest2, guestproto.FileSpec{Path: dest, Size: int64(len(payload)), Overwrite: true})
+		_ = guest2.Close()
+	}()
+	if ack2, aerr := guestproto.ReadFileResult(host2); aerr != nil || ack2.Error != "" {
+		t.Fatalf("overwrite ack: err=%v ack=%+v", aerr, ack2)
+	}
+	if _, werr := host2.Write(payload); werr != nil {
+		t.Fatalf("write payload: %v", werr)
+	}
+	if res, rerr := guestproto.ReadFileResult(host2); rerr != nil || res.Error != "" {
+		t.Fatalf("overwrite result: err=%v res=%+v", rerr, res)
+	}
+	if got, _ := os.ReadFile(dest); string(got) != "NEW" {
+		t.Fatalf("file not replaced: %q", got)
+	}
+}
+
 // TestReadDownloadRoundTrip writes a file, then drives readDownload and checks
 // the host receives the right header and bytes.
 func TestReadDownloadRoundTrip(t *testing.T) {

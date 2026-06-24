@@ -2512,7 +2512,11 @@ type UploadStart struct {
 	// size is the file's total length in bytes. The client declares it up front
 	// (it knows the source size) so the daemon streams exactly this many bytes to
 	// the guest; a short or long stream is reported as an error.
-	Size          int64 `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	Size int64 `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	// overwrite controls what happens when a file already exists at path: false
+	// (the default) fails with an "already exists" error before any bytes stream;
+	// true replaces it. A directory at path always fails (it is never replaced).
+	Overwrite     bool `protobuf:"varint,5,opt,name=overwrite,proto3" json:"overwrite,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2573,6 +2577,13 @@ func (x *UploadStart) GetSize() int64 {
 		return x.Size
 	}
 	return 0
+}
+
+func (x *UploadStart) GetOverwrite() bool {
+	if x != nil {
+		return x.Overwrite
+	}
+	return false
 }
 
 type UploadFileResponse struct {
@@ -3769,12 +3780,13 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\x11UploadFileRequest\x120\n" +
 	"\x05start\x18\x01 \x01(\v2\x18.fletcher.v1.UploadStartH\x00R\x05start\x12\x16\n" +
 	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x05\n" +
-	"\x03msg\"[\n" +
+	"\x03msg\"y\n" +
 	"\vUploadStart\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x12\n" +
 	"\x04mode\x18\x03 \x01(\rR\x04mode\x12\x12\n" +
-	"\x04size\x18\x04 \x01(\x03R\x04size\"Q\n" +
+	"\x04size\x18\x04 \x01(\x03R\x04size\x12\x1c\n" +
+	"\toverwrite\x18\x05 \x01(\bR\toverwrite\"Q\n" +
 	"\x12UploadFileResponse\x12#\n" +
 	"\rbytes_written\x18\x01 \x01(\x03R\fbytesWritten\x12\x16\n" +
 	"\x06sha256\x18\x02 \x01(\tR\x06sha256\";\n" +

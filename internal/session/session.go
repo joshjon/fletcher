@@ -650,7 +650,7 @@ func (m *Manager) Exec(ctx context.Context, ref, command string) (ExecResult, er
 // UploadFile streams content (size bytes) into a running session's fork at path,
 // writing it atomically and handing it to the login user. mode is the file's
 // permission bits (0 uses 0644). Returns the bytes written and the content hash.
-func (m *Manager) UploadFile(ctx context.Context, ref, path string, mode uint32, size int64, content io.Reader) (runtime.FileWriteResult, error) {
+func (m *Manager) UploadFile(ctx context.Context, ref, path string, mode uint32, size int64, overwrite bool, content io.Reader) (runtime.FileWriteResult, error) {
 	if strings.TrimSpace(path) == "" {
 		return runtime.FileWriteResult{}, errs.New(errs.CategoryInvalidArgument, "destination path is required")
 	}
@@ -670,7 +670,7 @@ func (m *Manager) UploadFile(ctx context.Context, ref, path string, mode uint32,
 	m.markBusy(row.ID)
 	defer m.unmarkBusy(row.ID)
 
-	res, err := handle.WriteFile(ctx, runtime.FileWriteSpec{Path: path, Mode: mode, Size: size}, content)
+	res, err := handle.WriteFile(ctx, runtime.FileWriteSpec{Path: path, Mode: mode, Size: size, Overwrite: overwrite}, content)
 	if err != nil {
 		return runtime.FileWriteResult{}, fmt.Errorf("upload to session: %w", err)
 	}

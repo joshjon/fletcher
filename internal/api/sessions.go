@@ -27,7 +27,7 @@ type SessionsBackend interface {
 	Delete(ctx context.Context, ref string) (bool, error)
 	UpdateSession(ctx context.Context, ref, egressPolicy, gateway string, envVars []session.EnvVar, updateEnv bool) (session.Session, bool, error)
 	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
-	UploadFile(ctx context.Context, ref, path string, mode uint32, size int64, content io.Reader) (runtime.FileWriteResult, error)
+	UploadFile(ctx context.Context, ref, path string, mode uint32, size int64, overwrite bool, content io.Reader) (runtime.FileWriteResult, error)
 	DownloadFile(ctx context.Context, ref, path string, onInfo func(runtime.FileReadResult) error, w io.Writer) error
 	ListDir(ctx context.Context, ref, path string) (runtime.DirListing, error)
 	FileOp(ctx context.Context, ref string, spec runtime.FileOpSpec) error
@@ -329,7 +329,7 @@ func (s *SessionsService) UploadFile(ctx context.Context, stream *connect.Client
 	if start == nil || start.GetRef() == "" {
 		return nil, errs.New(errs.CategoryInvalidArgument, "first upload message must carry start with a session ref")
 	}
-	res, err := s.backend.UploadFile(ctx, start.GetRef(), start.GetPath(), start.GetMode(), start.GetSize(),
+	res, err := s.backend.UploadFile(ctx, start.GetRef(), start.GetPath(), start.GetMode(), start.GetSize(), start.GetOverwrite(),
 		&uploadStreamReader{stream: stream})
 	if err != nil {
 		return nil, err

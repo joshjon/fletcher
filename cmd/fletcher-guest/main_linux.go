@@ -440,13 +440,23 @@ func writeUpload(conn net.Conn, spec guestproto.FileSpec) {
 	dir := filepath.Dir(dest)
 
 	tmp, err := func() (*os.File, error) {
+		// Check the destination up front (before streaming): a directory is never
+		// replaced, and an existing file only when overwrite is set.
+		if fi, lerr := os.Lstat(dest); lerr == nil {
+			if fi.IsDir() {
+				return nil, fmt.Errorf("a directory named %q already exists", filepath.Base(dest))
+			}
+			if !spec.Overwrite {
+				return nil, fmt.Errorf("a file named %q already exists", filepath.Base(dest))
+			}
+		}
 		if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // a writable workspace dir inside the fork
 			return nil, err
 		}
 		return os.CreateTemp(dir, ".fletcher-upload-*")
 	}()
 	if err != nil {
-		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: fmt.Sprintf("prepare upload: %v", err)})
+		_ = guestproto.WriteFileResult(conn, guestproto.FileResult{Error: err.Error()})
 		return
 	}
 	tmpName := tmp.Name()

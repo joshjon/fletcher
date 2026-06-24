@@ -36,6 +36,7 @@ func sessionCpCmd() *cli.Command {
 		Flags: []cli.Flag{
 			socketFlag(),
 			&cli.BoolFlag{Name: "recursive", Aliases: []string{"r"}, Usage: "for a remote-to-remote copy, copy a directory and its contents"},
+			&cli.BoolFlag{Name: "no-clobber", Aliases: []string{"n"}, Usage: "on upload, fail instead of overwriting an existing file"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if cmd.Args().Len() != 2 {
@@ -54,7 +55,7 @@ func sessionCpCmd() *cli.Command {
 			case !srcRemote && !dstRemote:
 				return errors.New("neither side is remote; write the session side as <ref>:<path>")
 			case !srcRemote && dstRemote:
-				return uploadFile(ctx, cmd, src, dstRef, dstPath)
+				return uploadFile(ctx, cmd, src, dstRef, dstPath, !cmd.Bool("no-clobber"))
 			default:
 				return downloadFile(ctx, cmd, srcRef, srcPath, dst)
 			}
@@ -226,8 +227,9 @@ func splitRemote(arg string) (ref, p string, remote bool) {
 }
 
 // uploadFile streams a local file into a running session. A remote path that is
-// empty or ends in '/' takes the local file's base name.
-func uploadFile(ctx context.Context, cmd *cli.Command, localPath, ref, remotePath string) error {
+// empty or ends in '/' takes the local file's base name. overwrite replaces an
+// existing file (false fails on a name clash).
+func uploadFile(ctx context.Context, cmd *cli.Command, localPath, ref, remotePath string, overwrite bool) error {
 	f, err := os.Open(localPath) //nolint:gosec // localPath is the operator's chosen source file
 	if err != nil {
 		return err
@@ -248,10 +250,11 @@ func uploadFile(ctx context.Context, cmd *cli.Command, localPath, ref, remotePat
 	stream := client.UploadFile(ctx)
 	if err := stream.Send(&fletcherv1.UploadFileRequest{
 		Msg: &fletcherv1.UploadFileRequest_Start{Start: &fletcherv1.UploadStart{
-			Ref:  ref,
-			Path: remotePath,
-			Mode: uint32(info.Mode().Perm()),
-			Size: info.Size(),
+			Ref:       ref,
+			Path:      remotePath,
+			Mode:      uint32(info.Mode().Perm()),
+			Size:      info.Size(),
+			Overwrite: overwrite,
 		}},
 	}); err != nil {
 		return err
