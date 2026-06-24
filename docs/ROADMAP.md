@@ -2022,6 +2022,21 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**Corrupt build cache no longer emits empty images (2026-06-24, daemon `6a4310c`).**
+Second face of the crash-inconsistency theme (after the fork self-heal): a daemon kill
+can leave the persistent buildah layer cache's ext4 corrupt (bad group-descriptor /
+bitmap checksums). buildah then writes broken layers onto it and the build emits an
+image whose files are all 0 bytes - every binary empty, so the deploy boots into
+`fork/exec /bin/sh: exec format error` and dies. `ensureBuildCache` assumed the cache
+was self-healing ("journaled fs, no fsck needed"), which only covers a clean unclean
+shutdown. It now runs `e2fsck -p` on the cache: a normal unclean shutdown (exit 0/1/2)
+keeps it, real corruption (exit >= 4) resets it (the cache is regenerable). Mirrors the
+cold-boot fork repair. Recovered the operator's wc-26-pundit deploy (rolled back to its
+working fork, cleared the cache; a fresh build then produced correct layers). *Note:*
+both this and the fork corruption were likely caused by the many `make install` daemon
+restarts during a development session - worth confirming the hibernate/stop sync path
+flushes ext4 metadata, since that is the common thread.
+
 **Build-then-redeploy in one step (2026-06-24, daemon `98c9eb9` + iOS `ec9bafa`).**
 Closed a workflow gap: after fixing code in a dev session, there was no easy way to
 rebuild an existing deployment's image and redeploy onto it - you built (and named) an
