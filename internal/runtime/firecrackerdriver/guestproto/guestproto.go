@@ -128,7 +128,42 @@ const (
 	// Request (Kind + File.Path), the guest replies with a FileResult (Size +
 	// Mode, or Error), then streams that many raw bytes.
 	RequestReadFile RequestKind = "read_file"
+	// RequestListDir lists a directory in the guest fork. The host sends the
+	// Request (Kind + File.Path), the guest replies with a DirListing. Served in
+	// pure Go (os.ReadDir), so it works on an image with no shell.
+	RequestListDir RequestKind = "list_dir"
 )
+
+// DirEntry is one entry in a guest directory listing.
+type DirEntry struct {
+	Name          string `json:"name"`
+	Size          int64  `json:"size,omitempty"`
+	Mode          uint32 `json:"mode,omitempty"`
+	IsDir         bool   `json:"isDir,omitempty"`
+	ModTime       int64  `json:"modTime,omitempty"`
+	IsSymlink     bool   `json:"isSymlink,omitempty"`
+	SymlinkTarget string `json:"symlinkTarget,omitempty"`
+}
+
+// DirListing is the guest's reply to a RequestListDir: the resolved directory,
+// its entries, and whether the listing was capped. Error is non-empty on failure
+// (e.g. the path is missing or not a directory).
+type DirListing struct {
+	Path      string     `json:"path,omitempty"`
+	Entries   []DirEntry `json:"entries,omitempty"`
+	Truncated bool       `json:"truncated,omitempty"`
+	Error     string     `json:"error,omitempty"`
+}
+
+// WriteDirListing sends a DirListing as a length-prefixed JSON message.
+func WriteDirListing(w io.Writer, l DirListing) error { return writeJSON(w, l) }
+
+// ReadDirListing reads a DirListing written by WriteDirListing.
+func ReadDirListing(r io.Reader) (DirListing, error) {
+	var l DirListing
+	err := readJSON(r, &l)
+	return l, err
+}
 
 // FileSpec names a file to transfer and, for a write, how many bytes follow.
 type FileSpec struct {

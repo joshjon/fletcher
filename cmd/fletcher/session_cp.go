@@ -8,7 +8,10 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
+	"text/tabwriter"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/urfave/cli/v3"
@@ -51,6 +54,88 @@ func sessionCpCmd() *cli.Command {
 			}
 		},
 	}
+}
+
+func sessionLsCmd() *cli.Command {
+	return &cli.Command{
+		Name:      "ls",
+		Usage:     "list a directory inside a running session (works on a shell-less image)",
+		ArgsUsage: "<ref>[:<path>]",
+		Description: "List a directory in a running session's filesystem - including a\n" +
+			"mounted volume at /volume. Served by the guest in pure Go (no shell),\n" +
+			"so it works even on a distroless image. Example:\n" +
+			"  fletcher session ls wc-26-pundit:/volume",
+		Flags: []cli.Flag{socketFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			arg := cmd.Args().First()
+			if arg == "" {
+				return errors.New("usage: fletcher session ls <ref>[:<path>]")
+			}
+			ref, dir, isRemote := splitRemote(arg)
+			if !isRemote {
+				// No colon: the whole arg is the ref, list the login user's home.
+				ref, dir = arg, ""
+			}
+			client := newSessionsClient(cmd)
+			resp, err := client.ListDir(ctx, connect.NewRequest(&fletcherv1.ListDirRequest{Ref: ref, Path: dir}))
+			if err != nil {
+				return err
+			}
+			msg := resp.Msg
+			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+			entries := msg.GetEntries()
+			sort.SliceStable(entries, func(i, j int) bool {
+				if entries[i].GetIsDir() != entries[j].GetIsDir() {
+					return entries[i].GetIsDir()
+				}
+				return entries[i].GetName() < entries[j].GetName()
+			})
+			for _, e := range entries {
+				name := e.GetName()
+				if e.GetIsDir() {
+					name += "/"
+				}
+				if e.GetIsSymlink() && e.GetSymlinkTarget() != "" {
+					name += " -> " + e.GetSymlinkTarget()
+				}
+				size := "-"
+				if !e.GetIsDir() {
+					size = humanBytes(e.GetSize())
+				}
+				modified := time.Unix(e.GetModifiedAt(), 0).Format("2006-01-02 15:04")
+				fmt.Fprintf(tw, "%s\t%8s\t%s\t%s\n", modeString(e.GetMode(), e.GetIsDir(), e.GetIsSymlink()), size, modified, name)
+			}
+			if err := tw.Flush(); err != nil {
+				return err
+			}
+			if msg.GetTruncated() {
+				fmt.Fprintf(os.Stdout, "... (listing truncated at %d entries)\n", len(entries))
+			}
+			return nil
+		},
+	}
+}
+
+// modeString renders unix permission bits as an ls-style string (e.g. drwxr-xr-x).
+func modeString(mode uint32, isDir, isSymlink bool) string {
+	var b strings.Builder
+	switch {
+	case isSymlink:
+		b.WriteByte('l')
+	case isDir:
+		b.WriteByte('d')
+	default:
+		b.WriteByte('-')
+	}
+	const rwx = "rwxrwxrwx"
+	for i := 0; i < 9; i++ {
+		if mode&(1<<uint(8-i)) != 0 {
+			b.WriteByte(rwx[i])
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
 }
 
 // splitRemote parses a `<ref>:<path>` argument. It is remote when there is a

@@ -704,6 +704,28 @@ func (m *Manager) DownloadFile(ctx context.Context, ref, path string, onInfo fun
 	return nil
 }
 
+// ListDir lists a directory inside a running session's fork. An empty path lists
+// the login user's home.
+func (m *Manager) ListDir(ctx context.Context, ref, path string) (runtime.DirListing, error) {
+	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return runtime.DirListing{}, err
+	}
+	handle := m.getHandle(row.ID)
+	if handle == nil || State(row.State) != StateRunning {
+		return runtime.DirListing{}, errs.Newf(errs.CategoryFailedPrecondition,
+			"session %q is not running; start it with `fletcher session start`", row.Name)
+	}
+	m.markBusy(row.ID)
+	defer m.unmarkBusy(row.ID)
+	listing, err := handle.ListDir(ctx, path)
+	if err != nil {
+		return runtime.DirListing{}, fmt.Errorf("list session directory: %w", err)
+	}
+	m.touch(ctx, row.ID)
+	return listing, nil
+}
+
 // appLogPath is where a run_app session's supervisor writes the app's merged
 // stdout/stderr inside the guest.
 const appLogPath = "/var/log/fletcher-app.log"

@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -404,6 +405,8 @@ func serveControl(conn net.Conn) {
 		writeUpload(conn, req.File)
 	case guestproto.RequestReadFile:
 		readDownload(conn, req.File)
+	case guestproto.RequestListDir:
+		listDir(conn, req.File)
 	case guestproto.RequestShutdown:
 		shutdown() // resets the VM; does not return
 	default:
@@ -525,6 +528,78 @@ func readDownload(conn net.Conn, spec guestproto.FileSpec) {
 	}
 	if _, err := io.CopyN(conn, f, info.Size()); err != nil {
 		fmt.Fprintf(os.Stderr, "fletcher-guest: stream %s: %v\n", src, err)
+	}
+}
+
+// maxDirEntries caps a single directory listing so a pathological directory
+// cannot make the reply unbounded. The listing reports Truncated when it hits it.
+const maxDirEntries = 10000
+
+// listDir handles a RequestListDir: read the directory in pure Go (no shell, so
+// it works on an image with no /bin/sh) and reply with the entries, directories
+// first then by name. A missing path or a non-directory is reported in the
+// listing's error.
+func listDir(conn net.Conn, spec guestproto.FileSpec) {
+	lu := lookupLoginUser()
+	dir := resolveGuestPath(spec.Path, lu)
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		_ = guestproto.WriteDirListing(conn, guestproto.DirListing{Error: err.Error()})
+		return
+	}
+	if !info.IsDir() {
+		_ = guestproto.WriteDirListing(conn, guestproto.DirListing{Error: fmt.Sprintf("%s is not a directory", dir)})
+		return
+	}
+	raw, err := os.ReadDir(dir)
+	if err != nil {
+		_ = guestproto.WriteDirListing(conn, guestproto.DirListing{Path: dir, Error: err.Error()})
+		return
+	}
+	truncated := false
+	if len(raw) > maxDirEntries {
+		raw = raw[:maxDirEntries]
+		truncated = true
+	}
+
+	entries := make([]guestproto.DirEntry, 0, len(raw))
+	for _, e := range raw {
+		full := filepath.Join(dir, e.Name())
+		de := guestproto.DirEntry{Name: e.Name(), IsDir: e.IsDir()}
+		if fi, ierr := e.Info(); ierr == nil {
+			de.Size = fi.Size()
+			de.Mode = uint32(fi.Mode().Perm())
+			de.ModTime = fi.ModTime().Unix()
+			if fi.Mode()&os.ModeSymlink != 0 {
+				de.IsSymlink = true
+				if target, lerr := os.Readlink(full); lerr == nil {
+					de.SymlinkTarget = target
+				}
+				// Resolve through the link so the client can descend a dir symlink.
+				if ti, terr := os.Stat(full); terr == nil {
+					de.IsDir = ti.IsDir()
+					if !ti.IsDir() {
+						de.Size = ti.Size()
+					}
+				}
+			}
+		}
+		entries = append(entries, de)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir != entries[j].IsDir {
+			return entries[i].IsDir // directories first
+		}
+		return entries[i].Name < entries[j].Name
+	})
+
+	if err := guestproto.WriteDirListing(conn, guestproto.DirListing{
+		Path:      dir,
+		Entries:   entries,
+		Truncated: truncated,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "fletcher-guest: write listing %s: %v\n", dir, err)
 	}
 }
 

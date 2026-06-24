@@ -84,6 +84,10 @@ service SessionService {
   // The first response message carries a FileInfo (size + mode); later messages
   // carry chunk bytes. Server-streaming: requires HTTP/2.
   rpc DownloadFile(DownloadFileRequest) returns (stream DownloadFileResponse) {}
+  // ListDir lists a directory inside a running session's fork. Served by the
+  // guest init in pure Go (no shell), so it works on any image - including a
+  // distroless one with no /bin/sh, where exec/shell are unavailable.
+  rpc ListDir(ListDirRequest) returns (ListDirResponse) {}
 }
 
 enum SessionState {
@@ -462,6 +466,41 @@ message FileInfo {
   int64 size = 1;
   // mode is the file's unix permission bits.
   uint32 mode = 2;
+}
+
+message ListDirRequest {
+  // ref is a session ID or name; the session must be running.
+  string ref = 1;
+  // path is the directory to list. Absolute is used as-is; empty or relative
+  // resolves under the login user's home.
+  string path = 2;
+}
+
+message ListDirResponse {
+  // path is the resolved absolute directory that was listed.
+  string path = 1;
+  // entries are the directory's contents (directories first, then by name).
+  repeated DirEntry entries = 2;
+  // truncated is true when the directory had more entries than the listing cap
+  // and some were omitted.
+  bool truncated = 3;
+}
+
+message DirEntry {
+  // name is the entry's base name (no path).
+  string name = 1;
+  // size is the file size in bytes (0 for a directory).
+  int64 size = 2;
+  // mode is the entry's unix permission bits.
+  uint32 mode = 3;
+  // is_dir is whether the entry is a directory (a symlink to a directory counts).
+  bool is_dir = 4;
+  // modified_at is the entry's mtime as Unix epoch seconds.
+  int64 modified_at = 5;
+  // is_symlink is whether the entry itself is a symbolic link.
+  bool is_symlink = 6;
+  // symlink_target is where a symlink points (best-effort; empty otherwise).
+  string symlink_target = 7;
 }
 
 // PublishedPort is a port a session serves, brokered by the daemon (the

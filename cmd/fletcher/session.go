@@ -31,6 +31,7 @@ func sessionCmd() *cli.Command {
 			sessionDeleteCmd(),
 			sessionExecCmd(),
 			sessionCpCmd(),
+			sessionLsCmd(),
 			sessionShellCmd(),
 			sessionSSHCmd(),
 			sessionSSHProxyCmd(),

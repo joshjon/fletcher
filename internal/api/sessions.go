@@ -29,6 +29,7 @@ type SessionsBackend interface {
 	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
 	UploadFile(ctx context.Context, ref, path string, mode uint32, size int64, content io.Reader) (runtime.FileWriteResult, error)
 	DownloadFile(ctx context.Context, ref, path string, onInfo func(runtime.FileReadResult) error, w io.Writer) error
+	ListDir(ctx context.Context, ref, path string) (runtime.DirListing, error)
 	Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error)
 	DialSSH(ctx context.Context, ref string) (net.Conn, error)
 	Publish(ctx context.Context, ref string, guestPort int, name string, public bool, host string) (session.PublishedPort, error)
@@ -385,6 +386,32 @@ func (s *SessionsService) DownloadFile(ctx context.Context, req *connect.Request
 		return len(p), nil
 	})
 	return s.backend.DownloadFile(ctx, req.Msg.GetRef(), req.Msg.GetPath(), onInfo, w)
+}
+
+// ListDir lists a directory inside a running session (served by the guest in
+// pure Go, so it works on a shell-less image).
+func (s *SessionsService) ListDir(ctx context.Context, req *connect.Request[fletcherv1.ListDirRequest]) (*connect.Response[fletcherv1.ListDirResponse], error) {
+	listing, err := s.backend.ListDir(ctx, req.Msg.GetRef(), req.Msg.GetPath())
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]*fletcherv1.DirEntry, len(listing.Entries))
+	for i, e := range listing.Entries {
+		entries[i] = &fletcherv1.DirEntry{
+			Name:          e.Name,
+			Size:          e.Size,
+			Mode:          e.Mode,
+			IsDir:         e.IsDir,
+			ModifiedAt:    e.ModTime,
+			IsSymlink:     e.IsSymlink,
+			SymlinkTarget: e.SymlinkTarget,
+		}
+	}
+	return connect.NewResponse(&fletcherv1.ListDirResponse{
+		Path:      listing.Path,
+		Entries:   entries,
+		Truncated: listing.Truncated,
+	}), nil
 }
 
 // ExecSession runs a command in a running session and returns its output.

@@ -170,6 +170,10 @@ func (h *fakeHandle) ReadFile(_ context.Context, _ string, onInfo func(runtime.F
 	return nil
 }
 
+func (h *fakeHandle) ListDir(_ context.Context, _ string) (runtime.DirListing, error) {
+	return runtime.DirListing{}, nil
+}
+
 func (h *fakeHandle) Stop(_ context.Context) error {
 	h.stopped++
 	return nil

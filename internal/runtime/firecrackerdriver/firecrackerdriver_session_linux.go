@@ -374,6 +374,44 @@ func (s *fcSession) ReadFile(ctx context.Context, path string, onInfo func(fcrun
 	return nil
 }
 
+// ListDir lists a directory in the guest fork. The guest serves it in pure Go,
+// so it works on an image with no shell.
+func (s *fcSession) ListDir(ctx context.Context, path string) (fcruntime.DirListing, error) {
+	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.ControlPort)
+	if err != nil {
+		return fcruntime.DirListing{}, fmt.Errorf("firecracker: connect session: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+
+	req := guestproto.Request{Kind: guestproto.RequestListDir, File: guestproto.FileSpec{Path: path}}
+	if err := guestproto.WriteRequest(conn, req); err != nil {
+		return fcruntime.DirListing{}, fmt.Errorf("firecracker: send list: %w", err)
+	}
+	listing, err := guestproto.ReadDirListing(conn)
+	if err != nil {
+		return fcruntime.DirListing{}, fmt.Errorf("firecracker: read listing: %w", err)
+	}
+	if listing.Error != "" {
+		return fcruntime.DirListing{}, errs.New(errs.CategoryNotFound, listing.Error)
+	}
+	out := fcruntime.DirListing{Path: listing.Path, Truncated: listing.Truncated}
+	out.Entries = make([]fcruntime.DirEntry, len(listing.Entries))
+	for i, e := range listing.Entries {
+		out.Entries[i] = fcruntime.DirEntry{
+			Name:          e.Name,
+			Size:          e.Size,
+			Mode:          e.Mode,
+			IsDir:         e.IsDir,
+			ModTime:       e.ModTime,
+			IsSymlink:     e.IsSymlink,
+			SymlinkTarget: e.SymlinkTarget,
+		}
+	}
+	return out, nil
+}
+
 // Shell opens an interactive PTY in the running session VM. It sends the host's
 // keystrokes (stdin) and window resizes to the guest as frames, and writes the
 // guest's terminal output to stdout, returning the shell's exit code.

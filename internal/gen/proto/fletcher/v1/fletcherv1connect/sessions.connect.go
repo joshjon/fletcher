@@ -96,6 +96,8 @@ const (
 	// SessionServiceDownloadFileProcedure is the fully-qualified name of the SessionService's
 	// DownloadFile RPC.
 	SessionServiceDownloadFileProcedure = "/fletcher.v1.SessionService/DownloadFile"
+	// SessionServiceListDirProcedure is the fully-qualified name of the SessionService's ListDir RPC.
+	SessionServiceListDirProcedure = "/fletcher.v1.SessionService/ListDir"
 )
 
 // SessionServiceClient is a client for the fletcher.v1.SessionService service.
@@ -175,6 +177,10 @@ type SessionServiceClient interface {
 	// The first response message carries a FileInfo (size + mode); later messages
 	// carry chunk bytes. Server-streaming: requires HTTP/2.
 	DownloadFile(context.Context, *connect.Request[v1.DownloadFileRequest]) (*connect.ServerStreamForClient[v1.DownloadFileResponse], error)
+	// ListDir lists a directory inside a running session's fork. Served by the
+	// guest init in pure Go (no shell), so it works on any image - including a
+	// distroless one with no /bin/sh, where exec/shell are unavailable.
+	ListDir(context.Context, *connect.Request[v1.ListDirRequest]) (*connect.Response[v1.ListDirResponse], error)
 }
 
 // NewSessionServiceClient constructs a client for the fletcher.v1.SessionService service. By
@@ -314,6 +320,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(sessionServiceMethods.ByName("DownloadFile")),
 			connect.WithClientOptions(opts...),
 		),
+		listDir: connect.NewClient[v1.ListDirRequest, v1.ListDirResponse](
+			httpClient,
+			baseURL+SessionServiceListDirProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("ListDir")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -340,6 +352,7 @@ type sessionServiceClient struct {
 	rollbackSession    *connect.Client[v1.RollbackSessionRequest, v1.RollbackSessionResponse]
 	uploadFile         *connect.Client[v1.UploadFileRequest, v1.UploadFileResponse]
 	downloadFile       *connect.Client[v1.DownloadFileRequest, v1.DownloadFileResponse]
+	listDir            *connect.Client[v1.ListDirRequest, v1.ListDirResponse]
 }
 
 // CreateSession calls fletcher.v1.SessionService.CreateSession.
@@ -447,6 +460,11 @@ func (c *sessionServiceClient) DownloadFile(ctx context.Context, req *connect.Re
 	return c.downloadFile.CallServerStream(ctx, req)
 }
 
+// ListDir calls fletcher.v1.SessionService.ListDir.
+func (c *sessionServiceClient) ListDir(ctx context.Context, req *connect.Request[v1.ListDirRequest]) (*connect.Response[v1.ListDirResponse], error) {
+	return c.listDir.CallUnary(ctx, req)
+}
+
 // SessionServiceHandler is an implementation of the fletcher.v1.SessionService service.
 type SessionServiceHandler interface {
 	// CreateSession provisions a session's persistent fork and boots its VM. The
@@ -524,6 +542,10 @@ type SessionServiceHandler interface {
 	// The first response message carries a FileInfo (size + mode); later messages
 	// carry chunk bytes. Server-streaming: requires HTTP/2.
 	DownloadFile(context.Context, *connect.Request[v1.DownloadFileRequest], *connect.ServerStream[v1.DownloadFileResponse]) error
+	// ListDir lists a directory inside a running session's fork. Served by the
+	// guest init in pure Go (no shell), so it works on any image - including a
+	// distroless one with no /bin/sh, where exec/shell are unavailable.
+	ListDir(context.Context, *connect.Request[v1.ListDirRequest]) (*connect.Response[v1.ListDirResponse], error)
 }
 
 // NewSessionServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -659,6 +681,12 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 		connect.WithSchema(sessionServiceMethods.ByName("DownloadFile")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionServiceListDirHandler := connect.NewUnaryHandler(
+		SessionServiceListDirProcedure,
+		svc.ListDir,
+		connect.WithSchema(sessionServiceMethods.ByName("ListDir")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fletcher.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionServiceCreateSessionProcedure:
@@ -703,6 +731,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 			sessionServiceUploadFileHandler.ServeHTTP(w, r)
 		case SessionServiceDownloadFileProcedure:
 			sessionServiceDownloadFileHandler.ServeHTTP(w, r)
+		case SessionServiceListDirProcedure:
+			sessionServiceListDirHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -794,4 +824,8 @@ func (UnimplementedSessionServiceHandler) UploadFile(context.Context, *connect.C
 
 func (UnimplementedSessionServiceHandler) DownloadFile(context.Context, *connect.Request[v1.DownloadFileRequest], *connect.ServerStream[v1.DownloadFileResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.DownloadFile is not implemented"))
+}
+
+func (UnimplementedSessionServiceHandler) ListDir(context.Context, *connect.Request[v1.ListDirRequest]) (*connect.Response[v1.ListDirResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.ListDir is not implemented"))
 }

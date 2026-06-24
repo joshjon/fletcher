@@ -102,6 +102,76 @@ func TestReadDownloadRoundTrip(t *testing.T) {
 	}
 }
 
+// TestListDir lists a directory and checks ordering (dirs first), entry fields,
+// and a symlink's resolution.
+func TestListDir(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "bfile.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "adir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("adir", filepath.Join(root, "zlink")); err != nil {
+		t.Fatal(err)
+	}
+
+	host, guest := net.Pipe()
+	go func() {
+		listDir(guest, guestproto.FileSpec{Path: root})
+		_ = guest.Close()
+	}()
+	listing, err := guestproto.ReadDirListing(host)
+	if err != nil {
+		t.Fatalf("read listing: %v", err)
+	}
+	if listing.Error != "" {
+		t.Fatalf("unexpected error: %s", listing.Error)
+	}
+	if len(listing.Entries) != 3 {
+		t.Fatalf("got %d entries, want 3", len(listing.Entries))
+	}
+	// Directories first: "adir" and the dir-symlink "zlink" precede "bfile.txt".
+	if !listing.Entries[0].IsDir || listing.Entries[0].Name != "adir" {
+		t.Fatalf("first entry = %+v, want dir adir", listing.Entries[0])
+	}
+	var bfile, zlink *guestproto.DirEntry
+	for i := range listing.Entries {
+		switch listing.Entries[i].Name {
+		case "bfile.txt":
+			bfile = &listing.Entries[i]
+		case "zlink":
+			zlink = &listing.Entries[i]
+		}
+	}
+	if bfile == nil || bfile.IsDir || bfile.Size != 5 {
+		t.Fatalf("bfile entry wrong: %+v", bfile)
+	}
+	if zlink == nil || !zlink.IsSymlink || !zlink.IsDir || zlink.SymlinkTarget != "adir" {
+		t.Fatalf("zlink entry wrong: %+v", zlink)
+	}
+}
+
+// TestListDirNotADir reports a non-directory path as an error.
+func TestListDirNotADir(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	host, guest := net.Pipe()
+	go func() {
+		listDir(guest, guestproto.FileSpec{Path: f})
+		_ = guest.Close()
+	}()
+	listing, err := guestproto.ReadDirListing(host)
+	if err != nil {
+		t.Fatalf("read listing: %v", err)
+	}
+	if listing.Error == "" {
+		t.Fatalf("expected an error for a non-directory")
+	}
+}
+
 // TestReadDownloadMissing reports a missing file in the header error rather than
 // streaming.
 func TestReadDownloadMissing(t *testing.T) {

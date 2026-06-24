@@ -106,6 +106,9 @@ type SessionHandle interface {
 	// file's size and mode before any bytes are written (so the caller can send a
 	// header first); if it returns an error the transfer aborts.
 	ReadFile(ctx context.Context, path string, onInfo func(FileReadResult) error, w io.Writer) error
+	// ListDir lists a directory in the guest fork (pure Go in the guest, so it
+	// works without a shell).
+	ListDir(ctx context.Context, path string) (DirListing, error)
 	// Stop shuts the VM down cleanly. The fork on disk is untouched.
 	Stop(ctx context.Context) error
 }
@@ -131,6 +134,25 @@ type FileWriteResult struct {
 type FileReadResult struct {
 	Size int64
 	Mode uint32
+}
+
+// DirEntry is one entry in a session directory listing.
+type DirEntry struct {
+	Name          string
+	Size          int64
+	Mode          uint32
+	IsDir         bool
+	ModTime       int64
+	IsSymlink     bool
+	SymlinkTarget string
+}
+
+// DirListing is a session directory listing: the resolved path, its entries
+// (directories first, then by name), and whether the listing was capped.
+type DirListing struct {
+	Path      string
+	Entries   []DirEntry
+	Truncated bool
 }
 
 // SessionRuntime is the optional capability a Driver advertises when it can host
