@@ -1816,6 +1816,19 @@ Files UI. Motivating case: inspecting a deployment's files and a mounted volume 
 `/volume` without sshd in the image. Verified: listed the wc-26-pundit deploy's busybox
 `/app` and home, clean non-directory error.
 
+**File operations (delete / move / copy) - DONE (daemon `9390ca0` + iOS `23f4fc1`;
+daemon/CLI verified on hardware 2026-06-24, iOS pending Xcode build).** A `FileOp` RPC
+(unary) does delete, move (rename), and copy inside a running session, served by the
+guest in pure Go (`os.Remove`/`RemoveAll`, `os.Rename`, a recursive copy) - so, like
+the rest, it works on a shell-less image. Move falls back to copy-then-delete across
+mounts (EXDEV, e.g. root fork <-> `/volume`); a move/copy into an existing directory
+keeps the source base name; deleting `/` is refused. CLI: `session rm [-r]`,
+`session mv`, and a remote-to-remote `session cp` (copy within one session). iOS/Mac:
+the file browser deletes (iOS swipe + a context-menu item on both, with a recursive
+folder confirmation) and renames (context menu + text-field alert); move-to-folder and
+copy stay CLI-only for now (no destination-picker UX yet). Verified on hardware:
+up/ls/mv/cp/rm/rm -r round trip, non-empty-dir delete refused without `-r`, `/` refused.
+
 **Why RPCs, not a direct route.** The client never gets a route into VM-land (DESIGN
 §5, two planes never touch): bytes flow client -> daemon (over WireGuard) -> vsock ->
 the `fletcher-guest` init, which reads/writes the fork. This is the same shape as
