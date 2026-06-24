@@ -209,6 +209,14 @@ func sessionRedeployCmd() *cli.Command {
 				Name:  "image",
 				Usage: "redeploy to this image instead: an imported template name, or a registry ref (e.g. ghcr.io/you/app:v2) imported under the session's template name first",
 			},
+			&cli.StringFlag{
+				Name:  "from-session",
+				Usage: "rebuild the deployment's image from this dev session (e.g. after fixing code there), then redeploy onto it",
+			},
+			&cli.StringFlag{
+				Name:  "subdir",
+				Usage: "project subdirectory within --from-session that holds the Dockerfile (default: the workspace root)",
+			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ref := cmd.Args().First()
@@ -216,15 +224,43 @@ func sessionRedeployCmd() *cli.Command {
 				return errors.New("session ref (id or name) is required")
 			}
 			client := newSessionsClient(cmd)
+
+			image := cmd.String("image")
+			origin := "current image"
+			if fromSession := cmd.String("from-session"); fromSession != "" {
+				if image != "" {
+					return errors.New("--from-session rebuilds the deployment's own image; do not also pass --image")
+				}
+				// Rebuild the deployment's existing image from the dev session, then
+				// redeploy onto it. Look up the deploy's image name to build into.
+				sess, gerr := client.GetSession(ctx, connect.NewRequest(&fletcherv1.GetSessionRequest{Ref: ref}))
+				if gerr != nil {
+					return gerr
+				}
+				target := sess.Msg.GetSession().GetImage()
+				fmt.Printf("building %q from session %s in a sandboxed build fork (no host docker)...\n", target, fromSession)
+				if _, berr := newImageClient(cmd).BuildFromSession(ctx, connect.NewRequest(&fletcherv1.BuildFromSessionRequest{
+					DevSessionRef: fromSession,
+					Subdir:        cmd.String("subdir"),
+					Name:          target,
+					Force:         true,
+				})); berr != nil {
+					return berr
+				}
+				image = target
+				origin = "rebuilt " + target + " from session " + fromSession
+			}
+
 			resp, err := client.RedeploySession(ctx, connect.NewRequest(&fletcherv1.RedeploySessionRequest{
 				Ref:   ref,
-				Image: cmd.String("image"),
+				Image: image,
 			}))
 			if err != nil {
 				return err
 			}
-			origin := "current image"
 			switch {
+			case cmd.String("from-session") != "":
+				// origin already set above.
 			case cmd.String("image") != "" && resp.Msg.GetImageRefreshed():
 				origin = "imported " + cmd.String("image")
 			case cmd.String("image") != "":
