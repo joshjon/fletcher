@@ -1829,6 +1829,18 @@ folder confirmation) and renames (context menu + text-field alert); move-to-fold
 copy stay CLI-only for now (no destination-picker UX yet). Verified on hardware:
 up/ls/mv/cp/rm/rm -r round trip, non-empty-dir delete refused without `-r`, `/` refused.
 
+**Upload overwrite control - DONE (daemon `a4a76c8` + iOS `1fc8b1f`; daemon/CLI
+verified on hardware 2026-06-24, iOS pending Xcode build).** Uploads previously
+overwrote silently (`os.Rename` replace). Now `UploadStart` carries an `overwrite`
+flag; the guest checks the destination before streaming (a directory is never
+replaced; an existing file only with overwrite, else a clean "a file named X already
+exists" with no half-written temp). RPC default is no-clobber. CLI `session cp`
+overwrites by default (scp/cp convention) with `--no-clobber`/`-n`. iOS/Mac: the
+browser checks the listing and prompts Replace / Keep Both (uploads `name-2.ext`) /
+Cancel - and still passes overwrite only when Replace is chosen, so a stale-listing
+race can't silently clobber. Verified: default re-upload replaces, `-n` refuses
+intact.
+
 **Why RPCs, not a direct route.** The client never gets a route into VM-land (DESIGN
 §5, two planes never touch): bytes flow client -> daemon (over WireGuard) -> vsock ->
 the `fletcher-guest` init, which reads/writes the fork. This is the same shape as
