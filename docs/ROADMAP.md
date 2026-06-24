@@ -2022,6 +2022,20 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**Build-then-redeploy in one step (2026-06-24, daemon `98c9eb9` + iOS `ec9bafa`).**
+Closed a workflow gap: after fixing code in a dev session, there was no easy way to
+rebuild an existing deployment's image and redeploy onto it - you built (and named) an
+image, then redeployed with `--image` separately, and the app's Redeploy only re-forked
+the current image (no way to point it at a fresh build). Now "redeploy from session"
+rebuilds the deployment's *own* image name (`BuildFromSession`, force) then redeploys
+onto it (`RedeploySession`), keeping the previous fork for Roll back. It composes the
+two existing RPCs - no new daemon primitive. CLI: `fletcher session redeploy <deploy>
+--from-session <dev> [--subdir <path>]` (mutually exclusive with `--image`). iOS/Mac: a
+"Redeploy from Session..." action on the deploy detail (overflow menu / Box->Session
+menu) with a session+subdir picker and live build-log polling. Verified on hardware:
+edited a project in the dev session, one command rebuilt the image and the live
+deployment picked up the change (confirmed via a COPY'd marker file).
+
 **Crash-inconsistent fork now self-heals on cold boot (2026-06-24, daemon `7470bd6`).**
 A hibernated session could leave its fork's ext4 with bad group-descriptor checksums
 (metadata not fully flushed); the kernel refuses to mount such a filesystem, so the VM
