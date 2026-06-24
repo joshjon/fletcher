@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path"
@@ -16,6 +17,40 @@ import (
 
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestagent"
 )
+
+// repairRootfs makes a cold-booted fork mountable. A fork can be left
+// crash-inconsistent - e.g. a hibernated session whose ext4 metadata was not
+// fully flushed - and the kernel refuses to mount a filesystem with bad group
+// descriptor checksums, so the VM panics at boot unless the fork is repaired
+// offline first. e2fsck -p (preen) is a fast no-op on a clean fork and replays
+// the journal / fixes minor issues on a dirty one; when preen gives up (exit
+// >= 4, "RUN fsck MANUALLY") it escalates to a full -fy repair. Best-effort: a
+// failure is logged and boot proceeds (it may still panic, but nothing more can
+// be tried). NEVER call on the hibernation-restore path - the restored guest's
+// page cache assumes the current on-disk state, and an offline edit would
+// diverge from it.
+func (d *Driver) repairRootfs(ctx context.Context, rootfs string) {
+	if out, err := exec.CommandContext(ctx, "e2fsck", "-p", rootfs).CombinedOutput(); err != nil { //nolint:gosec // rootfs is a daemon-owned fork path
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() < 4 {
+			return // 1/2: preen fixed minor issues. Fine.
+		}
+		// Preen could not handle it (>= 4) or e2fsck could not run: full repair.
+		d.logger.Warn("fork filesystem inconsistent; running full repair before boot",
+			slog.String("rootfs", rootfs), slog.String("preen", strings.TrimSpace(string(out))))
+		out2, err2 := exec.CommandContext(ctx, "e2fsck", "-fy", rootfs).CombinedOutput() //nolint:gosec // rootfs is a daemon-owned fork path
+		if err2 != nil {
+			var ee2 *exec.ExitError
+			if !errors.As(err2, &ee2) || ee2.ExitCode() >= 4 {
+				d.logger.Error("fork filesystem repair failed; boot may panic",
+					slog.String("rootfs", rootfs), slog.String("err", err2.Error()),
+					slog.String("fsck", strings.TrimSpace(string(out2))))
+				return
+			}
+		}
+		d.logger.Warn("fork filesystem repaired before boot", slog.String("rootfs", rootfs))
+	}
+}
 
 // initFingerprintPath records, inside the rootfs, the hex SHA-256 of the guest
 // init currently written there. refreshGuestInit reads it to skip the ext4 edit
@@ -44,17 +79,9 @@ func (d *Driver) refreshGuestInit(ctx context.Context, rootfs string) error {
 	if err != nil {
 		return err
 	}
-	// Replay the journal first: a run_app restart cold-boots the same fork the
-	// previous guest just ran on, which can leave committed-but-uncheckpointed
-	// transactions, and debugfs writes bypass the journal (they would be lost on
-	// the next mount). Preen exit 1/2 means it fixed minor issues - fine for a
-	// crash-consistent fork; 4+ is a real failure.
-	if out, ferr := exec.CommandContext(ctx, "e2fsck", "-fp", rootfs).CombinedOutput(); ferr != nil { //nolint:gosec // rootfs is a daemon-owned fork path
-		var ee *exec.ExitError
-		if !errors.As(ferr, &ee) || ee.ExitCode() >= 4 {
-			return fmt.Errorf("fsck rootfs before init refresh: %w: %s", ferr, out)
-		}
-	}
+	// The caller runs repairRootfs before this on the cold-boot path, so the fork
+	// is journal-replayed and consistent here - the debugfs write (which bypasses
+	// the journal) lands safely without a separate fsck.
 	if err := writeRootfsFile(ctx, rootfs, guestagent.InitPath, data, "0100755"); err != nil {
 		return err
 	}

@@ -64,6 +64,13 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 	apiSock := filepath.Join(vmDir, "fc.sock")
 	vsockUDS := filepath.Join(vmDir, "v.sock")
 
+	// Repair a crash-inconsistent fork before boot: a hibernated session can
+	// leave its ext4 with bad group-descriptor checksums, which the kernel
+	// refuses to mount (it would panic). e2fsck makes it mountable; this is the
+	// cold-boot path only (never the restore path). It also leaves the fork
+	// journal-replayed so the init-refresh debugfs write below lands safely.
+	d.repairRootfs(ctx, spec.RootfsPath)
+
 	// Bring the fork's guest init up to this daemon's version before booting it:
 	// the init pairs with the host wire protocol, so an image built by an older
 	// release must not boot its stale init. Best-effort - a refresh failure logs
