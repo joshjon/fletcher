@@ -412,7 +412,15 @@ func serveControl(conn net.Conn) {
 	case guestproto.RequestShutdown:
 		shutdown() // resets the VM; does not return
 	default:
+		// A request kind this guest does not know: the daemon is newer than the
+		// session's guest binary (an image built before the feature shipped).
+		// Reply with a structured error so the host surfaces an actionable
+		// message instead of seeing the connection close (a bare EOF).
 		fmt.Fprintf(os.Stderr, "fletcher-guest: unknown request kind %q\n", req.Kind)
+		msg := fmt.Sprintf("guest does not support request %q; rebuild the session so its image bundles a current guest", req.Kind)
+		if err := guestproto.WriteError(conn, msg); err != nil {
+			fmt.Fprintf(os.Stderr, "fletcher-guest: write unsupported reply: %v\n", err)
+		}
 	}
 }
 

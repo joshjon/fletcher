@@ -181,6 +181,19 @@ type DirListing struct {
 	Error     string     `json:"error,omitempty"`
 }
 
+// ErrorResponse is a request-kind-agnostic failure reply. Its single Error
+// field unmarshals into the Error field of any typed JSON reply (e.g. DirListing,
+// FileResult), so a host that expects one of those still surfaces the message
+// rather than seeing the connection close. The guest sends it when it cannot
+// produce a typed reply - notably for a request kind it does not recognise,
+// which is how an older guest answers a request added after its image was built.
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// WriteError sends a generic ErrorResponse as a length-prefixed JSON message.
+func WriteError(w io.Writer, msg string) error { return writeJSON(w, ErrorResponse{Error: msg}) }
+
 // WriteDirListing sends a DirListing as a length-prefixed JSON message.
 func WriteDirListing(w io.Writer, l DirListing) error { return writeJSON(w, l) }
 

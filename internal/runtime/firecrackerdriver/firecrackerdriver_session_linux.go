@@ -330,7 +330,7 @@ func (s *fcSession) WriteFile(ctx context.Context, spec fcruntime.FileWriteSpec,
 	}
 	ack, err := guestproto.ReadFileResult(conn)
 	if err != nil {
-		return fcruntime.FileWriteResult{}, fmt.Errorf("firecracker: upload ack: %w", err)
+		return fcruntime.FileWriteResult{}, guestReplyErr("upload ack", err)
 	}
 	if ack.Error != "" {
 		return fcruntime.FileWriteResult{}, errs.New(errs.CategoryFailedPrecondition, ack.Error)
@@ -365,7 +365,7 @@ func (s *fcSession) ReadFile(ctx context.Context, path string, onInfo func(fcrun
 	}
 	hdr, err := guestproto.ReadFileResult(conn)
 	if err != nil {
-		return fmt.Errorf("firecracker: download header: %w", err)
+		return guestReplyErr("download header", err)
 	}
 	if hdr.Error != "" {
 		return errs.New(errs.CategoryNotFound, hdr.Error)
@@ -379,6 +379,21 @@ func (s *fcSession) ReadFile(ctx context.Context, path string, onInfo func(fcrun
 		return fmt.Errorf("firecracker: stream download: %w", err)
 	}
 	return nil
+}
+
+// guestReplyErr categorises a failure to read the guest's reply to a control
+// request. A premature EOF means the guest closed the connection without
+// answering - the hallmark of a session whose guest binary predates this
+// request kind (an image built before the feature shipped). It is surfaced as a
+// failed precondition with an actionable message rather than a bare,
+// uncategorised read error that the API edge would mask as a generic "internal
+// error". Rebuilding the session image bundles a current guest.
+func guestReplyErr(op string, err error) error {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return errs.Newf(errs.CategoryFailedPrecondition,
+			"session guest closed the connection without replying to %s; the session image may predate this feature - rebuild the session", op)
+	}
+	return fmt.Errorf("firecracker: %s: %w", op, err)
 }
 
 // ListDir lists a directory in the guest fork. The guest serves it in pure Go,
@@ -398,7 +413,7 @@ func (s *fcSession) ListDir(ctx context.Context, path string) (fcruntime.DirList
 	}
 	listing, err := guestproto.ReadDirListing(conn)
 	if err != nil {
-		return fcruntime.DirListing{}, fmt.Errorf("firecracker: read listing: %w", err)
+		return fcruntime.DirListing{}, guestReplyErr("directory listing", err)
 	}
 	if listing.Error != "" {
 		return fcruntime.DirListing{}, errs.New(errs.CategoryNotFound, listing.Error)
@@ -444,7 +459,7 @@ func (s *fcSession) FileOp(ctx context.Context, spec fcruntime.FileOpSpec) error
 	}
 	res, err := guestproto.ReadFileResult(conn)
 	if err != nil {
-		return fmt.Errorf("firecracker: file op result: %w", err)
+		return guestReplyErr("file op result", err)
 	}
 	if res.Error != "" {
 		return errs.New(errs.CategoryFailedPrecondition, res.Error)
