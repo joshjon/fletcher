@@ -1816,23 +1816,40 @@ Files UI. Motivating case: inspecting a deployment's files and a mounted volume 
 `/volume` without sshd in the image. Verified: listed the wc-26-pundit deploy's busybox
 `/app` and home, clean non-directory error.
 
-**Stale-guest "internal error" on browse - FIXED (daemon, hardware 2026-06-25).**
-Browsing files in a session whose image was built before the file-browser shipped
-(`5939180`) failed with a generic "internal error" in the app. Root cause: the
-session's in-VM guest binary predated `RequestListDir`, hit its dispatch `default`
-case, and closed the vsock connection without replying; the host read a bare `EOF`,
-which carried no `errs` category, so the API interceptor masked it as the
-catch-all internal error. Two fixes: (1) the host now maps a premature EOF reading
-any guest reply (`ListDir`/`FileOp`/upload-ack/download-header) to a
-`FailedPrecondition` with an actionable "rebuild the session" message instead of an
-uncategorised error; (2) the guest replies to an unknown request kind with a
-structured `guestproto.ErrorResponse` (its `Error` field unmarshals into any typed
-JSON reply) rather than silently closing, so a daemon newer than a session's guest
-gets a clear message going forward. **Operational note (general):** a guest-side
-feature only takes effect once the session image is rebuilt and the session
-redeployed - the guest binary is baked into the rootfs (same caveat as the M6
-guest batch). Sessions forked from a pre-`5939180` image must be rebuilt+redeployed
-to browse.
+**Stale-guest "internal error" on browse - FIXED (daemon `356fbd4`+`c88a7f5`,
+verified on hardware 2026-06-25).** Browsing files in a long-lived dev session
+(`fletcher-base` image) failed with a generic "internal error" in the app. Three
+layered bugs, peeled one at a time:
+
+1. *Surface (error masking).* The session's in-VM guest predated `RequestListDir`,
+   hit its dispatch `default` case, and closed the vsock connection without
+   replying; the host read a bare `EOF` that carried no `errs` category, so the
+   API interceptor masked it as the catch-all internal error. Fix: the host maps a
+   premature EOF reading any guest reply (`ListDir`/`FileOp`/upload-ack/
+   download-header) to a `FailedPrecondition` with an actionable message; the guest
+   answers an unknown request kind with a structured `guestproto.ErrorResponse`
+   (its `Error` field unmarshals into any typed JSON reply) instead of closing.
+2. *Root cause (guest refresh broken on usrmerge).* The daemon already re-injects
+   its embedded guest into a fork on cold boot (`refreshGuestInit`), so a cold boot
+   *should* have fixed it - but the refresh was silently failing on this image.
+   `fletcher-base` is usrmerged: `/sbin` is a symlink to `usr/sbin`. debugfs `cd`
+   does not follow symlinks, so `cd /sbin; write fletcher-init` created a stray
+   file at the image root while the real `/usr/sbin/fletcher-init` stayed stale;
+   debugfs exits 0, so the write looked fine, but the readback (which follows the
+   symlink) saw the old init -> "write could not be verified" -> boots stale guest.
+   Fix: `writeRootfsFile` resolves symlinked directory components
+   (`resolveRootfsDir`/`rootfsSymlinkTarget`) before the `cd`.
+3. *Why it never self-healed.* `snapshotIdentity` did not include the guest
+   fingerprint, so a daemon upgrade shipping a new guest never invalidated a
+   session's hibernation snapshot - stop/start kept restoring the old guest and the
+   cold-boot refresh never ran. Fix: the guest fingerprint is now part of the
+   snapshot identity, so a guest change invalidates the snapshot and forces one
+   cold boot that re-injects the current init.
+
+With all three, a daemon upgrade now auto-heals every session on its next start (no
+manual rebuild/redeploy). Verified on hardware: after `make install`, `dev`
+cold-booted, refreshed `/usr/sbin/fletcher-init` to the current guest (marker in
+`/etc/fletcher/init.sha256` matches), and `session ls`/`cp` (browse + download) work.
 
 **File operations (delete / move / copy) - DONE (daemon `9390ca0` + iOS `23f4fc1`;
 daemon/CLI verified on hardware 2026-06-24, iOS pending Xcode build).** A `FileOp` RPC
