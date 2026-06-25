@@ -129,6 +129,16 @@ func writeRootfsFile(ctx context.Context, rootfs, guestPath string, data []byte,
 	if !path.IsAbs(guestPath) || strings.ContainsAny(guestPath, " \t\n\"") {
 		return fmt.Errorf("refresh guest init: invalid rootfs path %q", guestPath)
 	}
+	// Resolve symlinked directory components before writing. debugfs `cd` does
+	// not follow symlinks, so on a usrmerged image (where e.g. /sbin is a symlink
+	// to usr/sbin) `cd /sbin` would land in the wrong place and `write` would
+	// create a stray file at the root while the real target stayed stale - a
+	// write that "succeeds" (debugfs exits 0) but does not land. Operating on the
+	// resolved real directory makes the write land where a readback (which does
+	// follow symlinks) looks for it.
+	dir := resolveRootfsDir(ctx, rootfs, path.Dir(guestPath))
+	base := path.Base(guestPath)
+
 	tmpf, err := os.CreateTemp("", "fletcher-init-*")
 	if err != nil {
 		return fmt.Errorf("refresh guest init: stage file: %w", err)
@@ -145,15 +155,15 @@ func writeRootfsFile(ctx context.Context, rootfs, guestPath string, data []byte,
 	}
 
 	// One stdin-driven debugfs run: `write` only creates a file in the current
-	// directory, so cd to the parent first. mkdir fails harmlessly when the
-	// directory exists; rm fails harmlessly when the file is absent. sif sets the
-	// inode mode so the init keeps its exec bit (debugfs write defaults to 0644).
+	// directory, so cd to the (resolved) parent first. mkdir fails harmlessly
+	// when the directory exists; rm fails harmlessly when the file is absent. sif
+	// sets the inode mode so the init keeps its exec bit (debugfs write defaults
+	// to 0644).
 	var script strings.Builder
-	for _, dir := range rootfsAncestorDirs(guestPath) {
-		fmt.Fprintf(&script, "mkdir %s\n", dir)
+	for _, d := range rootfsAncestorDirs(path.Join(dir, base)) {
+		fmt.Fprintf(&script, "mkdir %s\n", d)
 	}
-	base := path.Base(guestPath)
-	fmt.Fprintf(&script, "cd %s\n", path.Dir(guestPath))
+	fmt.Fprintf(&script, "cd %s\n", dir)
 	fmt.Fprintf(&script, "rm %s\n", base)
 	fmt.Fprintf(&script, "write %s %s\n", tmpf.Name(), base)
 	fmt.Fprintf(&script, "sif %s mode %s\n", base, mode)
@@ -163,6 +173,58 @@ func writeRootfsFile(ctx context.Context, rootfs, guestPath string, data []byte,
 		return fmt.Errorf("refresh guest init: debugfs write %s: %w: %s", guestPath, err, bytes.TrimSpace(out))
 	}
 	return nil
+}
+
+// resolveRootfsDir resolves symlinked components of an absolute directory path
+// inside an unmounted ext4 image, so a caller can `cd` to the real directory
+// (debugfs `cd` does not follow symlinks). It walks the path component by
+// component; when a component is a symlink (e.g. /sbin -> usr/sbin on a usrmerged
+// image) it follows the target, absolute or relative. A component that does not
+// exist yet (e.g. a marker directory about to be created) is taken literally.
+// Best-effort: anything it cannot resolve is left as-is, so the worst case is
+// the original unresolved path.
+func resolveRootfsDir(ctx context.Context, rootfs, dir string) string {
+	cur := "/"
+	for _, comp := range strings.Split(strings.Trim(dir, "/"), "/") {
+		if comp == "" {
+			continue
+		}
+		next := path.Join(cur, comp)
+		target, ok := rootfsSymlinkTarget(ctx, rootfs, next)
+		if !ok {
+			cur = next
+			continue
+		}
+		if path.IsAbs(target) {
+			cur = path.Clean(target)
+		} else {
+			cur = path.Clean(path.Join(cur, target))
+		}
+	}
+	return cur
+}
+
+// rootfsSymlinkTarget reports whether guestPath is a symlink in the unmounted
+// image and, if so, its target. It reads the debugfs `stat` output: a short
+// target is inlined as `Fast link dest: "..."`, a longer one lives in a data
+// block that `cat` returns.
+func rootfsSymlinkTarget(ctx context.Context, rootfs, guestPath string) (string, bool) {
+	out, err := exec.CommandContext(ctx, "debugfs", "-R", "stat "+guestPath, rootfs).Output() //nolint:gosec // rootfs is a daemon-owned fork path; guestPath is built from fixed constants
+	if err != nil || !bytes.Contains(out, []byte("Type: symlink")) {
+		return "", false
+	}
+	const marker = `Fast link dest: "`
+	if i := strings.Index(string(out), marker); i >= 0 {
+		rest := string(out)[i+len(marker):]
+		if j := strings.IndexByte(rest, '"'); j >= 0 {
+			return rest[:j], true
+		}
+	}
+	// Slow (block-stored) symlink: its data is the target path.
+	if cout, cerr := exec.CommandContext(ctx, "debugfs", "-R", "cat "+guestPath, rootfs).Output(); cerr == nil { //nolint:gosec // see above
+		return strings.TrimSpace(string(cout)), true
+	}
+	return "", false
 }
 
 // rootfsAncestorDirs lists the parent directories of an absolute path, shallowest

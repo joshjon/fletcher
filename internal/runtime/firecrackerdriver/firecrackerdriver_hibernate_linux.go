@@ -13,6 +13,7 @@ import (
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 
 	fcruntime "github.com/joshjon/fletcher/internal/runtime"
+	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestagent"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestproto"
 )
 
@@ -31,11 +32,21 @@ func snapshotPaths(vmDir string) (mem, state, meta string) {
 
 // snapshotIdentity fingerprints what a hibernation snapshot is tied to: the
 // VMM binary and guest kernel (Firecracker snapshots are only restorable by
-// the same pair, so a Fletcher upgrade invalidates them) plus the rootfs path
-// the VM was running on - a redeploy/rollback swaps the session's fork, and
-// restoring a memory image of the old disk would silently undo the swap.
+// the same pair, so a Fletcher upgrade invalidates them), the rootfs path the
+// VM was running on (a redeploy/rollback swaps the session's fork, and restoring
+// a memory image of the old disk would silently undo the swap), and the guest
+// init's fingerprint. The init pairs with the host wire protocol and is
+// refreshed only on a cold boot (refreshGuestInit), so without it a daemon
+// upgrade that ships a new guest would keep restoring the stale init forever -
+// the snapshot stays "valid" and the cold-boot refresh never runs. Including it
+// invalidates the snapshot on a guest change, forcing one cold boot that
+// re-injects the current init.
 func (d *Driver) snapshotIdentity(rootfsPath string) string {
-	return fileFingerprint(d.firecrackerBinary) + "|" + fileFingerprint(d.kernelPath) + "|" + rootfsPath
+	guestFP, err := guestagent.Fingerprint()
+	if err != nil {
+		guestFP = "?" // no bundled guest in this build: nothing to tie to
+	}
+	return fileFingerprint(d.firecrackerBinary) + "|" + fileFingerprint(d.kernelPath) + "|" + rootfsPath + "|" + guestFP
 }
 
 func fileFingerprint(path string) string {
