@@ -2391,6 +2391,26 @@ Listed so they are visible, not lost. Items that became milestones are above.
 - **Per-peer handshake/transfer visibility** - surface wireguard-go's in-process
   stats (e.g. `fletcher peer status`) since the userspace tunnel is invisible to
   `wg show`.
+- **Public web behind-proxy mode** - today public web (M8) hardcodes `:443`/`:80`
+  (`internal/daemon/daemon.go` `publicHTTPSAddr`/`publicHTTPAddr`) and runs its
+  own certmagic ACME + TLS: HTTP-01 on 80, TLS-ALPN-01 on 443
+  (`internal/session/public.go` `HTTPHandler`/`TLSConfig`). Fletcher is its own
+  internet edge, so it can never share the box with another reverse proxy (Caddy,
+  nginx) that wants 80/443 - enabling `public_web` while something else holds
+  those ports just fails to bind and logs a non-fatal error, leaving the feature
+  silently off. The 80/443 requirement is real *only* while Fletcher terminates
+  TLS itself: browsers default to 443, and Let's Encrypt picks the challenge port
+  (80 for HTTP-01, 443 for TLS-ALPN-01), not us. The underlying routing in
+  `HTTPSHandler` (host -> guest port -> vsock proxy into the VM) does not need TLS
+  at all. Proposed: a `public_web_mode = edge | behind_proxy` setting (edge stays
+  the self-contained default). In `behind_proxy`, Fletcher binds a configurable
+  plain-HTTP port (e.g. `127.0.0.1:8080`), skips certmagic entirely, and serves
+  the same host-routing handler over HTTP; the operator's existing reverse proxy
+  owns 80/443, obtains the cert, terminates TLS, and forwards with the Host header
+  preserved. This lets Fletcher coexist with a homelab front proxy without giving
+  up the VM-routing job. On-thesis: nothing hosted or metered, the operator still
+  owns the edge. Usage signal: an operator running Fletcher alongside other
+  self-hosted apps on one public box (surfaced 2026-07-03).
 
 **Agents + gateway**
 
