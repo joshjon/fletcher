@@ -18,33 +18,57 @@ import (
 	"github.com/joshjon/fletcher/internal/session"
 )
 
-// SessionsBackend is what the SessionService handler needs from the session
-// manager.
-type SessionsBackend interface {
-	Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool, volumeRef string, credentials []string, envVars []session.EnvVar) (session.Session, error)
+// SessionLifecycle is the create/start/stop/delete surface of the session
+// manager, plus the deploy operations that re-point a session's disk.
+type SessionLifecycle interface {
+	Create(ctx context.Context, p session.CreateParams) (session.Session, error)
 	Get(ctx context.Context, ref string) (session.Session, error)
 	List(ctx context.Context) ([]session.Session, error)
 	Start(ctx context.Context, ref string) (session.Session, error)
 	Stop(ctx context.Context, ref string) (session.Session, error)
+	Restart(ctx context.Context, ref string) (session.Session, error)
 	Delete(ctx context.Context, ref string) (bool, error)
-	UpdateSession(ctx context.Context, ref, egressPolicy, gateway string, envVars []session.EnvVar, updateEnv bool) (session.Session, bool, error)
-	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
-	UploadFile(ctx context.Context, ref, path string, mode uint32, size int64, overwrite bool, content io.Reader) (runtime.FileWriteResult, error)
+	Update(ctx context.Context, ref string, p session.UpdateParams) (session.Session, bool, error)
+	Redeploy(ctx context.Context, ref, newImage string) (session.Session, error)
+	Rollback(ctx context.Context, ref string) (session.Session, error)
+	CommitImage(ctx context.Context, ref string, p session.CommitImageParams) (string, error)
+}
+
+// SessionFiles is the guest-filesystem surface: uploads, downloads, listings,
+// and structured file operations.
+type SessionFiles interface {
+	UploadFile(ctx context.Context, ref string, spec runtime.FileWriteSpec, content io.Reader) (runtime.FileWriteResult, error)
 	DownloadFile(ctx context.Context, ref, path string, onInfo func(runtime.FileReadResult) error, w io.Writer) error
 	ListDir(ctx context.Context, ref, path string) (runtime.DirListing, error)
 	FileOp(ctx context.Context, ref string, spec runtime.FileOpSpec) error
+}
+
+// SessionStreams is the interactive/streaming surface: exec, shells, SSH, and
+// app logs.
+type SessionStreams interface {
+	Exec(ctx context.Context, ref, command string) (session.ExecResult, error)
 	Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error)
 	DialSSH(ctx context.Context, ref string) (net.Conn, error)
-	Publish(ctx context.Context, ref string, guestPort int, name string, public bool, host string) (session.PublishedPort, error)
-	Unpublish(ctx context.Context, ref string, guestPort int) error
-	ListPorts(ctx context.Context, ref string) ([]session.PublishedPort, error)
-	Restart(ctx context.Context, ref string) (session.Session, error)
-	Redeploy(ctx context.Context, ref, newImage string) (session.Session, error)
-	Rollback(ctx context.Context, ref string) (session.Session, error)
 	Logs(ctx context.Context, ref string, tailLines int) (string, error)
 	StreamLogs(ctx context.Context, ref string, tailLines int, follow bool, w io.Writer) error
 	AppRestartCount(ctx context.Context, ref string) (int64, bool)
-	CommitImage(ctx context.Context, ref string, p session.CommitImageParams) (string, error)
+}
+
+// SessionPorts is the published-port surface.
+type SessionPorts interface {
+	Publish(ctx context.Context, ref string, p session.PublishParams) (session.PublishedPort, error)
+	Unpublish(ctx context.Context, ref string, guestPort int) error
+	ListPorts(ctx context.Context, ref string) ([]session.PublishedPort, error)
+}
+
+// SessionsBackend is what the SessionService handler needs from the session
+// manager, composed from the per-concern surfaces above (the handler serves
+// all of them; tests fake only the slice they exercise).
+type SessionsBackend interface {
+	SessionLifecycle
+	SessionFiles
+	SessionStreams
+	SessionPorts
 }
 
 // DeployInfoResolver returns the image-derived deploy detail for a run_app
@@ -118,7 +142,16 @@ func NewSessionsService(backend SessionsBackend, deps SessionsDeps) *SessionsSer
 // CreateSession provisions a session and boots its VM. Categorised errors
 // (e.g. a duplicate name) map to the wire code via the ErrorInterceptor.
 func (s *SessionsService) CreateSession(ctx context.Context, req *connect.Request[fletcherv1.CreateSessionRequest]) (*connect.Response[fletcherv1.CreateSessionResponse], error) {
-	sess, err := s.backend.Create(ctx, req.Msg.GetName(), req.Msg.GetImage(), req.Msg.GetEgressPolicy(), req.Msg.GetGateway(), req.Msg.GetRunApp(), req.Msg.GetVolume(), req.Msg.GetCredentials(), envVarsFromProto(req.Msg.GetEnvVars()))
+	sess, err := s.backend.Create(ctx, session.CreateParams{
+		Name:         req.Msg.GetName(),
+		Image:        req.Msg.GetImage(),
+		EgressPolicy: req.Msg.GetEgressPolicy(),
+		Gateway:      req.Msg.GetGateway(),
+		RunApp:       req.Msg.GetRunApp(),
+		VolumeRef:    req.Msg.GetVolume(),
+		Credentials:  req.Msg.GetCredentials(),
+		EnvVars:      envVarsFromProto(req.Msg.GetEnvVars()),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +232,12 @@ func (s *SessionsService) DeleteSession(ctx context.Context, req *connect.Reques
 // a field unchanged); restart_required flags that a running session needs a
 // restart for the change to take effect.
 func (s *SessionsService) UpdateSession(ctx context.Context, req *connect.Request[fletcherv1.UpdateSessionRequest]) (*connect.Response[fletcherv1.UpdateSessionResponse], error) {
-	sess, restartRequired, err := s.backend.UpdateSession(ctx, req.Msg.GetRef(), req.Msg.GetEgressPolicy(), req.Msg.GetGateway(), envVarsFromProto(req.Msg.GetEnvVars()), req.Msg.GetUpdateEnvVars())
+	sess, restartRequired, err := s.backend.Update(ctx, req.Msg.GetRef(), session.UpdateParams{
+		EgressPolicy: req.Msg.GetEgressPolicy(),
+		Gateway:      req.Msg.GetGateway(),
+		EnvVars:      envVarsFromProto(req.Msg.GetEnvVars()),
+		UpdateEnv:    req.Msg.GetUpdateEnvVars(),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -331,8 +369,12 @@ func (s *SessionsService) UploadFile(ctx context.Context, stream *connect.Client
 	if start == nil || start.GetRef() == "" {
 		return nil, errs.New(errs.CategoryInvalidArgument, "first upload message must carry start with a session ref")
 	}
-	res, err := s.backend.UploadFile(ctx, start.GetRef(), start.GetPath(), start.GetMode(), start.GetSize(), start.GetOverwrite(),
-		&uploadStreamReader{stream: stream})
+	res, err := s.backend.UploadFile(ctx, start.GetRef(), runtime.FileWriteSpec{
+		Path:      start.GetPath(),
+		Mode:      start.GetMode(),
+		Size:      start.GetSize(),
+		Overwrite: start.GetOverwrite(),
+	}, &uploadStreamReader{stream: stream})
 	if err != nil {
 		return nil, err
 	}
@@ -585,7 +627,12 @@ func proxyClientToConn(stream *connect.BidiStream[fletcherv1.ProxySessionRequest
 
 // PublishPort exposes a port the session serves, brokered by the daemon.
 func (s *SessionsService) PublishPort(ctx context.Context, req *connect.Request[fletcherv1.PublishPortRequest]) (*connect.Response[fletcherv1.PublishPortResponse], error) {
-	pp, err := s.backend.Publish(ctx, req.Msg.GetRef(), int(req.Msg.GetGuestPort()), req.Msg.GetName(), req.Msg.GetPublic(), req.Msg.GetHost())
+	pp, err := s.backend.Publish(ctx, req.Msg.GetRef(), session.PublishParams{
+		GuestPort: int(req.Msg.GetGuestPort()),
+		Name:      req.Msg.GetName(),
+		Public:    req.Msg.GetPublic(),
+		Host:      req.Msg.GetHost(),
+	})
 	if err != nil {
 		return nil, err
 	}

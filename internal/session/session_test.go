@@ -218,7 +218,7 @@ func newManager(t *testing.T, rt runtime.SessionRuntime, snap snapshot.Driver) *
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return session.NewManager(sqliteq.New(db), snap, rt, nil, nil, logger, session.Options{})
+	return session.NewManager(sqliteq.New(db), snap, rt, session.AgentEnv{}, logger, session.Options{})
 }
 
 func newManagerWithOpts(t *testing.T, rt runtime.SessionRuntime, snap snapshot.Driver, opts session.Options) *session.Manager {
@@ -229,7 +229,7 @@ func newManagerWithOpts(t *testing.T, rt runtime.SessionRuntime, snap snapshot.D
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return session.NewManager(sqliteq.New(db), snap, rt, nil, nil, logger, opts)
+	return session.NewManager(sqliteq.New(db), snap, rt, session.AgentEnv{}, logger, opts)
 }
 
 func newManagerWithQuerier(t *testing.T, rt runtime.SessionRuntime, snap snapshot.Driver) (*session.Manager, sqliteq.Querier) {
@@ -241,7 +241,7 @@ func newManagerWithQuerier(t *testing.T, rt runtime.SessionRuntime, snap snapsho
 	require.NoError(t, sqlite.Migrate(db))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	q := sqliteq.New(db)
-	return session.NewManager(q, snap, rt, nil, nil, logger, session.Options{}), q
+	return session.NewManager(q, snap, rt, session.AgentEnv{}, logger, session.Options{}), q
 }
 
 func TestCreateBootsAndRecords(t *testing.T) {
@@ -250,7 +250,7 @@ func TestCreateBootsAndRecords(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	s, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	s, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 	require.NotEmpty(t, s.ID)
 	require.Equal(t, "dev", s.Name)
@@ -267,9 +267,9 @@ func TestCreateDuplicateNameConflicts(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
-	_, err = mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err = mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryConflict, errs.CategoryOf(err))
 }
@@ -280,7 +280,7 @@ func TestStopThenStartReusesFork(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	created, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	created, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 	forkPath := rt.started[0]
 
@@ -303,7 +303,7 @@ func TestExecRequiresRunning(t *testing.T) {
 	mgr := newManager(t, rt, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 
 	res, err := mgr.Exec(ctx, "dev", "echo hi")
@@ -325,7 +325,7 @@ func TestDeleteDestroysFork(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 
 	deleted, err := mgr.Delete(ctx, "dev")
@@ -346,7 +346,7 @@ func TestReconcileOnBootResetsRunning(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	created, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	created, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 	require.Equal(t, session.StateRunning, created.State)
 
@@ -363,9 +363,9 @@ func TestCreateRefusedAtCountCap(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{MaxCount: 1})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "a", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "a", Image: "ubuntu"})
 	require.NoError(t, err)
-	_, err = mgr.Create(ctx, "b", "ubuntu", "", "", false, "", nil, nil)
+	_, err = mgr.Create(ctx, session.CreateParams{Name: "b", Image: "ubuntu"})
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }
@@ -375,7 +375,7 @@ func TestReapIdleStopsIdleSession(t *testing.T) {
 	mgr := newManagerWithOpts(t, rt, newFakeSnapshot(), session.Options{IdleTimeout: time.Millisecond})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond) // let it age past the idle timeout
 
@@ -393,7 +393,7 @@ func TestReapIdleKeepsBusySession(t *testing.T) {
 	mgr := newManagerWithOpts(t, rt, newFakeSnapshot(), session.Options{IdleTimeout: time.Millisecond})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 	time.Sleep(5 * time.Millisecond)
 
@@ -409,7 +409,7 @@ func TestReapIdleKeepsBusySession(t *testing.T) {
 func TestReapIdleDisabledIsNoop(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{}) // IdleTimeout 0
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 
 	n, err := mgr.ReapIdle(ctx)
@@ -423,10 +423,10 @@ func TestPublishOpensListsAndUnpublishes(t *testing.T) {
 	mgr.SetBroker(broker)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 
-	pp, err := mgr.Publish(ctx, "dev", 3000, "", false, "")
+	pp, err := mgr.Publish(ctx, "dev", session.PublishParams{GuestPort: 3000})
 	require.NoError(t, err)
 	require.Equal(t, "port-3000", pp.Name, "name defaults to port-<n>")
 	require.NotZero(t, pp.TunnelPort, "broker assigns a tunnel port")
@@ -438,7 +438,7 @@ func TestPublishOpensListsAndUnpublishes(t *testing.T) {
 	require.Equal(t, 3000, ports[0].GuestPort)
 
 	// Re-publishing the same port conflicts.
-	_, err = mgr.Publish(ctx, "dev", 3000, "", false, "")
+	_, err = mgr.Publish(ctx, "dev", session.PublishParams{GuestPort: 3000})
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryConflict, errs.CategoryOf(err))
 
@@ -453,7 +453,7 @@ func TestUnpublishMissingPortNotFound(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
 	mgr.SetBroker(newFakeBroker())
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 
 	err = mgr.Unpublish(ctx, "dev", 3000)
@@ -466,7 +466,7 @@ func TestDialPortWakesStoppedSession(t *testing.T) {
 	mgr := newManager(t, rt, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 	_, err = mgr.Stop(ctx, "dev")
 	require.NoError(t, err)
@@ -488,9 +488,9 @@ func TestDeleteClosesPublishedPorts(t *testing.T) {
 	mgr.SetBroker(broker)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
-	pp, err := mgr.Publish(ctx, "dev", 8080, "web", false, "")
+	pp, err := mgr.Publish(ctx, "dev", session.PublishParams{GuestPort: 8080, Name: "web"})
 	require.NoError(t, err)
 
 	_, err = mgr.Delete(ctx, "dev")
@@ -502,10 +502,10 @@ func TestPublishPublicRequiresEnable(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot()) // PublicWeb defaults off
 	mgr.SetBroker(newFakeBroker())
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 
-	_, err = mgr.Publish(ctx, "dev", 8080, "", true, "app.example.com")
+	_, err = mgr.Publish(ctx, "dev", session.PublishParams{GuestPort: 8080, Public: true, Host: "app.example.com"})
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }
@@ -514,16 +514,16 @@ func TestPublishPublicValidatesHostAndResolves(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{PublicWeb: true})
 	mgr.SetBroker(newFakeBroker())
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 
 	// A malformed host is rejected before anything is recorded.
-	_, err = mgr.Publish(ctx, "dev", 8080, "", true, "not a host")
+	_, err = mgr.Publish(ctx, "dev", session.PublishParams{GuestPort: 8080, Public: true, Host: "not a host"})
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryInvalidArgument, errs.CategoryOf(err))
 
 	// A valid host is accepted, lowercased, and persisted as public.
-	pp, err := mgr.Publish(ctx, "dev", 8080, "", true, "App.Example.com")
+	pp, err := mgr.Publish(ctx, "dev", session.PublishParams{GuestPort: 8080, Public: true, Host: "App.Example.com"})
 	require.NoError(t, err)
 	require.True(t, pp.Public)
 	require.Equal(t, "app.example.com", pp.Host)
@@ -540,10 +540,10 @@ func TestPublishHostWithoutPublicRejected(t *testing.T) {
 	mgr := newManagerWithOpts(t, &fakeRuntime{}, newFakeSnapshot(), session.Options{PublicWeb: true})
 	mgr.SetBroker(newFakeBroker())
 	ctx := context.Background()
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.NoError(t, err)
 
-	_, err = mgr.Publish(ctx, "dev", 8080, "", false, "app.example.com")
+	_, err = mgr.Publish(ctx, "dev", session.PublishParams{GuestPort: 8080, Host: "app.example.com"})
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryInvalidArgument, errs.CategoryOf(err))
 }
@@ -553,7 +553,7 @@ func TestCreateAppRunsAndPersists(t *testing.T) {
 	mgr := newManager(t, rt, newFakeSnapshot())
 	ctx := context.Background()
 
-	s, err := mgr.Create(ctx, "web", "nginx", "", "", true, "", nil, nil)
+	s, err := mgr.Create(ctx, session.CreateParams{Name: "web", Image: "nginx", RunApp: true})
 	require.NoError(t, err)
 	require.True(t, s.RunApp)
 	require.Equal(t, []bool{true}, rt.runApps, "create should boot the VM in app mode")
@@ -574,7 +574,7 @@ func TestCreateAppRunsAndPersists(t *testing.T) {
 func TestSessionsRequireSessionRuntime(t *testing.T) {
 	// A nil runtime models a non-session-capable runtime (e.g. mock/runc).
 	mgr := newManager(t, nil, newFakeSnapshot())
-	_, err := mgr.Create(context.Background(), "dev", "ubuntu", "", "", false, "", nil, nil)
+	_, err := mgr.Create(context.Background(), session.CreateParams{Name: "dev", Image: "ubuntu"})
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }
@@ -583,12 +583,12 @@ func TestUpdateSession(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "ubuntu", "allowlist", "on", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "ubuntu", EgressPolicy: "allowlist", Gateway: "on"})
 	require.NoError(t, err)
 
 	// Change egress; empty gateway leaves it unchanged. A running session needs
 	// a restart to apply (the policy is baked into the fork at boot).
-	s, restart, err := mgr.UpdateSession(ctx, "dev", "open", "", nil, false)
+	s, restart, err := mgr.Update(ctx, "dev", session.UpdateParams{EgressPolicy: "open"})
 	require.NoError(t, err)
 	require.True(t, restart)
 	require.Equal(t, "open", s.EgressPolicy)
@@ -599,15 +599,15 @@ func TestUpdateSession(t *testing.T) {
 	require.Equal(t, "open", got.EgressPolicy)
 
 	// Invalid values are rejected.
-	_, _, err = mgr.UpdateSession(ctx, "dev", "bogus", "", nil, false)
+	_, _, err = mgr.Update(ctx, "dev", session.UpdateParams{EgressPolicy: "bogus"})
 	require.Error(t, err)
-	_, _, err = mgr.UpdateSession(ctx, "dev", "", "maybe", nil, false)
+	_, _, err = mgr.Update(ctx, "dev", session.UpdateParams{Gateway: "maybe"})
 	require.Error(t, err)
 
 	// A stopped session applies on next start, so no restart flag.
 	_, err = mgr.Stop(ctx, "dev")
 	require.NoError(t, err)
-	_, restart, err = mgr.UpdateSession(ctx, "dev", "none", "off", nil, false)
+	_, restart, err = mgr.Update(ctx, "dev", session.UpdateParams{EgressPolicy: "none", Gateway: "off"})
 	require.NoError(t, err)
 	require.False(t, restart)
 }
@@ -619,7 +619,7 @@ func TestCommitImageCommitsRunningSession(t *testing.T) {
 	mgr := newManagerWithOpts(t, rt, snap, session.Options{ImagesDir: imagesDir})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev-1", "fletcher-base", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev-1", Image: "fletcher-base"})
 	require.NoError(t, err)
 
 	img, err := mgr.CommitImage(ctx, "dev-1", session.CommitImageParams{
@@ -655,7 +655,7 @@ func TestCommitImageStoppedSessionCommitsWithoutExec(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "base", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "base"})
 	require.NoError(t, err)
 	_, err = mgr.Stop(ctx, "dev")
 	require.NoError(t, err)
@@ -673,7 +673,7 @@ func TestCommitImageStoppedSessionAcceptsEntrypoint(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "base", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "base"})
 	require.NoError(t, err)
 	_, err = mgr.Stop(ctx, "dev")
 	require.NoError(t, err)
@@ -693,7 +693,7 @@ func TestCommitImageConflictWithoutForce(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "base", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "base"})
 	require.NoError(t, err)
 
 	_, err = mgr.CommitImage(ctx, "dev", session.CommitImageParams{Name: "snap1"})
@@ -710,7 +710,7 @@ func TestCommitImageRejectsInvalidName(t *testing.T) {
 	mgr := newManager(t, rt, newFakeSnapshot())
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "base", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "base"})
 	require.NoError(t, err)
 
 	for _, bad := range []string{"", "Has Caps", "../escape", ".hidden", "-flag", "a/b"} {
@@ -724,7 +724,7 @@ func TestCommitImageRequiresCommittingDriver(t *testing.T) {
 	mgr := newManager(t, rt, nonCommittingSnapshot{inner: newFakeSnapshot()})
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "dev", "base", "", "", false, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "base"})
 	require.NoError(t, err)
 
 	_, err = mgr.CommitImage(ctx, "dev", session.CommitImageParams{Name: "x"})
@@ -737,7 +737,7 @@ func TestSessionEnvCarriesIdentity(t *testing.T) {
 	mgr := newManager(t, rt, newFakeSnapshot())
 	ctx := context.Background()
 
-	created, err := mgr.Create(ctx, "dev", "base", "", "", false, "", nil, nil)
+	created, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "base"})
 	require.NoError(t, err)
 	require.Contains(t, rt.envs[0], "FLETCHER_SESSION_ID="+created.ID)
 	require.Contains(t, rt.envs[0], "FLETCHER_SESSION_NAME=dev")
@@ -756,7 +756,7 @@ func TestRedeployKeepsPreviousForkAndRollbackSwaps(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	created, err := mgr.Create(ctx, "app", "webapp", "", "", true, "", nil, nil)
+	created, err := mgr.Create(ctx, session.CreateParams{Name: "app", Image: "webapp", RunApp: true})
 	require.NoError(t, err)
 	require.False(t, created.HasRollback)
 	firstFork := rt.started[0]
@@ -794,7 +794,7 @@ func TestRedeployRetargetsImageAndDropsOlderPrev(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "app", "v1img", "", "", true, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "app", Image: "v1img", RunApp: true})
 	require.NoError(t, err)
 
 	// Retarget to a different template.
@@ -816,7 +816,7 @@ func TestDeleteReclaimsPreviousFork(t *testing.T) {
 	mgr := newManager(t, rt, snap)
 	ctx := context.Background()
 
-	_, err := mgr.Create(ctx, "app", "img", "", "", true, "", nil, nil)
+	_, err := mgr.Create(ctx, session.CreateParams{Name: "app", Image: "img", RunApp: true})
 	require.NoError(t, err)
 	_, err = mgr.Redeploy(ctx, "app", "")
 	require.NoError(t, err)
@@ -868,14 +868,14 @@ func TestCreateAttachesVolumeAndItSurvivesLifecycle(t *testing.T) {
 	vol, err := volMgr.Create(ctx, "data", 0)
 	require.NoError(t, err)
 
-	created, err := mgr.Create(ctx, "dev", "img", "", "", false, "data", nil, nil)
+	created, err := mgr.Create(ctx, session.CreateParams{Name: "dev", Image: "img", VolumeRef: "data"})
 	require.NoError(t, err)
 	require.Equal(t, vol.ID, created.VolumeID)
 	require.Equal(t, "data", created.VolumeName)
 	require.Equal(t, vol.Path, rt.volumes[0])
 
 	// Attached: the volume is not attachable elsewhere and not deletable.
-	_, err = mgr.Create(ctx, "dev2", "img", "", "", false, "data", nil, nil)
+	_, err = mgr.Create(ctx, session.CreateParams{Name: "dev2", Image: "img", VolumeRef: "data"})
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryConflict, errs.CategoryOf(err))
 	require.Error(t, volMgr.Delete(ctx, "data"))
@@ -911,7 +911,7 @@ func (fakeVolumeProvisioner) DeleteVolume(context.Context, string) error { retur
 
 func TestCreateWithVolumeRequiresResolver(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
-	_, err := mgr.Create(context.Background(), "dev", "img", "", "", false, "data", nil, nil)
+	_, err := mgr.Create(context.Background(), session.CreateParams{Name: "dev", Image: "img", VolumeRef: "data"})
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }
@@ -919,7 +919,7 @@ func TestCreateWithVolumeRequiresResolver(t *testing.T) {
 func TestCreateWithAttachedVolumeConflicts(t *testing.T) {
 	mgr := newManager(t, &fakeRuntime{}, newFakeSnapshot())
 	mgr.SetVolumes(&fakeVolumes{id: "vol_1", name: "data", path: "/fake/v", attachedTo: "other"})
-	_, err := mgr.Create(context.Background(), "dev", "img", "", "", false, "data", nil, nil)
+	_, err := mgr.Create(context.Background(), session.CreateParams{Name: "dev", Image: "img", VolumeRef: "data"})
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryConflict, errs.CategoryOf(err))
 }

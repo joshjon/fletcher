@@ -9,6 +9,7 @@ import (
 	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/image"
+	"github.com/joshjon/fletcher/internal/session"
 )
 
 // ImageBuilder builds a project's Dockerfile out of a running session into a
@@ -18,7 +19,7 @@ import (
 type ImageBuilder interface {
 	BuildImageFromSession(ctx context.Context, devRef, subdir, name string, force bool) (resultName string, exposedPort int, err error)
 	StartBuildFromSession(ctx context.Context, devRef, subdir, name string, force bool) (buildID string, err error)
-	BuildStatus(buildID string) (state, name string, exposedPort int, errMsg, log string)
+	BuildStatus(buildID string) session.BuildStatus
 }
 
 // ImagesService implements fletcherv1connect.ImageServiceHandler: it imports a
@@ -88,13 +89,13 @@ func (s *ImagesService) GetBuildStatus(_ context.Context, req *connect.Request[f
 	if req.Msg.GetBuildId() == "" {
 		return nil, errs.New(errs.CategoryInvalidArgument, "build_id is required")
 	}
-	state, name, port, errMsg, log := s.builder.BuildStatus(req.Msg.GetBuildId())
+	st := s.builder.BuildStatus(req.Msg.GetBuildId())
 	return connect.NewResponse(&fletcherv1.GetBuildStatusResponse{
-		State:       state,
-		Name:        name,
-		ExposedPort: uint32(port), //nolint:gosec // port is 0..65535
-		Error:       errMsg,
-		Log:         log,
+		State:       st.State,
+		Name:        st.Name,
+		ExposedPort: uint32(st.ExposedPort), //nolint:gosec // port is 0..65535
+		Error:       st.ErrMsg,
+		Log:         st.Log,
 	}), nil
 }
 

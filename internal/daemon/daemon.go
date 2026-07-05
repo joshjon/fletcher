@@ -59,11 +59,6 @@ import (
 	"github.com/joshjon/fletcher/internal/volume"
 )
 
-// auditRecorder is the daemon's privileged-op audit sink. Phase 4 wires
-// the Noop recorder; future phases will replace it with the SQLite-backed
-// log without changing any call sites.
-var auditRecorder audit.Recorder = audit.Noop{}
-
 // checkForUpgrade hits GitHub Releases in the background at boot and
 // logs a hint if a newer Fletcher version is published. Failures are
 // silent at info level (debug level if you want to see them) - the
@@ -106,10 +101,7 @@ type imageUpdateState struct {
 // until the next boot.
 func checkForImageUpdate(ctx context.Context, cfg Config, logger *slog.Logger, state imageUpdateState) {
 	defer state.checked.Store(true)
-	root := cfg.BtrfsRoot
-	if root == "" {
-		root = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
-	}
+	root := snapshotRootDir(cfg)
 	imagesDir := filepath.Join(root, "images")
 	available, source, err := image.CheckForUpdate(ctx, imagesDir, cfg.DefaultImage)
 	if err != nil {
@@ -486,7 +478,9 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 
 	// Tool registration happens once the session manager exists below (the
 	// publish_image tool commits session forks); the server starts serving later.
-	mcpServer := fletchermcp.NewServer("fletcher", buildinfo.Version, auditRecorder, logger)
+	// The privileged-op audit sink is a Noop today; a future phase swaps in
+	// the SQLite-backed recorder here.
+	mcpServer := fletchermcp.NewServer("fletcher", buildinfo.Version, audit.Noop{}, logger)
 	logger.Info("mcp server ready", slog.String("base_url", mcpURL))
 
 	// Env every agent inherits, split so a fork can opt out of the model gateway
@@ -535,7 +529,10 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	// runtime (firecracker) implements runtime.SessionRuntime; other runtimes
 	// leave it nil and session lifecycle calls return a clear error.
 	sessionRuntime, _ := rtDriver.(runtime.SessionRuntime)
-	sessionMgr := session.NewManager(queries, snapDriver, sessionRuntime, baseAgentEnv, gatewayAgentEnv, logger, session.Options{
+	sessionMgr := session.NewManager(queries, snapDriver, sessionRuntime, session.AgentEnv{
+		Base:    baseAgentEnv,
+		Gateway: gatewayAgentEnv,
+	}, logger, session.Options{
 		IdleTimeout:         cfg.SessionIdleTimeout,
 		MaxCount:            cfg.SessionMaxCount,
 		MaxDiskBytes:        int64(cfg.SessionMaxDiskGB) << 30,
@@ -574,8 +571,12 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	// Reports: structured results agents post; stored, event-published, and
 	// pushed (the surviving half of the inbox idea).
 	reportSvc := report.NewService(queries, eventBus)
-	fletchermcp.RegisterBuiltinTools(mcpServer, startedAt, fletchermcp.NewEgressHTTPClient(30*time.Second), approvalSvc, publisher,
-		&reportPublisher{reports: reportSvc, sessions: sessionMgr})
+	fletchermcp.RegisterBuiltinTools(mcpServer, fletchermcp.BuiltinToolDeps{
+		StartedAt: startedAt,
+		Approvals: approvalSvc,
+		Publisher: publisher,
+		Reports:   &reportPublisher{reports: reportSvc, sessions: sessionMgr},
+	})
 
 	// Published-port broker: forwards a session's published port to the service
 	// inside its VM, dialing in via the session manager over vsock so the VM
@@ -1592,14 +1593,10 @@ func (r *settingsReloader) Reload(ctx context.Context) (reloaded, pendingRestart
 // service can show the effective value rather than a bare "(default)". cfg is
 // already fully resolved here, so for an unset key it holds exactly that default.
 func settingsDefaults(cfg Config) map[string]string {
-	btrfsRoot := cfg.BtrfsRoot
-	if btrfsRoot == "" {
-		btrfsRoot = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
-	}
 	return map[string]string{
 		settings.KeyRuntime:             cfg.RuntimeKind,
 		settings.KeySnapshot:            cfg.SnapshotKind,
-		settings.KeyBtrfsRoot:           btrfsRoot,
+		settings.KeyBtrfsRoot:           snapshotRootDir(cfg),
 		settings.KeyPublicEndpoint:      cfg.PublicEndpoint,
 		settings.KeyWireGuardPort:       strconv.Itoa(cfg.WireGuardListenPort),
 		settings.KeyPairingPort:         strconv.Itoa(pairingPort(cfg)),
@@ -1654,28 +1651,16 @@ func sessionIdleTimeoutString(d time.Duration) string {
 // btrfs driver is only meaningful on Linux; on darwin it constructs to a
 // shim whose New returns "not supported on darwin".
 func buildSnapshotDriver(cfg Config) (snapshot.Driver, error) {
-	kind := cfg.SnapshotKind
-	if kind == "" {
-		kind = defaultDriverKind
-	}
-	switch kind {
+	switch driverKind(cfg.SnapshotKind) {
 	case "mock":
 		snapRoot := filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
 		return snapmock.New(snapRoot)
 	case "btrfs":
-		root := cfg.BtrfsRoot
-		if root == "" {
-			root = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
-		}
-		return btrfsdriver.New(btrfsdriver.Options{RootDir: root})
+		return btrfsdriver.New(btrfsdriver.Options{RootDir: snapshotRootDir(cfg)})
 	case "ext4":
 		// The Firecracker rootfs substrate: per-job ext4 image clones. Shares
 		// the btrfs root so clones are cheap reflinks (a full copy elsewhere).
-		root := cfg.BtrfsRoot
-		if root == "" {
-			root = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
-		}
-		return ext4driver.New(ext4driver.Options{RootDir: root})
+		return ext4driver.New(ext4driver.Options{RootDir: snapshotRootDir(cfg)})
 	default:
 		return nil, fmt.Errorf("unknown snapshot kind %q", cfg.SnapshotKind)
 	}
@@ -2095,10 +2080,7 @@ func snapshotRootDir(cfg Config) string {
 // daemon runs as the user that owns the images directory, so it can stat it
 // (the CLI running `fletcher doctor` usually cannot). Surfaced via Health.
 func baseImageAvailable(cfg Config) bool {
-	root := cfg.BtrfsRoot
-	if root == "" {
-		root = filepath.Join(filepath.Dir(cfg.DatabasePath), "snapshots")
-	}
+	root := snapshotRootDir(cfg)
 	entries, err := os.ReadDir(filepath.Join(root, "images"))
 	if err != nil {
 		return false

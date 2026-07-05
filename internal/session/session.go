@@ -222,15 +222,24 @@ type PublishedPort struct {
 // pubPortPrefix is the typeid prefix for published-port IDs.
 const pubPortPrefix = "pubport"
 
+// AgentEnv is the boot-bound environment injected into session guests: Base
+// goes into every session; Gateway is layered on top only when the session's
+// gateway wiring is on. Grouped so the two same-typed slices cannot be swapped
+// at a call site.
+type AgentEnv struct {
+	Base    []string
+	Gateway []string
+}
+
 // NewManager constructs a Manager. rt may be nil if the configured runtime does
 // not support sessions, in which case lifecycle calls fail with a clear error.
-func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRuntime, baseEnv, gatewayEnv []string, logger *slog.Logger, opts Options) *Manager {
+func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRuntime, env AgentEnv, logger *slog.Logger, opts Options) *Manager {
 	m := &Manager{
 		q:          q,
 		snapshot:   snap,
 		runtime:    rt,
-		baseEnv:    baseEnv,
-		gatewayEnv: gatewayEnv,
+		baseEnv:    env.Base,
+		gatewayEnv: env.Gateway,
 		logger:     logger,
 		handles:    make(map[string]runtime.SessionHandle),
 		busy:       make(map[string]int),
@@ -325,11 +334,35 @@ func (m *Manager) requireRuntime() error {
 	return nil
 }
 
+// CreateParams parameterise Create. Zero values mean "use the configured
+// default" where one exists (Image, EgressPolicy, Gateway) and "off/none"
+// otherwise (RunApp, VolumeRef, Credentials, EnvVars).
+type CreateParams struct {
+	// Name is the session's unique display name. Required.
+	Name string
+	// Image is the template to fork; empty uses the configured default image.
+	Image string
+	// EgressPolicy is "none"|"allowlist"|"open"; empty resolves to the
+	// manager's configured default.
+	EgressPolicy string
+	// Gateway is "on"|"off"; empty resolves to the configured default.
+	Gateway string
+	// RunApp boots the image's own app under the guest supervisor (a deploy).
+	RunApp bool
+	// VolumeRef, when non-empty, attaches that persistent volume (mounted at
+	// /volume in the guest) for the session's lifetime.
+	VolumeRef string
+	// Credentials are agent-login names seeded into the fork at create.
+	Credentials []string
+	// EnvVars are user env vars applied to the session's processes.
+	EnvVars []EnvVar
+}
+
 // Create provisions a session's persistent fork, boots its VM, and records it.
-// egressPolicy is "none"|"allowlist"|"open"; empty resolves to the manager's
-// configured default. volumeRef, when non-empty, attaches that persistent
-// volume (mounted at /volume in the guest) for the session's lifetime.
-func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway string, runApp bool, volumeRef string, credentials []string, envVars []EnvVar) (Session, error) {
+func (m *Manager) Create(ctx context.Context, p CreateParams) (Session, error) {
+	name, image := p.Name, p.Image
+	egressPolicy, gateway := p.EgressPolicy, p.Gateway
+	runApp, volumeRef, credentials, envVars := p.RunApp, p.VolumeRef, p.Credentials, p.EnvVars
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
@@ -698,14 +731,14 @@ func (m *Manager) Exec(ctx context.Context, ref, command string) (ExecResult, er
 	return ExecResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: res.ExitCode}, nil
 }
 
-// UploadFile streams content (size bytes) into a running session's fork at path,
-// writing it atomically and handing it to the login user. mode is the file's
-// permission bits (0 uses 0644). Returns the bytes written and the content hash.
-func (m *Manager) UploadFile(ctx context.Context, ref, path string, mode uint32, size int64, overwrite bool, content io.Reader) (runtime.FileWriteResult, error) {
-	if strings.TrimSpace(path) == "" {
+// UploadFile streams content (spec.Size bytes) into a running session's fork at
+// spec.Path, writing it atomically and handing it to the login user. A zero
+// spec.Mode uses 0644. Returns the bytes written and the content hash.
+func (m *Manager) UploadFile(ctx context.Context, ref string, spec runtime.FileWriteSpec, content io.Reader) (runtime.FileWriteResult, error) {
+	if strings.TrimSpace(spec.Path) == "" {
 		return runtime.FileWriteResult{}, errs.New(errs.CategoryInvalidArgument, "destination path is required")
 	}
-	if size < 0 {
+	if spec.Size < 0 {
 		return runtime.FileWriteResult{}, errs.New(errs.CategoryInvalidArgument, "size must not be negative")
 	}
 	row, err := m.lookup(ctx, ref)
@@ -721,7 +754,7 @@ func (m *Manager) UploadFile(ctx context.Context, ref, path string, mode uint32,
 	m.markBusy(row.ID)
 	defer m.unmarkBusy(row.ID)
 
-	res, err := handle.WriteFile(ctx, runtime.FileWriteSpec{Path: path, Mode: mode, Size: size, Overwrite: overwrite}, content)
+	res, err := handle.WriteFile(ctx, spec, content)
 	if err != nil {
 		return runtime.FileWriteResult{}, fmt.Errorf("upload to session: %w", err)
 	}
@@ -921,17 +954,29 @@ func (m *Manager) AppRestartCount(ctx context.Context, ref string) (int64, bool)
 	return n, true
 }
 
-// UpdateSession changes a session's egress policy and/or gateway wiring (an
-// empty value leaves that field unchanged). Both are baked into the fork at VM
-// boot, so a change to a running session takes effect on its next start;
-// restartRequired reports whether the session is currently running.
-func (m *Manager) UpdateSession(ctx context.Context, ref, egressPolicy, gateway string, envVars []EnvVar, updateEnv bool) (Session, bool, error) {
+// UpdateParams parameterise Update. Empty EgressPolicy/Gateway leave that
+// field unchanged; EnvVars replace the session's env only when UpdateEnv is
+// set (distinguishing "clear the vars" from "not provided").
+type UpdateParams struct {
+	EgressPolicy string
+	Gateway      string
+	EnvVars      []EnvVar
+	UpdateEnv    bool
+}
+
+// Update changes a session's egress policy, gateway wiring, and/or env vars.
+// All are baked into the fork at VM boot, so a change to a running session
+// takes effect on its next start; restartRequired reports whether the session
+// is currently running.
+func (m *Manager) Update(ctx context.Context, ref string, p UpdateParams) (Session, bool, error) {
+	egressPolicy, gateway := p.EgressPolicy, p.Gateway
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return Session{}, false, err
 	}
 
-	if updateEnv {
+	if p.UpdateEnv {
+		envVars := p.EnvVars
 		if err := validateEnvVars(envVars); err != nil {
 			return Session{}, false, err
 		}
@@ -1364,15 +1409,26 @@ func (m *Manager) DialPort(ctx context.Context, ref string, port uint16) (net.Co
 	return &busyConn{Conn: conn, release: func() { m.unmarkBusy(id) }}, nil
 }
 
+// PublishParams parameterise Publish.
+type PublishParams struct {
+	// GuestPort is the port the session serves inside the VM. Required.
+	GuestPort int
+	// Name labels the published port; empty derives "port-<n>".
+	Name string
+	// Public also serves the port on the public HTTPS listener under Host,
+	// which requires the public_web setting and a valid Host.
+	Public bool
+	Host   string
+}
+
 // Publish exposes a port the session serves, brokered by the daemon. It records
 // the port and (when a broker is wired) opens the host-side tunnel forwarder.
-// When public is set, the port is also served on the public HTTPS listener under
-// host - which requires the public_web setting to be enabled and a valid host.
-func (m *Manager) Publish(ctx context.Context, ref string, guestPort int, name string, public bool, host string) (PublishedPort, error) {
+func (m *Manager) Publish(ctx context.Context, ref string, p PublishParams) (PublishedPort, error) {
+	guestPort, name, public := p.GuestPort, p.Name, p.Public
 	if guestPort < 1 || guestPort > 65535 {
 		return PublishedPort{}, errs.New(errs.CategoryInvalidArgument, "guest port must be between 1 and 65535")
 	}
-	host = strings.ToLower(strings.TrimSpace(host))
+	host := strings.ToLower(strings.TrimSpace(p.Host))
 	if public {
 		if !m.opt().PublicWeb {
 			return PublishedPort{}, errs.New(errs.CategoryFailedPrecondition,

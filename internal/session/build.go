@@ -99,10 +99,16 @@ func (r *buildRecord) finish(state, name string, port int, errMsg string) {
 	r.state, r.name, r.exposedPort, r.errMsg, r.updated = state, name, port, errMsg, time.Now()
 }
 
-func (r *buildRecord) snapshot() (state, name string, port int, errMsg, log string) {
+func (r *buildRecord) snapshot() BuildStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.state, r.name, r.exposedPort, r.errMsg, string(r.log)
+	return BuildStatus{
+		State:       r.state,
+		Name:        r.name,
+		ExposedPort: r.exposedPort,
+		ErrMsg:      r.errMsg,
+		Log:         string(r.log),
+	}
 }
 
 // StartBuildFromSession kicks off BuildImageFromSession DETACHED from the caller
@@ -154,15 +160,29 @@ func (m *Manager) StartBuildFromSession(ctx context.Context, devRef, subdir, ima
 	return buildID, nil
 }
 
+// BuildStatus is a point-in-time view of a detached build: its state
+// ("building" | "succeeded" | "failed"), the produced template name and lowest
+// EXPOSE on success, the failure message otherwise, and the log tail.
+type BuildStatus struct {
+	State       string
+	Name        string
+	ExposedPort int
+	ErrMsg      string
+	Log         string
+}
+
 // BuildStatus reports a detached build's state and log tail. An unknown id (e.g.
 // the daemon restarted, or it aged out) is reported as failed so the client
 // stops polling.
-func (m *Manager) BuildStatus(buildID string) (state, name string, exposedPort int, errMsg, log string) {
+func (m *Manager) BuildStatus(buildID string) BuildStatus {
 	m.buildsMu.Lock()
 	rec, ok := m.builds[buildID]
 	m.buildsMu.Unlock()
 	if !ok {
-		return buildStateFailed, "", 0, "build not found (it may have expired or the daemon restarted); try again", ""
+		return BuildStatus{
+			State:  buildStateFailed,
+			ErrMsg: "build not found (it may have expired or the daemon restarted); try again",
+		}
 	}
 	return rec.snapshot()
 }
@@ -171,11 +191,11 @@ func (m *Manager) BuildStatus(buildID string) (state, name string, exposedPort i
 // does not grow unbounded. Caller holds buildsMu.
 func (m *Manager) sweepBuildsLocked() {
 	for id, rec := range m.builds {
-		state, _, _, _, _ := rec.snapshot()
 		rec.mu.Lock()
+		terminal := rec.state != buildStateBuilding
 		old := time.Since(rec.updated) > time.Hour
 		rec.mu.Unlock()
-		if state != buildStateBuilding && old {
+		if terminal && old {
 			delete(m.builds, id)
 		}
 	}

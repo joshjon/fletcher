@@ -651,25 +651,43 @@ func formatApproval(a approval.Approval) string {
 	return out
 }
 
+// BuiltinToolDeps are the collaborators behind the standard tool set. Each is
+// independently nil-able, and a nil skips the tools that need it, so a call
+// site names what it is omitting instead of encoding it in positional nils.
+type BuiltinToolDeps struct {
+	// StartedAt stamps the daemon_health tool's uptime.
+	StartedAt time.Time
+	// HTTPClient serves the http_get/http_request tools; nil uses the default
+	// egress client with a 30s timeout.
+	HTTPClient *http.Client
+	// Approvals backs request_approval; nil skips it (and the image tools,
+	// which gate on approvals).
+	Approvals ApprovalBackend
+	// Publisher backs publish_image/build_image; nil (no session-capable
+	// runtime) skips them.
+	Publisher ImagePublisher
+	// Reports backs the report tool; nil skips it.
+	Reports ReportSink
+}
+
 // RegisterBuiltinTools wires Fletcher's standard tool set onto srv. Future
 // phases extend this list (egress allowlists, secrets-bound tools, ...).
-// publisher may be nil (no session-capable runtime), which skips
-// publish_image; reports may be nil, which skips the report tool.
-func RegisterBuiltinTools(srv *Server, startedAt time.Time, httpClient *http.Client, approvals ApprovalBackend, publisher ImagePublisher, reports ReportSink) {
+func RegisterBuiltinTools(srv *Server, deps BuiltinToolDeps) {
+	httpClient := deps.HTTPClient
 	if httpClient == nil {
 		httpClient = NewEgressHTTPClient(30 * time.Second)
 	}
-	srv.RegisterTool(daemonHealthTool(startedAt))
+	srv.RegisterTool(daemonHealthTool(deps.StartedAt))
 	srv.RegisterTool(httpGetTool(httpClient))
 	srv.RegisterTool(httpRequestTool(httpClient))
-	if approvals != nil {
-		srv.RegisterTool(requestApprovalTool(approvals))
-		if publisher != nil {
-			srv.RegisterTool(publishImageTool(publisher, approvals))
-			srv.RegisterTool(buildImageTool(publisher, approvals))
+	if deps.Approvals != nil {
+		srv.RegisterTool(requestApprovalTool(deps.Approvals))
+		if deps.Publisher != nil {
+			srv.RegisterTool(publishImageTool(deps.Publisher, deps.Approvals))
+			srv.RegisterTool(buildImageTool(deps.Publisher, deps.Approvals))
 		}
 	}
-	if reports != nil {
-		srv.RegisterTool(reportTool(reports))
+	if deps.Reports != nil {
+		srv.RegisterTool(reportTool(deps.Reports))
 	}
 }
