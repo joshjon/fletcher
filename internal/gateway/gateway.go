@@ -87,9 +87,15 @@ func (g *Gateway) Handler() http.Handler {
 	return mux
 }
 
+// maxRequestBody caps inbound request bodies. The gateway is reachable from
+// forks running untrusted agent code (DESIGN.md §5/§6), so an unbounded read
+// would let a fork OOM the daemon. Generous: a full-context Messages request
+// with base64 images stays well under this.
+const maxRequestBody = 64 << 20
+
 func (g *Gateway) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	var req OpenAIRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "could not parse request body")
 		return
 	}
@@ -135,7 +141,7 @@ func (g *Gateway) chatCompletions(w http.ResponseWriter, r *http.Request) {
 // bodies pass through because we copy the response body directly rather
 // than JSON-decoding.
 func (g *Gateway) messages(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBody))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "could not read request body")
 		return
