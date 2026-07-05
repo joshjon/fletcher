@@ -39,6 +39,14 @@ func TestRunHonoursContextCancellation(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		cancel()
 	}()
-	_, err := d.Run(ctx, runtime.Spec{Command: "sleep 5"}, nil, nil)
+	// Non-nil writers and a forked grandchild reproduce the production shape:
+	// cancellation must kill the whole process group, or the grandchild keeps
+	// the pipes open and Run blocks long past the cancel (and the grandchild
+	// leaks to the host).
+	var stdout, stderr bytes.Buffer
+	start := time.Now()
+	_, err := d.Run(ctx, runtime.Spec{Command: "sleep 60 & sleep 60"}, &stdout, &stderr)
 	require.ErrorIs(t, err, context.Canceled)
+	require.Less(t, time.Since(start), 3*time.Second,
+		"cancellation must not wait for forked children")
 }

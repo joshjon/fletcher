@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"github.com/joshjon/fletcher/internal/runtime"
 )
@@ -25,8 +27,9 @@ type Driver struct {
 func New() *Driver { return &Driver{Shell: "/bin/sh"} }
 
 // Run executes spec.Command via "<shell> -c <command>", returning the
-// process's exit code. Setpgid is set so killing the process group is
-// effective - context cancellation kills the whole tree.
+// process's exit code. The command runs in its own process group and
+// cancellation kills the whole group, so children forked by the command die
+// too instead of holding the output pipes (and the caller's Wait) open.
 func (d *Driver) Run(ctx context.Context, spec runtime.Spec, stdout, stderr io.Writer) (runtime.Result, error) {
 	shell := d.Shell
 	if shell == "" {
@@ -43,6 +46,19 @@ func (d *Driver) Run(ctx context.Context, spec runtime.Spec, stdout, stderr io.W
 	}
 	cmd.Env = append(cmd.Environ(), spec.Env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// The default Cancel only signals the direct child; a grandchild would
+	// survive and keep the pipes open. Signal the group (negative pid).
+	cmd.Cancel = func() error {
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	// A command that exits leaving a forked child attached to the pipes (e.g.
+	// "sleep 60 & echo done") would otherwise block Wait until the child
+	// exits; bound that wait instead of inheriting the child's lifetime.
+	cmd.WaitDelay = 3 * time.Second
 
 	err := cmd.Run()
 	if err != nil {
