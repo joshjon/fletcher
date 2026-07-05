@@ -1293,19 +1293,20 @@ func serveActor(logger *slog.Logger, srv *http.Server, ln net.Listener, socketPa
 	return execute, interrupt
 }
 
-// supervisorActor wraps the job supervisor's Run as an oklog/run actor.
-// The supervisor's drain() honours ctx cancellation and waits for in-flight
-// runOne goroutines, so the interrupt closure has nothing to do here.
+// supervisorActor wraps the job supervisor's Run as an oklog/run actor. The
+// interrupt cancels a derived context so a group shutdown triggered by another
+// actor's error (not just the parent signal context) also stops the supervisor;
+// its drain() then waits for in-flight runOne goroutines.
 func supervisorActor(ctx context.Context, sup *job.Supervisor) (func() error, func(error)) {
-	cancelCh := make(chan struct{})
+	runCtx, cancel := context.WithCancel(ctx)
 	execute := func() error {
-		err := sup.Run(ctx)
+		err := sup.Run(runCtx)
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
 		return err
 	}
-	interrupt := func(_ error) { close(cancelCh) }
+	interrupt := func(_ error) { cancel() }
 	return execute, interrupt
 }
 
@@ -1809,14 +1810,16 @@ var (
 // as the daemon runs. Unlike the tunnel listener it is bound here rather than
 // at construction: the VPN interface (e.g. Tailscale) can come up after the
 // daemon, and a bind that fails once must not leave the API unreachable for the
-// whole process lifetime. The parent ctx is cancelled on shutdown, which breaks
-// the retry loop; interrupt drains an in-flight server.
+// whole process lifetime. Interrupt cancels a derived context so a group
+// shutdown triggered by another actor's error also breaks the retry loop, not
+// just parent-ctx cancellation; it then drains an in-flight server.
 func remoteAPIListenActor(ctx context.Context, addr string, srv *http.Server, logger *slog.Logger) (func() error, func(error)) {
+	runCtx, cancel := context.WithCancel(ctx)
 	execute := func() error {
 		var lc net.ListenConfig
 		backoff := remoteBindFirstBackoff
 		for {
-			ln, err := lc.Listen(ctx, "tcp", addr)
+			ln, err := lc.Listen(runCtx, "tcp", addr)
 			if err == nil {
 				logger.Info("remote-api (vpn) listening", slog.String("addr", addr))
 				if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
@@ -1824,7 +1827,7 @@ func remoteAPIListenActor(ctx context.Context, addr string, srv *http.Server, lo
 				}
 				return nil
 			}
-			if ctx.Err() != nil {
+			if runCtx.Err() != nil {
 				return nil //nolint:nilerr // ctx cancelled mid-bind is a clean shutdown, not an error
 			}
 			logger.Info("remote-api (vpn) address not bindable yet; retrying once the VPN is up",
@@ -1833,19 +1836,18 @@ func remoteAPIListenActor(ctx context.Context, addr string, srv *http.Server, lo
 				slog.String("err", err.Error()),
 			)
 			select {
-			case <-ctx.Done():
+			case <-runCtx.Done():
 				return nil
 			case <-time.After(backoff):
 			}
-			if backoff *= 2; backoff > remoteBindMaxBackoff {
-				backoff = remoteBindMaxBackoff
-			}
+			backoff = min(backoff*2, remoteBindMaxBackoff)
 		}
 	}
 	//nolint:contextcheck // shutdown must outlive the cancelled parent ctx
 	interrupt := func(_ error) {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
+		cancel()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer shutdownCancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}
 	return execute, interrupt
