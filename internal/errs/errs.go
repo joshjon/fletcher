@@ -85,8 +85,7 @@ func Newf(cat Category, format string, args ...any) error {
 // CategoryOf walks the err chain and returns the first Category it finds.
 // Returns CategoryUnknown when no Categorized error is present.
 func CategoryOf(err error) Category {
-	var c Categorized
-	if errors.As(err, &c) {
+	if c, ok := errors.AsType[Categorized](err); ok {
 		return c.Category()
 	}
 	return CategoryUnknown

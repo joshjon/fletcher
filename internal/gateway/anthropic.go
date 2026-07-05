@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -201,10 +202,10 @@ func openAIToAnthropic(req OpenAIRequest) anthropicRequest {
 }
 
 func anthropicToOpenAI(resp anthropicResponse, model string) OpenAIResponse {
-	text := ""
+	var text strings.Builder
 	for _, b := range resp.Content {
 		if b.Type == "text" {
-			text += b.Text
+			text.WriteString(b.Text)
 		}
 	}
 	if model == "" {
@@ -217,7 +218,7 @@ func anthropicToOpenAI(resp anthropicResponse, model string) OpenAIResponse {
 		Model:   model,
 		Choices: []OpenAIChoice{{
 			Index:        0,
-			Message:      OpenAIMessage{Role: "assistant", Content: text},
+			Message:      OpenAIMessage{Role: "assistant", Content: text.String()},
 			FinishReason: stopReasonToFinishReason(resp.StopReason),
 		}},
 		Usage: OpenAIUsage{

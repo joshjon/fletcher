@@ -51,8 +51,7 @@ func forkRunCmd() *cli.Command {
 			child := exec.CommandContext(ctx, args[0], args[1:]...) //nolint:gosec // the daemon supplies the job command to run in the fork
 			child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 			err := child.Run()
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) {
+			if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 				return cli.Exit("", exitErr.ExitCode())
 			}
 			return err

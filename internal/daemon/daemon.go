@@ -821,13 +821,7 @@ func notifyRouterActor(ctx context.Context, r notifyRouter) (func() error, func(
 // half the idle timeout capped to a sane range, so a session is stopped within
 // roughly one timeout of going idle.
 func sessionReaperActor(ctx context.Context, logger *slog.Logger, mgr *session.Manager, idleTimeout time.Duration) (func() error, func(error)) {
-	interval := idleTimeout / 2
-	if interval < time.Minute {
-		interval = time.Minute
-	}
-	if interval > 10*time.Minute {
-		interval = 10 * time.Minute
-	}
+	interval := min(max(idleTimeout/2, time.Minute), 10*time.Minute)
 	reapCtx, cancel := context.WithCancel(ctx)
 	return func() error {
 			ticker := time.NewTicker(interval)

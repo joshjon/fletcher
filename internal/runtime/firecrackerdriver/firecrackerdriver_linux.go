@@ -424,19 +424,19 @@ func (d *Driver) machineConfig(apiSock, vsockUDS, rootfs string, sessionMode, ru
 	}
 	kernelArgs += " root=/dev/vda rw init=" + guestagent.InitPath
 	drives := []models.Drive{{
-		DriveID:      ptr("rootfs"),
+		DriveID:      new("rootfs"),
 		PathOnHost:   &rootfs,
-		IsRootDevice: ptr(true),
-		IsReadOnly:   ptr(false),
+		IsRootDevice: new(true),
+		IsReadOnly:   new(false),
 	}}
 	if volumePath != "" {
 		// The persistent volume rides as the second virtio disk (/dev/vdb);
 		// the guest mounts it at /volume on boot.
 		drives = append(drives, models.Drive{
-			DriveID:      ptr("volume"),
+			DriveID:      new("volume"),
 			PathOnHost:   &volumePath,
-			IsRootDevice: ptr(false),
-			IsReadOnly:   ptr(false),
+			IsRootDevice: new(false),
+			IsReadOnly:   new(false),
 		})
 	}
 	return firecracker.Config{
@@ -515,7 +515,8 @@ func proxyToUnix(client net.Conn, socketPath string) {
 	<-done
 }
 
-func ptr[T any](v T) *T { return &v }
+//go:fix inline
+func ptr[T any](v T) *T { return new(v) }
 
 // sanitiseID keeps a job ID usable as a directory name (typeids are already
 // safe, but guard against an empty or path-bearing value).

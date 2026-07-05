@@ -302,7 +302,7 @@ func (s *Service) takenAddresses(ctx context.Context) (map[netip.Addr]bool, erro
 	}
 	taken := make(map[netip.Addr]bool, len(rows))
 	for _, r := range rows {
-		for _, raw := range strings.Split(r.AllowedIps, ",") {
+		for raw := range strings.SplitSeq(r.AllowedIps, ",") {
 			raw = strings.TrimSpace(raw)
 			if raw == "" {
 				continue

@@ -200,7 +200,7 @@ func modeString(mode uint32, isDir, isSymlink bool) string {
 		b.WriteByte('-')
 	}
 	const rwx = "rwxrwxrwx"
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		if mode&(1<<uint(8-i)) != 0 {
 			b.WriteByte(rwx[i])
 		} else {

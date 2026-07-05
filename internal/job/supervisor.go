@@ -292,9 +292,7 @@ func (s *Supervisor) startJob(parentCtx context.Context, row sqliteq.Job) {
 	s.active[row.ID] = cancel
 	s.mu.Unlock()
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		defer func() {
 			s.mu.Lock()
 			delete(s.active, row.ID)
@@ -302,7 +300,7 @@ func (s *Supervisor) startJob(parentCtx context.Context, row sqliteq.Job) {
 			cancel()
 		}()
 		s.runOne(jobCtx, row)
-	}()
+	})
 }
 
 func (s *Supervisor) runOne(jobCtx context.Context, row sqliteq.Job) {

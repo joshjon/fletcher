@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -173,12 +174,7 @@ func userInGroup(gid int) bool {
 		return false
 	}
 	target := strconv.Itoa(gid)
-	for _, id := range ids {
-		if id == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ids, target)
 }
 
 // isPermissionDenied returns true when err (typically wrapped by

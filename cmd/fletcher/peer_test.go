@@ -29,7 +29,7 @@ func TestRenderByoVPNPairResultEmitsLoginBlob(t *testing.T) {
 
 	// Pull the blob line (the only base64url token line) and decode it.
 	var blob string
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") || strings.Contains(line, " ") {
 			continue

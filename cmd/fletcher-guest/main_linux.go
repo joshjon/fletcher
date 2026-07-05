@@ -995,8 +995,7 @@ func waitCode(cmd *exec.Cmd) int {
 	if err == nil {
 		return 0
 	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		if ee.ExitCode() >= 0 {
 			return ee.ExitCode()
 		}
@@ -1077,8 +1076,7 @@ func runCommand(ctx context.Context, spec guestproto.Spec, fc *frameConn) int {
 	if err == nil {
 		return 0
 	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		if ee.ExitCode() >= 0 {
 			return ee.ExitCode()
 		}

@@ -288,7 +288,7 @@ func upsertHostBlock(configPath, host, block string) error {
 	}
 	var out strings.Builder
 	skip := false
-	for _, line := range strings.Split(string(existing), "\n") {
+	for line := range strings.SplitSeq(string(existing), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "Host ") {
 			skip = trimmed == "Host "+host

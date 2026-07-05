@@ -109,7 +109,7 @@ func unmapNATPMP(ctx context.Context, req Request, gateway net.IP) error {
 func natpmpExchange(ctx context.Context, conn *net.UDPConn, body []byte, minLen int) ([]byte, error) {
 	buf := make([]byte, 32)
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := range 3 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

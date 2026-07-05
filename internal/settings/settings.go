@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -243,10 +244,8 @@ func names() []string {
 
 func oneOf(allowed ...string) func(string) error {
 	return func(v string) error {
-		for _, a := range allowed {
-			if v == a {
-				return nil
-			}
+		if slices.Contains(allowed, v) {
+			return nil
 		}
 		return fmt.Errorf("must be one of: %s", strings.Join(allowed, ", "))
 	}

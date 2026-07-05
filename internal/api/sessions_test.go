@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"io"
+	"slices"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -67,12 +68,7 @@ func (f fakeRefresher) RefreshImage(context.Context, string) bool {
 }
 
 func (f fakeRefresher) HasTemplate(name string) bool {
-	for _, t := range f.templates {
-		if t == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(f.templates, name)
 }
 
 func (f fakeRefresher) ImportRef(_ context.Context, ref, name string) error {

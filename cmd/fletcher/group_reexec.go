@@ -6,6 +6,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -115,12 +116,7 @@ func inActiveGroups(gid int) bool {
 	if err != nil {
 		return false
 	}
-	for _, g := range groups {
-		if g == gid {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(groups, gid)
 }
 
 // memberOnDisk reports whether the current user is a member of gid according
@@ -136,23 +132,13 @@ func memberOnDisk(gid int) bool {
 		return false
 	}
 	target := strconv.Itoa(gid)
-	for _, id := range ids {
-		if id == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ids, target)
 }
 
 // hasServeCommand reports whether the daemon subcommand is being invoked, so
 // the re-exec guard can leave `fletcher serve` alone.
 func hasServeCommand(args []string) bool {
-	for _, a := range args {
-		if a == "serve" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(args, "serve")
 }
 
 // shellJoin renders argv as a single POSIX-shell-safe command string for

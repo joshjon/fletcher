@@ -185,7 +185,7 @@ func writeRootfsFile(ctx context.Context, rootfs, guestPath string, data []byte,
 // the original unresolved path.
 func resolveRootfsDir(ctx context.Context, rootfs, dir string) string {
 	cur := "/"
-	for _, comp := range strings.Split(strings.Trim(dir, "/"), "/") {
+	for comp := range strings.SplitSeq(strings.Trim(dir, "/"), "/") {
 		if comp == "" {
 			continue
 		}
@@ -216,8 +216,8 @@ func rootfsSymlinkTarget(ctx context.Context, rootfs, guestPath string) (string,
 	const marker = `Fast link dest: "`
 	if i := strings.Index(string(out), marker); i >= 0 {
 		rest := string(out)[i+len(marker):]
-		if j := strings.IndexByte(rest, '"'); j >= 0 {
-			return rest[:j], true
+		if before, _, ok := strings.Cut(rest, "\""); ok {
+			return before, true
 		}
 	}
 	// Slow (block-stored) symlink: its data is the target path.

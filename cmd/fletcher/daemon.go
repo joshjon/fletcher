@@ -105,8 +105,7 @@ func runManage(ctx context.Context, needsRoot bool, args ...string) error {
 	command := exec.CommandContext(ctx, name, rest...) //nolint:gosec // fixed systemctl/journalctl verbs + the constant unit name
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := command.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			return cli.Exit("", exitErr.ExitCode())
 		}
 		return err

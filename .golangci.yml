@@ -16,6 +16,7 @@ linters:
     - gosec
     - govet
     - misspell
+    - modernize
     - nilerr
     - nolintlint
     - noctx

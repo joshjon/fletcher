@@ -59,8 +59,7 @@ func ErrorInterceptor(logger *slog.Logger) connect.UnaryInterceptorFunc {
 				return resp, nil
 			}
 
-			var connectErr *connect.Error
-			if errors.As(err, &connectErr) {
+			if connectErr, ok := errors.AsType[*connect.Error](err); ok {
 				logger.ErrorContext(ctx, "rpc connect error",
 					slog.String("procedure", req.Spec().Procedure),
 					slog.String("code", connectErr.Code().String()),

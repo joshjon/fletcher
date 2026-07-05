@@ -128,8 +128,7 @@ func (d *Driver) Run(ctx context.Context, spec runtime.Spec, stdout, stderr io.W
 		if ctx.Err() != nil {
 			return runtime.Result{}, fmt.Errorf("job cancelled: %w", ctx.Err())
 		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			//nolint:gosec // POSIX exit codes fit in int32
 			return runtime.Result{ExitCode: int32(exitErr.ExitCode())}, nil
 		}

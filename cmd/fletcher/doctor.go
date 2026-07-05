@@ -216,21 +216,21 @@ func statusIcon(s doctor.Status) string {
 // CI consumers. The fields mirror the text renderer's organisation.
 func renderDoctorJSON(w io.Writer, results []doctor.Result) error {
 	type plan struct {
-		ID       string                   `json:"id"`
-		Priority string                   `json:"priority"`
-		Title    string                   `json:"title"`
-		Why      string                   `json:"why,omitempty"`
-		Options  []map[string]interface{} `json:"options,omitempty"`
+		ID       string           `json:"id"`
+		Priority string           `json:"priority"`
+		Title    string           `json:"title"`
+		Why      string           `json:"why,omitempty"`
+		Options  []map[string]any `json:"options,omitempty"`
 	}
 	type out struct {
-		Results []map[string]interface{} `json:"results"`
-		Summary map[string]int           `json:"summary"`
-		Plan    []plan                   `json:"plan"`
+		Results []map[string]any `json:"results"`
+		Summary map[string]int   `json:"summary"`
+		Plan    []plan           `json:"plan"`
 	}
 
 	o := out{Summary: map[string]int{}}
 	for _, r := range results {
-		o.Results = append(o.Results, map[string]interface{}{
+		o.Results = append(o.Results, map[string]any{
 			"category": string(r.Category),
 			"name":     r.Name,
 			"status":   r.Status.String(),
@@ -248,9 +248,9 @@ func renderDoctorJSON(w io.Writer, results []doctor.Result) error {
 		if p.Priority != doctor.PriorityBlocker {
 			priority = "follow-up"
 		}
-		opts := make([]map[string]interface{}, 0, len(p.Options))
+		opts := make([]map[string]any, 0, len(p.Options))
 		for _, op := range p.Options {
-			opts = append(opts, map[string]interface{}{
+			opts = append(opts, map[string]any{
 				"label": op.Label,
 				"steps": op.Steps,
 			})

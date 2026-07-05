@@ -172,7 +172,7 @@ func (s *Service) Get(ctx context.Context, id string) (Approval, error) {
 	if a.Status == StatusPending && time.Now().After(a.ExpiresAt) {
 		// Best-effort lazy expiry; ignore error here, the row will sweep eventually.
 		_, _ = s.q.ExpirePendingApprovals(ctx, sqliteq.ExpirePendingApprovalsParams{
-			DecidedAt: ptrInt64(time.Now().Unix()),
+			DecidedAt: new(time.Now().Unix()),
 			ExpiresAt: time.Now().Unix(),
 		})
 		a.Status = StatusExpired
@@ -236,13 +236,13 @@ func (s *Service) decide(ctx context.Context, id, reason string, approve bool) (
 	if approve {
 		n, err = s.q.ApproveApproval(ctx, sqliteq.ApproveApprovalParams{
 			DecisionReason: nilIfEmpty(reason),
-			DecidedAt:      ptrInt64(now),
+			DecidedAt:      new(now),
 			ID:             id,
 		})
 	} else {
 		n, err = s.q.DenyApproval(ctx, sqliteq.DenyApprovalParams{
 			DecisionReason: nilIfEmpty(reason),
-			DecidedAt:      ptrInt64(now),
+			DecidedAt:      new(now),
 			ID:             id,
 		})
 	}
@@ -300,7 +300,7 @@ func (s *Service) Wait(ctx context.Context, id string) (Approval, error) {
 func (s *Service) SweepExpired(ctx context.Context) (int64, error) {
 	now := time.Now().Unix()
 	n, err := s.q.ExpirePendingApprovals(ctx, sqliteq.ExpirePendingApprovalsParams{
-		DecidedAt: ptrInt64(now),
+		DecidedAt: new(now),
 		ExpiresAt: now,
 	})
 	if err != nil {
@@ -361,7 +361,8 @@ func approvalFromRow(r sqliteq.PendingApproval) Approval {
 	return a
 }
 
-func ptrInt64(v int64) *int64 { return &v }
+//go:fix inline
+func ptrInt64(v int64) *int64 { return new(v) }
 
 func nilIfEmpty(s string) *string {
 	if s == "" {

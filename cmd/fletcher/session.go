@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -648,10 +649,8 @@ func dnsStatus(ctx context.Context, host, wantIP string) (string, bool) {
 	if err != nil {
 		return "not resolving yet - add the record above", false
 	}
-	for _, a := range addrs {
-		if a == wantIP {
-			return "DNS ✓", true
-		}
+	if slices.Contains(addrs, wantIP) {
+		return "DNS ✓", true
 	}
 	return fmt.Sprintf("points to %s, not %s", strings.Join(addrs, ", "), wantIP), false
 }

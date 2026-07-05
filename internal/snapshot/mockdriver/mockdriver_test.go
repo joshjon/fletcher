@@ -41,7 +41,7 @@ func TestCreateSnapshotsHaveDistinctIDs(t *testing.T) {
 	d, err := mockdriver.New(t.TempDir())
 	require.NoError(t, err)
 	seen := make(map[string]struct{})
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		s, err := d.Create(context.Background(), "x")
 		require.NoError(t, err)
 		_, dup := seen[s.ID]

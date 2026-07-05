@@ -126,7 +126,7 @@ func TestListAndCount(t *testing.T) {
 	svc := newService(t)
 	ctx := context.Background()
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, err := svc.Create(ctx, job.CreateParams{
 			Trigger: job.TriggerEphemeral,
 			Name:    "x",

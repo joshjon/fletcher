@@ -141,7 +141,7 @@ func upsertGitCredentialLine(path, host, username, token string) error {
 	var kept []string
 	switch data, err := os.ReadFile(path); { //nolint:gosec // path is under the daemon-owned credentials root
 	case err == nil:
-		for _, l := range strings.Split(string(data), "\n") {
+		for l := range strings.SplitSeq(string(data), "\n") {
 			if l = strings.TrimSpace(l); l == "" {
 				continue
 			}
@@ -154,7 +154,6 @@ func upsertGitCredentialLine(path, host, username, token string) error {
 		return err
 	}
 	kept = append(kept, line)
-	//nolint:gosec // path is the daemon-owned credentials file, not user input
 	return os.WriteFile(path, []byte(strings.Join(kept, "\n")+"\n"), 0o600)
 }
 
@@ -197,7 +196,7 @@ func readGitIdentity(path string) gitIdentity {
 	}
 	var id gitIdentity
 	inUser := false
-	for _, raw := range strings.Split(string(data), "\n") {
+	for raw := range strings.SplitSeq(string(data), "\n") {
 		line := strings.TrimSpace(raw)
 		switch {
 		case line == "[user]":
@@ -381,12 +380,12 @@ func allowedCredentialNames() string {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	out := ""
+	var out strings.Builder
 	for i, n := range names {
 		if i > 0 {
-			out += ", "
+			out.WriteString(", ")
 		}
-		out += n
+		out.WriteString(n)
 	}
-	return out
+	return out.String()
 }

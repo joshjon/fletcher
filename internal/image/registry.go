@@ -159,7 +159,7 @@ func parseRef(ref string) (host, repo, tag string) {
 func parseChallenge(header string) (realm string, params url.Values) {
 	params = url.Values{}
 	header = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(header), "Bearer "))
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		k, v, ok := strings.Cut(part, "=")
 		if !ok {
 			continue

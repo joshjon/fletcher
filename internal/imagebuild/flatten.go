@@ -54,10 +54,7 @@ func buildExt4(ctx context.Context, stagingDir, target string) error {
 		mib   = int64(1) << 20
 		floor = int64(1) << 30
 	)
-	size := used + used/2 + 512*mib
-	if size < floor {
-		size = floor
-	}
+	size := max(used+used/2+512*mib, floor)
 	size = (size + mib - 1) / mib * mib // round up to a whole MiB
 
 	truncate := exec.CommandContext(ctx, "truncate", "-s", strconv.FormatInt(size, 10), target) //nolint:gosec // fixed args + the operator's path

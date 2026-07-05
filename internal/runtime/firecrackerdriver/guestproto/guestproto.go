@@ -297,10 +297,10 @@ type ShellSpec struct {
 // can also carry a clean shutdown or an interactive shell.
 type Request struct {
 	Kind   RequestKind `json:"kind"`
-	Spec   Spec        `json:"spec,omitempty"`
-	Shell  ShellSpec   `json:"shell,omitempty"`
-	File   FileSpec    `json:"file,omitempty"`
-	FileOp FileOpSpec  `json:"fileOp,omitempty"`
+	Spec   Spec        `json:"spec,omitzero"`
+	Shell  ShellSpec   `json:"shell,omitzero"`
+	File   FileSpec    `json:"file,omitzero"`
+	FileOp FileOpSpec  `json:"fileOp,omitzero"`
 }
 
 // Frame kinds. KindStdout/KindStderr/KindExit flow guest->host; KindStdin and

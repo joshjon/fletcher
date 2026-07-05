@@ -40,6 +40,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 )
@@ -194,12 +195,7 @@ func (m *Manager) covers(leaf *x509.Certificate, host string) bool {
 		}
 		return false
 	}
-	for _, dns := range leaf.DNSNames {
-		if dns == host {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(leaf.DNSNames, host)
 }
 
 func (m *Manager) certPath() string { return filepath.Join(m.dir, certFile) }
