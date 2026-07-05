@@ -208,10 +208,12 @@ type resolvedUser struct{ uid, gid uint32 }
 // lookupUser resolves a username or numeric uid to uid/gid.
 func lookupUser(name string) (resolvedUser, error) {
 	if n, err := strconv.Atoi(name); err == nil && n >= 0 && n <= math.MaxUint32 {
-		// Numeric uid: try to find its primary gid, else mirror the uid.
+		// Numeric uid: try to find its primary gid, else mirror the uid. The
+		// gid needs its own bounds check - the nolint above only justifies the
+		// uid, and a corrupt /etc/passwd gid would otherwise wrap silently.
 		if u, lerr := user.LookupId(name); lerr == nil {
-			if gid, gerr := strconv.Atoi(u.Gid); gerr == nil {
-				return resolvedUser{uid: uint32(n), gid: uint32(gid)}, nil //nolint:gosec // bounded above
+			if gid, gerr := strconv.Atoi(u.Gid); gerr == nil && gid >= 0 && gid <= math.MaxUint32 {
+				return resolvedUser{uid: uint32(n), gid: uint32(gid)}, nil
 			}
 		}
 		return resolvedUser{uid: uint32(n), gid: uint32(n)}, nil
@@ -624,9 +626,28 @@ func copyPath(src, dst string, recursive bool, lu loginUser) error {
 		if !recursive {
 			return fmt.Errorf("%s is a directory (use recursive)", src)
 		}
+		// Copying a directory into its own subtree (e.g. /workspace ->
+		// /workspace/backup) would descend into the fresh copy and recurse
+		// until the disk fills; what cp refuses, we refuse.
+		if isSubPath(src, dst) {
+			return fmt.Errorf("cannot copy %s into itself (%s)", src, dst)
+		}
 		return copyTree(src, dst, lu)
 	}
+	// Same-file copy would O_TRUNC the destination (= the source) before
+	// reading a byte, destroying it.
+	if filepath.Clean(src) == filepath.Clean(dst) {
+		return fmt.Errorf("%s and %s are the same file", src, dst)
+	}
 	return copyFile(src, dst, info.Mode().Perm(), lu)
+}
+
+// isSubPath reports whether sub equals base or lives inside it, comparing
+// cleaned paths component-wise (no false positives on sibling prefixes like
+// /a/bc vs /a/b).
+func isSubPath(base, sub string) bool {
+	base, sub = filepath.Clean(base), filepath.Clean(sub)
+	return sub == base || strings.HasPrefix(sub, base+string(filepath.Separator))
 }
 
 // copyFile copies one regular file's contents and mode, then hands it to the
@@ -1287,9 +1308,15 @@ func writeCredentialFile(c guestproto.CredentialFile, lu loginUser) error {
 		_ = os.Chown(c.Path, int(lu.uid), int(lu.gid))
 		// Hand the credential directories (which MkdirAll may have created
 		// root-owned) up to but not including the home to the login user, so the
-		// agent can refresh tokens in place.
-		for d := dir; d != lu.home && d != "/" && d != "." && strings.HasPrefix(d, lu.home); d = filepath.Dir(d) {
-			_ = os.Chown(d, int(lu.uid), int(lu.gid))
+		// agent can refresh tokens in place. Guarded on a real home: with
+		// lu.home empty a bare-prefix check would be vacuously true for every
+		// path and this loop would chown system directories (e.g. /etc) to the
+		// unprivileged user. The separator-suffixed prefix also stops sibling
+		// escapes (/home/userX passing a /home/user prefix check).
+		if lu.home != "" && lu.home != "/" {
+			for d := dir; d != lu.home && strings.HasPrefix(d, lu.home+"/"); d = filepath.Dir(d) {
+				_ = os.Chown(d, int(lu.uid), int(lu.gid))
+			}
 		}
 	}
 	return nil
