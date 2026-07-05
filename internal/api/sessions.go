@@ -10,6 +10,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/joshjon/fletcher/internal/background"
 	"github.com/joshjon/fletcher/internal/errs"
 	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
@@ -487,7 +488,7 @@ func (s *SessionsService) ShellSession(ctx context.Context, stream *connect.Bidi
 	})
 
 	// Forward later client messages (keystrokes, resizes) until it hangs up.
-	go func() {
+	background.GoNamed(ctx, "api.SessionsService.shellReceive", func(context.Context) {
 		defer func() { _ = pw.Close() }()
 		defer close(resize)
 		for {
@@ -507,7 +508,7 @@ func (s *SessionsService) ShellSession(ctx context.Context, stream *connect.Bidi
 				}
 			}
 		}
-	}()
+	})
 
 	spec := runtime.ShellSpec{
 		Term:        start.GetTerm(),

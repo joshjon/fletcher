@@ -20,6 +20,7 @@ import (
 	"go.jetify.com/typeid"
 
 	"github.com/joshjon/fletcher/internal/appspec"
+	"github.com/joshjon/fletcher/internal/background"
 	"github.com/joshjon/fletcher/internal/errs"
 	"github.com/joshjon/fletcher/internal/image"
 	"github.com/joshjon/fletcher/internal/imagebuild"
@@ -129,18 +130,27 @@ func (m *Manager) StartBuildFromSession(ctx context.Context, devRef, subdir, ima
 	m.builds[buildID] = rec
 	m.buildsMu.Unlock()
 
-	go func() {
+	background.GoNamed(context.WithoutCancel(ctx), "session.build", func(gctx context.Context) {
 		// Detached: own context (not the request's), with a ceiling so a wedged
 		// build cannot run forever.
-		bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Minute)
+		bctx, cancel := context.WithTimeout(gctx, 30*time.Minute)
 		defer cancel()
+		// A panic must still move the record out of "building" so a polling
+		// client sees a failure instead of a forever-pending build; re-panic so
+		// background's recovery logs the stack.
+		defer func() {
+			if r := recover(); r != nil {
+				rec.finish(buildStateFailed, "", 0, fmt.Sprintf("build panicked: %v", r))
+				panic(r)
+			}
+		}()
 		name, port, berr := m.buildImageFromSession(bctx, devRef, subdir, imageName, force, rec)
 		if berr != nil {
 			rec.finish(buildStateFailed, "", 0, berr.Error())
 		} else {
 			rec.finish(buildStateSucceeded, name, port, "")
 		}
-	}()
+	})
 	return buildID, nil
 }
 
@@ -274,9 +284,14 @@ func (m *Manager) buildImageFromSession(ctx context.Context, devRef, subdir, ima
 // this call.
 func (m *Manager) buildInFork(ctx context.Context, contextGz []byte, logSink io.Writer) ([]byte, appspec.Spec, int, error) {
 	// Serialise builds: one at a time writes the shared persistent layer cache
-	// (M20, the self-hosted-runner model). A queued build's caller just waits.
-	m.buildCacheMu.Lock()
-	defer m.buildCacheMu.Unlock()
+	// (M20, the self-hosted-runner model). A queued build waits its turn but can
+	// still abandon the queue when its context is cancelled.
+	select {
+	case m.buildCacheSem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, appspec.Spec{}, 0, fmt.Errorf("wait for build slot: %w", ctx.Err())
+	}
+	defer func() { <-m.buildCacheSem }()
 
 	cachePath, err := m.ensureBuildCache(ctx)
 	if err != nil {
@@ -431,7 +446,8 @@ func (m *Manager) buildCachePath() string {
 
 // ensureBuildCache returns the path to the persistent layer-cache ext4 disk,
 // creating it if missing and resetting it (one cold build) if it has grown past
-// the reset threshold. Caller holds buildCacheMu, so there is no concurrent use.
+// the reset threshold. Caller holds the build cache semaphore, so there is no
+// concurrent use.
 func (m *Manager) ensureBuildCache(ctx context.Context) (string, error) {
 	path := m.buildCachePath()
 	if path == "" {
@@ -476,7 +492,7 @@ func (m *Manager) ensureBuildCache(ctx context.Context) (string, error) {
 // unclean fork shutdown leaves (exit 0/1/2); when it cannot (exit >= 4 - real
 // corruption like bad group-descriptor / bitmap checksums), the cache may hold
 // broken layers, so the caller resets it rather than risk an image of empty
-// files. The caller holds buildCacheMu, so the disk is not in use.
+// files. The caller holds the build cache semaphore, so the disk is not in use.
 func (m *Manager) buildCacheUsable(ctx context.Context, path string) bool {
 	err := exec.CommandContext(ctx, "e2fsck", "-p", path).Run() //nolint:gosec // daemon-owned path
 	if err == nil {

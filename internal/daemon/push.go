@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/joshjon/fletcher/internal/background"
 	"github.com/joshjon/fletcher/internal/push"
 	"github.com/joshjon/fletcher/internal/settings"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
@@ -59,7 +60,10 @@ func (n approvalNotifier) NotifyApprovalCreated(_ context.Context, approvalID st
 	// Deliberately detached from the request context: the push must outlive the
 	// approval write (whose ctx is about to be cancelled). pushToAll uses its
 	// own bounded context.
-	go n.push(approvalID) //nolint:gosec,contextcheck // intentionally request-context-independent; see comment
+	//nolint:contextcheck // intentionally request-context-independent; see comment
+	background.GoNamed(context.Background(), "daemon.approvalNotifier.push", func(context.Context) {
+		n.push(approvalID)
+	})
 }
 
 func (n approvalNotifier) push(approvalID string) {

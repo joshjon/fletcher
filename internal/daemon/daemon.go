@@ -27,6 +27,7 @@ import (
 	"github.com/joshjon/fletcher/internal/api"
 	"github.com/joshjon/fletcher/internal/approval"
 	"github.com/joshjon/fletcher/internal/audit"
+	"github.com/joshjon/fletcher/internal/background"
 	"github.com/joshjon/fletcher/internal/buildinfo"
 	"github.com/joshjon/fletcher/internal/egress"
 	"github.com/joshjon/fletcher/internal/events"
@@ -239,6 +240,36 @@ const (
 // forcing exit. Matches STANDARDS.md.
 const shutdownTimeout = 30 * time.Second
 
+// maxSessionMaxDiskGB caps session_max_disk_gb so int64(gb) << 30 stays far
+// from int64 overflow (above 2^33 GB the shift goes negative and the cap
+// silently inverts). 1 PiB is beyond any single box this runs on.
+const maxSessionMaxDiskGB = 1 << 20
+
+// validateConfig checks the effective boot config after the settings overlay,
+// collecting every violation into one error so the operator sees them together
+// (STANDARDS.md: the daemon collects validation errors at startup). Values set
+// via `fletcher settings set` are validated on write; this also covers the
+// flag/env path. SessionMaxDiskGB is clamped rather than fatal so a stored
+// out-of-range value can never stop the daemon (fixing it needs the daemon up).
+func validateConfig(cfg *Config, logger *slog.Logger) error {
+	var errs []error
+	if cfg.WireGuardListenPort < 0 || cfg.WireGuardListenPort > 65535 {
+		errs = append(errs, fmt.Errorf("wireguard port %d: must be a port number 1-65535", cfg.WireGuardListenPort))
+	}
+	if cfg.PairingPort < 0 || cfg.PairingPort > 65535 {
+		errs = append(errs, fmt.Errorf("pairing port %d: must be a port number 1-65535", cfg.PairingPort))
+	}
+	if cfg.SessionMaxDiskGB < 0 || cfg.SessionMaxDiskGB > maxSessionMaxDiskGB {
+		clamped := min(max(cfg.SessionMaxDiskGB, 0), maxSessionMaxDiskGB)
+		logger.Warn("session_max_disk_gb out of range; clamping",
+			slog.Int("value", cfg.SessionMaxDiskGB),
+			slog.Int("clamped", clamped),
+		)
+		cfg.SessionMaxDiskGB = clamped
+	}
+	return errors.Join(errs...)
+}
+
 // Run starts the daemon and blocks until ctx is cancelled or a fatal error
 // occurs. On shutdown it closes the listener, removes the socket file, and
 // closes the database.
@@ -252,7 +283,9 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := ensureDirs(cfg); err != nil {
 		return err
 	}
-	go checkForUpgrade(ctx, logger)
+	background.GoNamed(ctx, "daemon.checkForUpgrade", func(ctx context.Context) {
+		checkForUpgrade(ctx, logger)
+	})
 
 	db, err := sqlite.Open(ctx, cfg.DatabasePath)
 	if err != nil {
@@ -272,13 +305,18 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	logger = newLogger(cfg.LogLevel) // reflect a log_level setting
+	if err := validateConfig(&cfg, logger); err != nil {
+		return err
+	}
 
 	// Launch the image-update check here, before buildServices does the slower
 	// network setup, so its result is usually ready by the first `fletcher
 	// doctor` after a restart. Run owns the atomics; buildServices wires them
 	// into the admin service so Health reflects them.
 	imageUpdate := imageUpdateState{available: &atomic.Bool{}, checked: &atomic.Bool{}}
-	go checkForImageUpdate(ctx, cfg, logger, imageUpdate)
+	background.GoNamed(ctx, "daemon.checkForImageUpdate", func(ctx context.Context) {
+		checkForImageUpdate(ctx, cfg, logger, imageUpdate)
+	})
 
 	svcs, err := buildServices(ctx, cfg, flagCfg, queries, logger, imageUpdate)
 	if err != nil {
@@ -556,9 +594,9 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	if err := sessionMgr.ReconcilePorts(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile published ports: %w", err)
 	}
-	// Bring deployed app sessions (created --app) back up after a restart, in the
-	// background so booting their VMs does not delay daemon startup.
-	go sessionMgr.StartDeployedOnBoot(ctx)
+	// Deployed app sessions (created --app) come back up after a restart via
+	// startDeployedActor in the run group, so booting their VMs does not delay
+	// daemon startup and the sweep stops cleanly on shutdown.
 
 	// Public web (Milestone 8 Phase 2): serve `session publish --public` ports on
 	// the internet over HTTPS, certmagic terminating TLS and reverse-proxying into
@@ -725,22 +763,20 @@ type tunnelPeerSyncer struct {
 	logger *slog.Logger
 }
 
-// SyncPeers refreshes the tunnel's peer set. Returns nil if the tunnel
-// is not configured (Mac dev / no public endpoint).
-func (t *tunnelPeerSyncer) SyncPeers(ctx context.Context) error {
+// SyncPeers refreshes the tunnel's peer set. Best-effort: failures are
+// logged, and a nil tunnel (Mac dev / no public endpoint) is a no-op.
+func (t *tunnelPeerSyncer) SyncPeers(ctx context.Context) {
 	if t == nil || t.tunnel == nil {
-		return nil
+		return
 	}
 	configs, err := loadPeerConfigs(ctx, t.peers)
 	if err != nil {
 		t.logger.Error("load peers for tunnel sync", slog.String("err", err.Error()))
-		return err
+		return
 	}
 	if err := t.tunnel.SetPeers(ctx, configs); err != nil {
 		t.logger.Error("apply peers to tunnel", slog.String("err", err.Error()))
-		return err
 	}
-	return nil
 }
 
 // gatewayCatalog adapts the gateway-base-URL closure into the
@@ -782,6 +818,7 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 		g.Add(tlsServeActor(logger, "pairing", s.pairingSrv, s.pairingLn, "https://"+s.pairingAddr))
 	}
 	g.Add(supervisorActor(ctx, s.supervisor))
+	g.Add(startDeployedActor(ctx, s.sessions))
 	// Always on: ReapIdle no-ops when the idle timeout is 0, and the same tick
 	// drives the deploy-health sweep.
 	g.Add(sessionReaperActor(ctx, logger, s.sessions, s.cfg.SessionIdleTimeout))
@@ -810,6 +847,21 @@ func notifyRouterActor(ctx context.Context, r notifyRouter) (func() error, func(
 	runCtx, cancel := context.WithCancel(ctx)
 	return func() error {
 			r.run(runCtx)
+			return nil
+		}, func(error) {
+			cancel()
+		}
+}
+
+// startDeployedActor brings deployed app sessions (created --app) back up after
+// a restart. Run as a group actor (not a bare goroutine) so shutdown during the
+// boot sweep cancels it before the deferred db.Close races its queries; it then
+// parks until interrupted so the group keeps running.
+func startDeployedActor(ctx context.Context, mgr *session.Manager) (func() error, func(error)) {
+	bootCtx, cancel := context.WithCancel(ctx)
+	return func() error {
+			mgr.StartDeployedOnBoot(bootCtx)
+			<-bootCtx.Done()
 			return nil
 		}, func(error) {
 			cancel()

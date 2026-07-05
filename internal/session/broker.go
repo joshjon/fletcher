@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/joshjon/fletcher/internal/background"
 )
 
 // Broker runs the host-side forwarders for published session ports. Each
@@ -84,7 +86,9 @@ func (b *Broker) Open(pp PublishedPort) (int, error) {
 	b.listeners[pp.ID] = ln
 	b.mu.Unlock()
 
-	go b.serve(ln, pp.SessionID, uint16(pp.GuestPort)) //nolint:gosec // guest port is validated 1..65535 before publish
+	background.GoNamed(b.ctx, "session.Broker.serve", func(context.Context) {
+		b.serve(ln, pp.SessionID, uint16(pp.GuestPort)) //nolint:gosec // guest port is validated 1..65535 before publish
+	})
 	b.logger.Info("published port forwarding",
 		slog.String("session_id", pp.SessionID),
 		slog.Int("guest_port", pp.GuestPort),
@@ -125,14 +129,16 @@ func (b *Broker) serve(ln net.Listener, sessionID string, guestPort uint16) {
 		if err != nil {
 			return // listener closed (unpublish / shutdown)
 		}
-		go b.forward(client, sessionID, guestPort)
+		background.GoNamed(b.ctx, "session.Broker.forward", func(ctx context.Context) {
+			b.forward(ctx, client, sessionID, guestPort)
+		})
 	}
 }
 
 // forward dials the guest port (waking a stopped session) and splices the two
 // connections. The dialer keeps the session busy for the connection's lifetime.
-func (b *Broker) forward(client net.Conn, sessionID string, guestPort uint16) {
-	dialCtx, cancel := context.WithTimeout(b.ctx, guestDialTimeout)
+func (b *Broker) forward(ctx context.Context, client net.Conn, sessionID string, guestPort uint16) {
+	dialCtx, cancel := context.WithTimeout(ctx, guestDialTimeout)
 	upstream, err := b.dial(dialCtx, sessionID, guestPort)
 	cancel()
 	if err != nil {

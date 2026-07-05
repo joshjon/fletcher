@@ -147,11 +147,12 @@ type Manager struct {
 	buildsMu sync.Mutex
 	builds   map[string]*buildRecord
 
-	// buildCacheMu serialises builds so only one writes the shared persistent
+	// buildCacheSem serialises builds so only one writes the shared persistent
 	// buildah layer cache (M20) at a time - the GitHub self-hosted-runner model
 	// (local cache + single concurrency), which avoids a shared-mutable-store
-	// race without locking the cache itself.
-	buildCacheMu sync.Mutex
+	// race without locking the cache itself. A 1-slot semaphore rather than a
+	// mutex so a queued build can bail out when its context is cancelled.
+	buildCacheSem chan struct{}
 
 	// startLocks serialises Start per session id so concurrent wakes (e.g.
 	// several inbound connections to a published port at once) boot at most one
@@ -237,6 +238,7 @@ func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRunti
 		lastAppRestarts: make(map[string]int64),
 		crashLoopWarned: make(map[string]time.Time),
 		builds:          make(map[string]*buildRecord),
+		buildCacheSem:   make(chan struct{}, 1),
 	}
 	m.opts.Store(&opts)
 	return m
