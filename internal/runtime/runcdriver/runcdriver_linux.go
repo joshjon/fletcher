@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -153,7 +154,9 @@ func fwdSocketPath(i int) string {
 // over loopback with no egress; otherwise the command runs directly.
 func (d *Driver) jobArgsAndMounts(spec runtime.Spec) ([]string, []runtime.Mount) {
 	command := []string{"/bin/sh", "-c", spec.Command}
-	mounts := spec.Mounts
+	// Clone before appending: appending to the caller's slice could write into
+	// its backing array when it has spare capacity.
+	mounts := slices.Clone(spec.Mounts)
 
 	if d.forwarderBin == "" || len(d.forwards) == 0 {
 		return command, mounts

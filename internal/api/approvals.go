@@ -32,6 +32,12 @@ func NewApprovalsService(backend ApprovalsBackend) *ApprovalsService {
 	return &ApprovalsService{backend: backend}
 }
 
+// maxApprovalTTLSeconds caps a requested approval TTL so the seconds-to-
+// Duration multiplication cannot overflow int64 and wrap negative (which
+// would silently fall back to the default TTL). ~68 years is effectively
+// "never expires" for a pending approval.
+const maxApprovalTTLSeconds = 1 << 31
+
 // CreateApproval inserts a new pending approval.
 func (s *ApprovalsService) CreateApproval(ctx context.Context, req *connect.Request[fletcherv1.CreateApprovalRequest]) (*connect.Response[fletcherv1.CreateApprovalResponse], error) {
 	m := req.Msg
@@ -39,7 +45,7 @@ func (s *ApprovalsService) CreateApproval(ctx context.Context, req *connect.Requ
 		Action:        m.GetAction(),
 		Justification: m.GetJustification(),
 		Requester:     m.GetRequester(),
-		TTL:           time.Duration(m.GetTtlSeconds()) * time.Second,
+		TTL:           time.Duration(min(m.GetTtlSeconds(), maxApprovalTTLSeconds)) * time.Second,
 	})
 	if err != nil {
 		return nil, err

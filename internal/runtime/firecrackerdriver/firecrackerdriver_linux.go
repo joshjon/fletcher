@@ -471,6 +471,12 @@ func acceptCtx(ctx context.Context, ln net.Listener) (net.Conn, error) {
 	select {
 	case <-ctx.Done():
 		_ = ln.Close() // unblock the Accept goroutine
+		// The Accept may have won the race and produced a conn; Close makes it
+		// return promptly, so wait for the result and close any conn it carries
+		// rather than leak the fd.
+		if r := <-ch; r.conn != nil {
+			_ = r.conn.Close()
+		}
 		return nil, ctx.Err()
 	case r := <-ch:
 		return r.conn, r.err

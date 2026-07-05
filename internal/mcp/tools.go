@@ -539,6 +539,11 @@ func parsePublishArgs(req mcpgo.CallToolRequest) (publishArgs, string) {
 		return args, "entrypoint_json/cmd_json/working_dir apply to session commits only (a registry image carries its own run config)"
 	}
 	args.exposedPort = int(req.GetFloat("exposed_port", 0))
+	// 0 means unset (no default publish port); anything else must be a real
+	// port so a nonsense value cannot flow into the template metadata.
+	if args.exposedPort < 0 || args.exposedPort > 65535 {
+		return args, "exposed_port must be a port number 1-65535"
+	}
 	args.force = req.GetBool("force", false)
 	args.wait = time.Duration(req.GetFloat("wait_seconds", publishWaitDefault.Seconds())) * time.Second
 	if args.wait <= 0 {

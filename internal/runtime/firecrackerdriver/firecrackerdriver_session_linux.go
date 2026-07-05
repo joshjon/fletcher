@@ -517,7 +517,12 @@ func (s *fcSession) Shell(ctx context.Context, spec fcruntime.ShellSpec, stdin i
 				return 0, werr
 			}
 		case guestproto.KindExit:
-			code, _ := guestproto.DecodeExit(payload)
+			// A truncated exit frame must not read as success (matches
+			// demuxFrames' handling of the same decode).
+			code, derr := guestproto.DecodeExit(payload)
+			if derr != nil {
+				return 0, fmt.Errorf("firecracker: shell exit frame: %w", derr)
+			}
 			return code, nil
 		}
 	}

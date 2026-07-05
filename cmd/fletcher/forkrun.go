@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/urfave/cli/v3"
 )
@@ -70,7 +71,13 @@ func startForwarder(listenAddr, socketPath string) error {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
-				return // listener closed on process exit
+				if errors.Is(err, net.ErrClosed) {
+					return // listener closed on process exit
+				}
+				// A transient accept failure (e.g. EMFILE) must not kill the
+				// forwarder for the fork's lifetime; back off briefly and retry.
+				time.Sleep(100 * time.Millisecond)
+				continue
 			}
 			go proxyToUnix(conn, socketPath)
 		}

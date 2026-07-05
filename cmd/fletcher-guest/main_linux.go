@@ -264,12 +264,24 @@ func serve() {
 		return
 	}
 	defer func() { _ = ln.Close() }()
+	acceptLoop(ln, serveControl)
+}
+
+// acceptLoop hands each accepted connection to handle on its own goroutine.
+// Transient accept errors (e.g. EMFILE) are retried after a short sleep so one
+// failure does not kill the loop for the VM's lifetime; it returns only when
+// the listener is closed.
+func acceptLoop(ln net.Listener, handle func(net.Conn)) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			return
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+			continue
 		}
-		go serveControl(conn)
+		go handle(conn)
 	}
 }
 
@@ -306,13 +318,7 @@ func serveSSHRelay() {
 		return
 	}
 	defer func() { _ = ln.Close() }()
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		go relayToSSHD(conn)
-	}
+	acceptLoop(ln, relayToSSHD)
 }
 
 func relayToSSHD(conn net.Conn) {
@@ -346,13 +352,7 @@ func servePortRelay() {
 		return
 	}
 	defer func() { _ = ln.Close() }()
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		go relayToPort(conn)
-	}
+	acceptLoop(ln, relayToPort)
 }
 
 // relayToPort reads the target port header from conn, dials that loopback port
@@ -1338,15 +1338,9 @@ func startForward(f guestproto.Forward) error {
 	if err != nil {
 		return err
 	}
-	go func() {
-		for {
-			client, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go relayToVsock(client, f.VsockPort)
-		}
-	}()
+	go acceptLoop(ln, func(client net.Conn) {
+		relayToVsock(client, f.VsockPort)
+	})
 	return nil
 }
 
