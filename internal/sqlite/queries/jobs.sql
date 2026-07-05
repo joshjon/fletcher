@@ -33,20 +33,20 @@ UPDATE jobs
 SET status = ?, updated_at = ?
 WHERE id = ?;
 
--- name: MarkJobStarted :exec
+-- name: MarkJobStarted :execrows
 UPDATE jobs
 SET status = 'running', started_at = ?, updated_at = ?
 WHERE id = ? AND status = 'queued';
 
--- name: MarkJobSucceeded :exec
+-- name: MarkJobSucceeded :execrows
 UPDATE jobs
 SET status = 'succeeded', exit_code = ?, completed_at = ?, updated_at = ?
-WHERE id = ?;
+WHERE id = ? AND status = 'running';
 
--- name: MarkJobFailed :exec
+-- name: MarkJobFailed :execrows
 UPDATE jobs
 SET status = 'failed', exit_code = ?, error_message = ?, completed_at = ?, updated_at = ?
-WHERE id = ?;
+WHERE id = ? AND status IN ('running', 'scheduled');
 
 -- name: CancelJob :execrows
 UPDATE jobs

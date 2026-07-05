@@ -167,7 +167,17 @@ func (s *Supervisor) scheduleDueCronJobs(ctx context.Context) {
 			continue
 		}
 
-		next := sched.Next(now).Unix()
+		// ParseSchedule rejects never-firing schedules on every write path,
+		// but rows written before that guard existed could still compute a
+		// zero next fire; failing the definition beats re-firing every tick.
+		nextTime := sched.Next(now)
+		if nextTime.IsZero() {
+			s.logger.Error("cron job schedule never fires again; marking failed",
+				slog.String("job_id", c.ID), slog.String("schedule", c.Schedule))
+			s.failCronDefinition(ctx, c.ID, "schedule never fires", nowUnix)
+			continue
+		}
+		next := nextTime.Unix()
 		if uErr := s.q.SetJobNextRun(ctx, sqliteq.SetJobNextRunParams{
 			NextRunAt: &next,
 			UpdatedAt: nowUnix,
@@ -187,7 +197,7 @@ func (s *Supervisor) scheduleDueCronJobs(ctx context.Context) {
 // longer parses) so it stops being selected as due.
 func (s *Supervisor) failCronDefinition(ctx context.Context, id, message string, nowUnix int64) {
 	code := int64(-1)
-	if err := s.q.MarkJobFailed(ctx, sqliteq.MarkJobFailedParams{
+	if _, err := s.q.MarkJobFailed(ctx, sqliteq.MarkJobFailedParams{
 		ExitCode:     &code,
 		ErrorMessage: &message,
 		CompletedAt:  &nowUnix,
@@ -277,12 +287,19 @@ func (s *Supervisor) pickAndRun(ctx context.Context) {
 
 func (s *Supervisor) startJob(parentCtx context.Context, row sqliteq.Job) {
 	now := time.Now().Unix()
-	if err := s.q.MarkJobStarted(parentCtx, sqliteq.MarkJobStartedParams{
+	claimed, err := s.q.MarkJobStarted(parentCtx, sqliteq.MarkJobStartedParams{
 		StartedAt: &now,
 		UpdatedAt: now,
 		ID:        row.ID,
-	}); err != nil {
+	})
+	if err != nil {
 		s.logger.Error("mark job started", slog.String("job_id", row.ID), slog.String("err", err.Error()))
+		return
+	}
+	if claimed == 0 {
+		// The job left "queued" between the list and the claim (e.g. the user
+		// cancelled it); running it now would resurrect a cancelled job.
+		s.logger.Info("job no longer queued; skipping", slog.String("job_id", row.ID))
 		return
 	}
 	s.publishEvent("running", row.ID, row.Name)
@@ -411,13 +428,21 @@ func joinErrOutput(errMsg, output string) string {
 func (s *Supervisor) markSucceeded(jobID string, exitCode int32) {
 	now := time.Now().Unix()
 	ec := int64(exitCode)
-	if err := s.q.MarkJobSucceeded(context.Background(), sqliteq.MarkJobSucceededParams{
+	applied, err := s.q.MarkJobSucceeded(context.Background(), sqliteq.MarkJobSucceededParams{
 		ExitCode:    &ec,
 		CompletedAt: &now,
 		UpdatedAt:   now,
 		ID:          jobID,
-	}); err != nil {
+	})
+	if err != nil {
 		s.logger.Error("mark succeeded", slog.String("job_id", jobID), slog.String("err", err.Error()))
+		return
+	}
+	if applied == 0 {
+		// The job already left "running" (a cancel raced completion); keep the
+		// cancelled status and don't announce a success that didn't stick.
+		s.logger.Info("job no longer running; success not recorded", slog.String("job_id", jobID))
+		return
 	}
 	s.publishEvent("succeeded", jobID, "")
 }
@@ -434,8 +459,14 @@ func (s *Supervisor) markFailed(jobID string, exitCode int32, message string) {
 	if message != "" {
 		params.ErrorMessage = &message
 	}
-	if err := s.q.MarkJobFailed(context.Background(), params); err != nil {
+	applied, err := s.q.MarkJobFailed(context.Background(), params)
+	if err != nil {
 		s.logger.Error("mark failed", slog.String("job_id", jobID), slog.String("err", err.Error()))
+		return
+	}
+	if applied == 0 {
+		s.logger.Info("job already terminal; failure not recorded", slog.String("job_id", jobID))
+		return
 	}
 	s.publishEvent("failed", jobID, "")
 }

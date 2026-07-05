@@ -220,11 +220,13 @@ func TestSupervisorReconcilesOrphanRunningOnBoot(t *testing.T) {
 	// Simulate a daemon crash: promote queued → running directly, leaving
 	// the row in the orphan state the supervisor should reconcile on boot.
 	now := time.Now().Unix()
-	require.NoError(t, r.queries.MarkJobStarted(ctx, sqliteq.MarkJobStartedParams{
+	claimed, err := r.queries.MarkJobStarted(ctx, sqliteq.MarkJobStartedParams{
 		StartedAt: &now,
 		UpdatedAt: now,
 		ID:        created.ID,
-	}))
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, claimed)
 
 	runCtx, cancel := context.WithCancel(ctx)
 	wait := r.start(runCtx)

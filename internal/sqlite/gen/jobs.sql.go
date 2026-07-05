@@ -307,10 +307,10 @@ func (q *Queries) ListJobsByStatus(ctx context.Context, arg ListJobsByStatusPara
 	return items, nil
 }
 
-const markJobFailed = `-- name: MarkJobFailed :exec
+const markJobFailed = `-- name: MarkJobFailed :execrows
 UPDATE jobs
 SET status = 'failed', exit_code = ?, error_message = ?, completed_at = ?, updated_at = ?
-WHERE id = ?
+WHERE id = ? AND status IN ('running', 'scheduled')
 `
 
 type MarkJobFailedParams struct {
@@ -321,18 +321,21 @@ type MarkJobFailedParams struct {
 	ID           string
 }
 
-func (q *Queries) MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) error {
-	_, err := q.db.ExecContext(ctx, markJobFailed,
+func (q *Queries) MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markJobFailed,
 		arg.ExitCode,
 		arg.ErrorMessage,
 		arg.CompletedAt,
 		arg.UpdatedAt,
 		arg.ID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
-const markJobStarted = `-- name: MarkJobStarted :exec
+const markJobStarted = `-- name: MarkJobStarted :execrows
 UPDATE jobs
 SET status = 'running', started_at = ?, updated_at = ?
 WHERE id = ? AND status = 'queued'
@@ -344,15 +347,18 @@ type MarkJobStartedParams struct {
 	ID        string
 }
 
-func (q *Queries) MarkJobStarted(ctx context.Context, arg MarkJobStartedParams) error {
-	_, err := q.db.ExecContext(ctx, markJobStarted, arg.StartedAt, arg.UpdatedAt, arg.ID)
-	return err
+func (q *Queries) MarkJobStarted(ctx context.Context, arg MarkJobStartedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markJobStarted, arg.StartedAt, arg.UpdatedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
-const markJobSucceeded = `-- name: MarkJobSucceeded :exec
+const markJobSucceeded = `-- name: MarkJobSucceeded :execrows
 UPDATE jobs
 SET status = 'succeeded', exit_code = ?, completed_at = ?, updated_at = ?
-WHERE id = ?
+WHERE id = ? AND status = 'running'
 `
 
 type MarkJobSucceededParams struct {
@@ -362,14 +368,17 @@ type MarkJobSucceededParams struct {
 	ID          string
 }
 
-func (q *Queries) MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) error {
-	_, err := q.db.ExecContext(ctx, markJobSucceeded,
+func (q *Queries) MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markJobSucceeded,
 		arg.ExitCode,
 		arg.CompletedAt,
 		arg.UpdatedAt,
 		arg.ID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const setJobNextRun = `-- name: SetJobNextRun :exec

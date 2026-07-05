@@ -381,6 +381,13 @@ func ParseSchedule(spec string) (cron.Schedule, error) {
 	if err != nil {
 		return nil, errs.Newf(errs.CategoryInvalidArgument, "invalid cron schedule %q: %v", spec, err)
 	}
+	// A parseable schedule can still never fire (e.g. "0 0 30 2 *", Feb 30):
+	// Next returns the zero time when no match exists within its search
+	// horizon. Storing that zero as next_run_at would make the job perpetually
+	// due, so reject it here where every write path validates.
+	if sched.Next(time.Now()).IsZero() {
+		return nil, errs.Newf(errs.CategoryInvalidArgument, "cron schedule %q never fires", spec)
+	}
 	return sched, nil
 }
 

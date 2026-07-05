@@ -60,9 +60,9 @@ type Querier interface {
 	ListSessionsByVolume(ctx context.Context, volumeID *string) ([]Session, error)
 	ListSettings(ctx context.Context) ([]Setting, error)
 	ListVolumes(ctx context.Context) ([]Volume, error)
-	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) error
-	MarkJobStarted(ctx context.Context, arg MarkJobStartedParams) error
-	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) error
+	MarkJobFailed(ctx context.Context, arg MarkJobFailedParams) (int64, error)
+	MarkJobStarted(ctx context.Context, arg MarkJobStartedParams) (int64, error)
+	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) (int64, error)
 	SetJobNextRun(ctx context.Context, arg SetJobNextRunParams) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateJobSchedule(ctx context.Context, arg UpdateJobScheduleParams) error
