@@ -2057,6 +2057,36 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**Repo-wide code-quality and tech-debt sweep (2026-07-05, daemon `e7b8f3b`..`4b6dcc9`,
+17 commits).** Six parallel audits (error handling, concurrency, defensive safety,
+style/API design, test quality, modernization) over the whole Go tree, then fixes in
+severity order. Real bugs fixed: an unsatisfiable cron schedule (e.g. Feb 30) forked a
+fresh VM every poll tick forever; a job cancelled between the due-list read and the
+claim still ran and its terminal status overwrote "cancelled" (claim + terminal updates
+are now guarded :execrows); the supervisor and remote-API run-group actors had no-op
+interrupts, so any other actor's fatal error wedged the daemon until kill -9; session
+Stop/Delete/Restart bypassed the per-session start lock, letting a delete race a
+published-port wake into a running VM with no session row (unreachable, holding a
+multi-GiB unlinked fork); the mock driver's cancellation killed only the direct child,
+leaking grandchildren to the host and silently burning the full drain deadline per
+cancelled job; guest file ops could recurse a directory into itself until the VM disk
+filled; and the credential-seeding chown escaped to /etc when the login user had an
+empty home. Robustness: panic recovery at the daemon's goroutine roots via
+`background.Go` (the standard existed, unused), gateway request bodies capped against
+fork OOM, NAT-PMP responses actually verified, typed SQLite/snapshot error checks
+replacing string matching, boundary port/TTL/disk-cap validation, and the images API no
+longer re-labels internal errors past the sanitizer. API polish: session
+Create/Update/Publish/UploadFile take params structs (Create was 9 positionals),
+SessionsBackend is composed from four per-concern interfaces, and the modernize linter
+is now enabled to hold the idiom line. Tests: nine new files covering the untested
+pure logic at the trust edges (runc OCI config 0->46%, guestproto 48->95% plus the
+repo's first fuzz targets, appspec 0->84%, push 22->78%), synctest replacing real-clock
+sleeps per STANDARDS.md, t.Parallel halving the slow suites, goleak on the
+goroutine-heavy packages, and t.Context throughout. One deliberate skip: the guestproto
+snake_case JSON tags (`app_restarts`, `control_mode`) stay - renaming a live wire
+protocol for naming consistency is a bad trade while stale-guest compatibility matters
+(see `356fbd4`).
+
 **Corrupt build cache no longer emits empty images (2026-06-24, daemon `6a4310c`).**
 Second face of the crash-inconsistency theme (after the fork self-heal): a daemon kill
 can leave the persistent buildah layer cache's ext4 corrupt (bad group-descriptor /
