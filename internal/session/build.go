@@ -353,8 +353,11 @@ func (m *Manager) buildInFork(ctx context.Context, contextGz []byte, logSink io.
 	}
 
 	rootfsRes, err := m.execIn(ctx, handle, "base64 -w0 "+buildRootfsPath)
-	if err != nil || rootfsRes.ExitCode != 0 {
-		return nil, appspec.Spec{}, 0, fmt.Errorf("read built rootfs: %w%s", err, rootfsRes.Stderr)
+	if err != nil {
+		return nil, appspec.Spec{}, 0, fmt.Errorf("read built rootfs: %w", err)
+	}
+	if rootfsRes.ExitCode != 0 {
+		return nil, appspec.Spec{}, 0, fmt.Errorf("read built rootfs: exit %d: %s", rootfsRes.ExitCode, rootfsRes.Stderr)
 	}
 	rootfsGz, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rootfsRes.Stdout))
 	if err != nil {
@@ -364,13 +367,23 @@ func (m *Manager) buildInFork(ctx context.Context, contextGz []byte, logSink io.
 	if err != nil {
 		return nil, appspec.Spec{}, 0, fmt.Errorf("read image config: %w", err)
 	}
-	spec, exposedPort := parseOCIConfig(cfgRes.Stdout)
+	if cfgRes.ExitCode != 0 {
+		// Committing without the config would deploy an image with no
+		// entrypoint and port 0, failing mysteriously at boot instead of here.
+		return nil, appspec.Spec{}, 0, fmt.Errorf("read image config: exit %d: %s", cfgRes.ExitCode, cfgRes.Stderr)
+	}
+	spec, exposedPort, err := parseOCIConfig(cfgRes.Stdout)
+	if err != nil {
+		return nil, appspec.Spec{}, 0, fmt.Errorf("parse image config: %w", err)
+	}
 	return rootfsGz, spec, exposedPort, nil
 }
 
 // parseOCIConfig pulls the app launch spec and the image's lowest EXPOSE out of
-// a raw `buildah inspect` dump (its OCIv1.config object).
-func parseOCIConfig(jsonStr string) (appspec.Spec, int) {
+// a raw `buildah inspect` dump (its OCIv1.config object). A dump that does not
+// parse is an error: silently deploying an empty spec would fail at boot with
+// no hint of the real cause.
+func parseOCIConfig(jsonStr string) (appspec.Spec, int, error) {
 	var inspect struct {
 		OCIv1 struct {
 			Config struct {
@@ -383,7 +396,9 @@ func parseOCIConfig(jsonStr string) (appspec.Spec, int) {
 			} `json:"config"`
 		} `json:"OCIv1"`
 	}
-	_ = json.Unmarshal([]byte(strings.TrimSpace(jsonStr)), &inspect)
+	if err := json.Unmarshal([]byte(strings.TrimSpace(jsonStr)), &inspect); err != nil {
+		return appspec.Spec{}, 0, fmt.Errorf("unmarshal buildah inspect output: %w", err)
+	}
 	cfg := inspect.OCIv1.Config
 	spec := appspec.Spec{
 		Entrypoint: cfg.Entrypoint,
@@ -403,7 +418,7 @@ func parseOCIConfig(jsonStr string) (appspec.Spec, int) {
 			best = n
 		}
 	}
-	return spec, best
+	return spec, best, nil
 }
 
 // buildCachePath is the persistent build cache disk, alongside the images dir.

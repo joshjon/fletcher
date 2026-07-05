@@ -29,6 +29,7 @@ import (
 	"github.com/joshjon/fletcher/internal/job"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/snapshot"
+	"github.com/joshjon/fletcher/internal/sqlite"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
 )
 
@@ -418,9 +419,8 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 		EnvVars:      envJSON,
 	})
 	if err != nil {
-		_ = handle.Stop(context.WithoutCancel(ctx))
-		_ = m.snapshot.Delete(context.WithoutCancel(ctx), fork.ID)
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		m.discardUnrecorded(ctx, handle, sessionID, fork.ID)
+		if sqlite.IsUniqueViolation(err) {
 			return Session{}, errs.Newf(errs.CategoryConflict, "a session named %q already exists", name)
 		}
 		return Session{}, fmt.Errorf("record session: %w", err)
@@ -429,6 +429,17 @@ func (m *Manager) Create(ctx context.Context, name, image, egressPolicy, gateway
 	m.putHandle(sessionID, handle)
 	m.publishEvent(string(StateRunning), sessionID, name)
 	return m.enrich(ctx, sessionFromRow(row)), nil
+}
+
+// discardUnrecorded tears down a VM that booted but whose session row failed
+// to insert: stop it, drop the VM state Stop hibernated (nothing will ever
+// resume an unrecorded session; leaving it strands disk until the next boot's
+// orphan reclaim), and delete the fork.
+func (m *Manager) discardUnrecorded(ctx context.Context, handle runtime.SessionHandle, sessionID, forkID string) {
+	ctx = context.WithoutCancel(ctx)
+	_ = handle.Stop(ctx)
+	_ = m.runtime.DiscardSession(ctx, sessionID)
+	_ = m.snapshot.Delete(ctx, forkID)
 }
 
 // resolveCredentials turns the requested agent-login names (or the box default
@@ -495,9 +506,13 @@ func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 	lock := m.startLock(row.ID)
 	lock.Lock()
 	defer lock.Unlock()
+	return m.startLocked(ctx, row.ID)
+}
 
+// startLocked is Start's body; the caller must hold startLock(id).
+func (m *Manager) startLocked(ctx context.Context, id string) (Session, error) {
 	// Re-read under the lock: a concurrent caller may have started it already.
-	row, err = m.lookup(ctx, row.ID)
+	row, err := m.lookup(ctx, id)
 	if err != nil {
 		return Session{}, err
 	}
@@ -560,9 +575,25 @@ func nilIfEmptyStr(s string) *string {
 	return &s
 }
 
-// Stop stops a running session's VM, keeping its fork on disk.
+// Stop stops a running session's VM, keeping its fork on disk. It serialises
+// on the same per-session lock as Start so a stop cannot interleave with a
+// concurrent wake (e.g. inbound traffic on a published port) and leave the DB
+// state contradicting the live handle.
 func (m *Manager) Stop(ctx context.Context, ref string) (Session, error) {
 	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return Session{}, err
+	}
+	lock := m.startLock(row.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	return m.stopLocked(ctx, row.ID)
+}
+
+// stopLocked is Stop's body; the caller must hold startLock(id).
+func (m *Manager) stopLocked(ctx context.Context, id string) (Session, error) {
+	// Re-read under the lock: a concurrent Start/Stop may have moved the state.
+	row, err := m.lookup(ctx, id)
 	if err != nil {
 		return Session{}, err
 	}
@@ -579,9 +610,23 @@ func (m *Manager) Stop(ctx context.Context, ref string) (Session, error) {
 	return sessionFromRow(row), nil
 }
 
-// Delete stops the VM (if running) and destroys the fork.
+// Delete stops the VM (if running) and destroys the fork. It holds the
+// per-session lock so a concurrent wake cannot boot the VM from the fork this
+// is unlinking (which would leave a running VM with no session row, invisible
+// to Stop, Delete, and the reaper).
 func (m *Manager) Delete(ctx context.Context, ref string) (bool, error) {
 	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	lock := m.startLock(row.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	// Re-read under the lock: a concurrent Delete may have removed it.
+	row, err = m.lookup(ctx, row.ID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return false, nil
@@ -613,6 +658,10 @@ func (m *Manager) Delete(ctx context.Context, ref string) (bool, error) {
 	if _, derr := m.q.DeleteSession(ctx, row.ID); derr != nil {
 		return false, fmt.Errorf("delete session: %w", derr)
 	}
+	// Session ids are never reused, so the lock entry can go. A goroutine still
+	// blocked on this mutex re-reads the row after acquiring it and gets
+	// NotFound; a later caller creating a fresh mutex for the dead id is fine.
+	m.startLocks.Delete(row.ID)
 	m.publishEvent("deleted", row.ID, row.Name)
 	return true, nil
 }
@@ -770,11 +819,21 @@ const defaultLogTailLines = 200
 // fork. For a run_app (deploy) session this re-runs the image's app, picking up
 // any env or policy change since the last boot.
 func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
+	if err := m.requireRuntime(); err != nil {
+		return Session{}, err
+	}
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return Session{}, err
 	}
-	if _, err := m.Stop(ctx, row.ID); err != nil {
+	// Hold the per-session lock across the whole stop-discard-start sequence:
+	// released between the steps, a published-port wake could boot the VM
+	// after the stop, making startLocked below see "already running" and skip
+	// the cold boot the restart exists to force.
+	lock := m.startLock(row.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := m.stopLocked(ctx, row.ID); err != nil {
 		return Session{}, err
 	}
 	// Stop hibernates (snapshots memory), so a plain Start would resume the old
@@ -788,7 +847,7 @@ func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
 				slog.String("session_id", row.ID), slog.String("err", derr.Error()))
 		}
 	}
-	return m.Start(ctx, row.ID)
+	return m.startLocked(ctx, row.ID)
 }
 
 // StreamLogs tails the session's app log into w. With follow it stays open
@@ -1007,7 +1066,7 @@ func (m *Manager) CommitImage(ctx context.Context, ref string, p CommitImagePara
 	}
 
 	if err := committer.CommitTemplate(ctx, row.ForkID, name, p.Force, extraFiles); err != nil {
-		if strings.Contains(err.Error(), "already exists") {
+		if errors.Is(err, snapshot.ErrTemplateExists) {
 			return "", errs.Newf(errs.CategoryConflict, "image %q already exists (use force to replace it)", name)
 		}
 		return "", fmt.Errorf("commit session fork: %w", err)
@@ -1107,12 +1166,12 @@ func (m *Manager) Redeploy(ctx context.Context, ref, newImage string) (Session, 
 		image = newImage
 	}
 
-	// Hold the per-session start lock across the disk swap so a concurrent wake
-	// cannot boot the old fork mid-redeploy. Released before the final Start
-	// (which re-acquires it); the new fork is committed by then, so whichever
-	// caller boots uses it.
+	// Hold the per-session start lock across the disk swap and the boot so a
+	// concurrent wake can neither boot the old fork mid-redeploy nor interleave
+	// between the swap and the restart.
 	lock := m.startLock(row.ID)
 	lock.Lock()
+	defer lock.Unlock()
 	if handle := m.takeHandle(row.ID); handle != nil {
 		// Flush the guest first: this disk becomes the rollback target.
 		m.syncGuest(ctx, handle, row.ID)
@@ -1121,13 +1180,11 @@ func (m *Manager) Redeploy(ctx context.Context, ref, newImage string) (Session, 
 		}
 	}
 	if err := m.setState(ctx, row.ID, StateStopped); err != nil {
-		lock.Unlock()
 		return Session{}, err
 	}
 
 	fork, err := m.snapshot.Create(ctx, image)
 	if err != nil {
-		lock.Unlock()
 		return Session{}, fmt.Errorf("re-fork session from image %q: %w", image, err)
 	}
 	retiredForkID, retiredForkPath := row.ForkID, row.ForkPath
@@ -1142,7 +1199,6 @@ func (m *Manager) Redeploy(ctx context.Context, ref, newImage string) (Session, 
 		ID:           row.ID,
 	}); err != nil {
 		_ = m.snapshot.Delete(context.WithoutCancel(ctx), fork.ID)
-		lock.Unlock()
 		return Session{}, fmt.Errorf("point session at new fork: %w", err)
 	}
 	// Only one rollback level is kept: reclaim the fork the retired one replaces.
@@ -1151,9 +1207,8 @@ func (m *Manager) Redeploy(ctx context.Context, ref, newImage string) (Session, 
 			m.logger.Warn("delete dropped previous fork after redeploy", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
 		}
 	}
-	lock.Unlock()
 
-	return m.Start(ctx, row.ID)
+	return m.startLocked(ctx, row.ID)
 }
 
 // Rollback swaps a session back to the fork its last redeploy retired and
@@ -1176,6 +1231,7 @@ func (m *Manager) Rollback(ctx context.Context, ref string) (Session, error) {
 
 	lock := m.startLock(row.ID)
 	lock.Lock()
+	defer lock.Unlock()
 	if handle := m.takeHandle(row.ID); handle != nil {
 		// Flush the guest first: this disk becomes the swap-forward target.
 		m.syncGuest(ctx, handle, row.ID)
@@ -1184,7 +1240,6 @@ func (m *Manager) Rollback(ctx context.Context, ref string) (Session, error) {
 		}
 	}
 	if err := m.setState(ctx, row.ID, StateStopped); err != nil {
-		lock.Unlock()
 		return Session{}, err
 	}
 	curID, curPath := row.ForkID, row.ForkPath
@@ -1197,12 +1252,10 @@ func (m *Manager) Rollback(ctx context.Context, ref string) (Session, error) {
 		UpdatedAt:    time.Now().Unix(),
 		ID:           row.ID,
 	}); err != nil {
-		lock.Unlock()
 		return Session{}, fmt.Errorf("swap session forks: %w", err)
 	}
-	lock.Unlock()
 
-	return m.Start(ctx, row.ID)
+	return m.startLocked(ctx, row.ID)
 }
 
 // Shell opens an interactive PTY in a running session, bridging the caller's
@@ -1387,7 +1440,7 @@ func (m *Manager) Publish(ctx context.Context, ref string, guestPort int, name s
 		if m.broker != nil {
 			m.broker.Close(pp.ID)
 		}
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") && host != "" {
+		if sqlite.IsUniqueViolation(err) && host != "" {
 			return PublishedPort{}, errs.Newf(errs.CategoryConflict, "host %q is already in use by another published port", host)
 		}
 		return PublishedPort{}, fmt.Errorf("record published port: %w", err)
@@ -1674,8 +1727,7 @@ func (m *Manager) ReapIdle(ctx context.Context) (int, error) {
 		if time.Since(lastActivity(r)) < m.opt().IdleTimeout {
 			continue
 		}
-		if _, serr := m.Stop(ctx, r.ID); serr != nil {
-			m.logger.Warn("auto-stop idle session", slog.String("session_id", r.ID), slog.String("err", serr.Error()))
+		if !m.stopIfIdle(ctx, r.ID) {
 			continue
 		}
 		m.logger.Info("auto-stopped idle session", slog.String("session_id", r.ID), slog.String("name", r.Name))
@@ -1686,6 +1738,28 @@ func (m *Manager) ReapIdle(ctx context.Context) (int, error) {
 		stopped++
 	}
 	return stopped, nil
+}
+
+// stopIfIdle hibernates one session for the reaper, re-checking state and
+// busy count under the per-session lock: an exec/shell/upload that started
+// after the reaper's unlocked scan must not have its VM stopped mid-flight.
+// Returns whether the session was stopped.
+func (m *Manager) stopIfIdle(ctx context.Context, id string) bool {
+	lock := m.startLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	row, err := m.lookup(ctx, id)
+	if err != nil {
+		return false
+	}
+	if State(row.State) != StateRunning || m.busyCount(row.ID) > 0 {
+		return false
+	}
+	if _, err := m.stopLocked(ctx, row.ID); err != nil {
+		m.logger.Warn("auto-stop idle session", slog.String("session_id", row.ID), slog.String("err", err.Error()))
+		return false
+	}
+	return true
 }
 
 // crashLoopThreshold is how many app restarts between two health sweeps mark
