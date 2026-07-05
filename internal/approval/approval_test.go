@@ -1,9 +1,9 @@
 package approval_test
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -16,7 +16,7 @@ import (
 func newService(t *testing.T) *approval.Service {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "fletcher.db")
-	db, err := sqlite.Open(context.Background(), dbPath)
+	db, err := sqlite.Open(t.Context(), dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -26,8 +26,9 @@ func newService(t *testing.T) *approval.Service {
 }
 
 func TestCreateAndGetRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	got, err := s.Create(ctx, approval.CreateParams{
 		Action:        "ssh into prod.example.com",
@@ -45,8 +46,9 @@ func TestCreateAndGetRoundTrip(t *testing.T) {
 }
 
 func TestApproveTransitionsPendingAndRefusesTerminal(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	a, err := s.Create(ctx, approval.CreateParams{
 		Action: "x", Justification: "y", Requester: "z",
@@ -70,8 +72,9 @@ func TestApproveTransitionsPendingAndRefusesTerminal(t *testing.T) {
 }
 
 func TestDenyMutuallyExclusiveWithApprove(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	a, err := s.Create(ctx, approval.CreateParams{
 		Action: "x", Justification: "y", Requester: "z",
@@ -93,14 +96,16 @@ func TestDenyMutuallyExclusiveWithApprove(t *testing.T) {
 }
 
 func TestGetMissingReturnsNotFound(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
-	_, err := s.Get(context.Background(), "appr_missing")
+	_, err := s.Get(t.Context(), "appr_missing")
 	require.ErrorIs(t, err, approval.ErrNotFound)
 }
 
 func TestWaitReturnsImmediatelyOnDecidedRow(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	a, err := s.Create(ctx, approval.CreateParams{
 		Action: "x", Justification: "y", Requester: "z",
@@ -123,75 +128,91 @@ func TestWaitReturnsImmediatelyOnDecidedRow(t *testing.T) {
 }
 
 func TestWaitWakesOnDecision(t *testing.T) {
-	s := newService(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	t.Cleanup(cancel)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := newService(t)
+		ctx := t.Context()
 
-	a, err := s.Create(ctx, approval.CreateParams{
-		Action: "x", Justification: "y", Requester: "z",
-	})
-	require.NoError(t, err)
-
-	done := make(chan approval.Approval, 1)
-	go func() {
-		r, err := s.Wait(ctx, a.ID)
+		a, err := s.Create(ctx, approval.CreateParams{
+			Action: "x", Justification: "y", Requester: "z",
+		})
 		require.NoError(t, err)
-		done <- r
-	}()
 
-	// Decide after a short delay; Wait should wake up promptly.
-	time.Sleep(50 * time.Millisecond)
-	_, err = s.Approve(ctx, a.ID, "ok")
-	require.NoError(t, err)
+		type waitResult struct {
+			a   approval.Approval
+			err error
+		}
+		done := make(chan waitResult, 1)
+		go func() {
+			r, werr := s.Wait(ctx, a.ID)
+			done <- waitResult{a: r, err: werr}
+		}()
 
-	select {
-	case r := <-done:
-		require.Equal(t, approval.StatusApproved, r.Status)
-	case <-time.After(2 * time.Second):
-		t.Fatal("Wait did not wake on decision")
-	}
+		// Decide after a (synthetic) delay; Wait should wake up promptly.
+		time.Sleep(50 * time.Millisecond)
+		_, err = s.Approve(ctx, a.ID, "ok")
+		require.NoError(t, err)
+
+		select {
+		case r := <-done:
+			require.NoError(t, r.err)
+			require.Equal(t, approval.StatusApproved, r.a.Status)
+		case <-time.After(2 * time.Second):
+			t.Fatal("Wait did not wake on decision")
+		}
+	})
 }
 
 func TestWaitExpiresWhenTTLPasses(t *testing.T) {
-	s := newService(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	t.Cleanup(cancel)
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := newService(t)
+		ctx := t.Context()
 
-	a, err := s.Create(ctx, approval.CreateParams{
-		Action: "x", Justification: "y", Requester: "z",
-		TTL: 100 * time.Millisecond,
+		a, err := s.Create(ctx, approval.CreateParams{
+			Action: "x", Justification: "y", Requester: "z",
+			TTL: time.Second,
+		})
+		require.NoError(t, err)
+
+		// Advance the synthetic clock strictly past expires_at (stored as
+		// whole INTEGER seconds) so Wait observes an overdue row.
+		time.Sleep(1500 * time.Millisecond)
+
+		r, err := s.Wait(ctx, a.ID)
+		require.NoError(t, err)
+		require.Equal(t, approval.StatusExpired, r.Status)
 	})
-	require.NoError(t, err)
-
-	r, err := s.Wait(ctx, a.ID)
-	require.NoError(t, err)
-	require.Equal(t, approval.StatusExpired, r.Status)
 }
 
 func TestSweepExpiredMarksOverdueRows(t *testing.T) {
-	s := newService(t)
-	ctx := context.Background()
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := newService(t)
+		ctx := t.Context()
 
-	// Schema stores expires_at as INTEGER seconds, so use a TTL of 1s
-	// and sleep well past the next whole-second tick to guarantee
-	// expires_at < now strictly.
-	a, err := s.Create(ctx, approval.CreateParams{
-		Action: "x", Justification: "y", Requester: "z",
-		TTL: 1 * time.Second,
+		// Schema stores expires_at as INTEGER seconds, so use a TTL of 1s
+		// and advance the synthetic clock well past the next whole-second
+		// tick to guarantee expires_at < now strictly.
+		a, err := s.Create(ctx, approval.CreateParams{
+			Action: "x", Justification: "y", Requester: "z",
+			TTL: 1 * time.Second,
+		})
+		require.NoError(t, err)
+
+		time.Sleep(2100 * time.Millisecond)
+		n, err := s.SweepExpired(ctx)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, n)
+
+		fetched, err := s.Get(ctx, a.ID)
+		require.NoError(t, err)
+		require.Equal(t, approval.StatusExpired, fetched.Status)
 	})
-	require.NoError(t, err)
-
-	time.Sleep(2100 * time.Millisecond)
-	n, err := s.SweepExpired(ctx)
-	require.NoError(t, err)
-	require.EqualValues(t, 1, n)
-
-	fetched, err := s.Get(ctx, a.ID)
-	require.NoError(t, err)
-	require.Equal(t, approval.StatusExpired, fetched.Status)
 }
 
 func TestCreateValidatesRequiredFields(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
 	cases := []struct {
 		name string
@@ -203,7 +224,7 @@ func TestCreateValidatesRequiredFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := s.Create(context.Background(), tc.p)
+			_, err := s.Create(t.Context(), tc.p)
 			require.Error(t, err)
 		})
 	}

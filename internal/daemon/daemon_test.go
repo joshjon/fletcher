@@ -35,7 +35,7 @@ func TestDaemonServesHealthAndShutsDownCleanly(t *testing.T) {
 		DisableUPnP: true,
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 
 	done := make(chan error, 1)

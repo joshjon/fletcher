@@ -38,7 +38,7 @@ func TestParseChallenge(t *testing.T) {
 // TestLatestDigestLive hits ghcr.io for real (the full anonymous-token + manifest
 // handshake). It skips on any network error so it doesn't flake offline/CI.
 func TestLatestDigestLive(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	digest, err := LatestDigest(ctx, "ghcr.io/joshjon/fletcher-base:debian-13")
 	if err != nil {

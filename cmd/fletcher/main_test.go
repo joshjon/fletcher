@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -15,7 +14,7 @@ import (
 
 func TestVersionHumanOutput(t *testing.T) {
 	out := captureStdout(t, func() {
-		require.NoError(t, newApp().Run(context.Background(), []string{"fletcher", "version"}))
+		require.NoError(t, newApp().Run(t.Context(), []string{"fletcher", "version"}))
 	})
 	require.Contains(t, out, "fletcher "+buildinfo.Version)
 	require.Contains(t, out, "commit "+buildinfo.Commit)
@@ -24,7 +23,7 @@ func TestVersionHumanOutput(t *testing.T) {
 
 func TestVersionJSONOutput(t *testing.T) {
 	out := captureStdout(t, func() {
-		require.NoError(t, newApp().Run(context.Background(), []string{"fletcher", "version", "--json"}))
+		require.NoError(t, newApp().Run(t.Context(), []string{"fletcher", "version", "--json"}))
 	})
 	var got buildinfo.Information
 	require.NoError(t, json.Unmarshal([]byte(out), &got))

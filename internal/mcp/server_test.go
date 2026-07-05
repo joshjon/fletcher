@@ -59,7 +59,7 @@ func TestDaemonHealthToolReturnsBuildInfo(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	require.NoError(t, c.Start(ctx))
 	_, err = c.Initialize(ctx, mcpgo.InitializeRequest{})
 	require.NoError(t, err)
@@ -92,7 +92,7 @@ func TestHTTPGetToolPerformsEgressAndRecordsAudit(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	require.NoError(t, c.Start(ctx))
 	_, err = c.Initialize(ctx, mcpgo.InitializeRequest{})
 	require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestHTTPGetToolRequiresURL(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	require.NoError(t, c.Start(ctx))
 	_, err = c.Initialize(ctx, mcpgo.InitializeRequest{})
 	require.NoError(t, err)
@@ -155,7 +155,7 @@ func TestHTTPRequestToolSendsMethodBodyAndHeaders(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	require.NoError(t, c.Start(ctx))
 	_, err = c.Initialize(ctx, mcpgo.InitializeRequest{})
 	require.NoError(t, err)
@@ -190,7 +190,7 @@ func TestHTTPRequestToolRejectsBadMethod(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	require.NoError(t, c.Start(ctx))
 	_, err = c.Initialize(ctx, mcpgo.InitializeRequest{})
 	require.NoError(t, err)

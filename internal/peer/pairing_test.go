@@ -1,7 +1,6 @@
 package peer_test
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -16,7 +15,7 @@ import (
 
 func newServiceWithEndpoint(t *testing.T) *peer.Service {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "f.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -27,8 +26,9 @@ func newServiceWithEndpoint(t *testing.T) *peer.Service {
 }
 
 func TestBeginPairReservesAddressAndCodeWithoutPersisting(t *testing.T) {
+	t.Parallel()
 	s := newServiceWithEndpoint(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	res, err := s.BeginPair(ctx, "phone")
 	require.NoError(t, err)
@@ -48,8 +48,9 @@ func TestBeginPairReservesAddressAndCodeWithoutPersisting(t *testing.T) {
 }
 
 func TestBeginPairRejectsWhenNameAlreadyPersisted(t *testing.T) {
+	t.Parallel()
 	s := newServiceWithEndpoint(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := s.Create(ctx, peer.CreateParams{Name: "phone", AllowedIPs: []string{"10.99.0.2/32"}})
 	require.NoError(t, err)
@@ -59,20 +60,22 @@ func TestBeginPairRejectsWhenNameAlreadyPersisted(t *testing.T) {
 }
 
 func TestBeginPairFailsWithoutPublicEndpoint(t *testing.T) {
-	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "f.db"))
+	t.Parallel()
+	db, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
 	s := peer.NewService(sqliteq.New(db), peer.Options{})
 
-	_, err = s.BeginPair(context.Background(), "phone")
+	_, err = s.BeginPair(t.Context(), "phone")
 	require.Error(t, err)
 	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 }
 
 func TestCompletePairPersistsPeerWithSuppliedPublicKey(t *testing.T) {
+	t.Parallel()
 	s := newServiceWithEndpoint(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	begin, err := s.BeginPair(ctx, "phone")
 	require.NoError(t, err)
@@ -94,8 +97,9 @@ func TestCompletePairPersistsPeerWithSuppliedPublicKey(t *testing.T) {
 }
 
 func TestCompletePairIsOneTimeUse(t *testing.T) {
+	t.Parallel()
 	s := newServiceWithEndpoint(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	begin, err := s.BeginPair(ctx, "phone")
 	require.NoError(t, err)
@@ -111,8 +115,9 @@ func TestCompletePairIsOneTimeUse(t *testing.T) {
 }
 
 func TestCompletePairRejectsNameMismatch(t *testing.T) {
+	t.Parallel()
 	s := newServiceWithEndpoint(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	begin, err := s.BeginPair(ctx, "phone")
 	require.NoError(t, err)
@@ -125,8 +130,9 @@ func TestCompletePairRejectsNameMismatch(t *testing.T) {
 }
 
 func TestCompletePairRejectsMalformedPublicKey(t *testing.T) {
+	t.Parallel()
 	s := newServiceWithEndpoint(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	begin, err := s.BeginPair(ctx, "phone")
 	require.NoError(t, err)
@@ -137,8 +143,9 @@ func TestCompletePairRejectsMalformedPublicKey(t *testing.T) {
 }
 
 func TestNextAvailableAddressSkipsPendingReservations(t *testing.T) {
+	t.Parallel()
 	s := newServiceWithEndpoint(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	begin, err := s.BeginPair(ctx, "phone")
 	require.NoError(t, err)

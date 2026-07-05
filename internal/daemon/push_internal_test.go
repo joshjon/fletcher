@@ -27,13 +27,13 @@ func (f *fakeSender) Send(_ context.Context, token string, _ push.Notification) 
 // The notifier pushes to every registered device and drops the ones APNs
 // reports dead.
 func TestApprovalNotifierPushesAndDropsDeadTokens(t *testing.T) {
-	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "f.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
 	store := deviceTokenStore{q: sqliteq.New(db)}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	require.NoError(t, store.RegisterToken(ctx, "good"))
 	require.NoError(t, store.RegisterToken(ctx, "dead"))
 
@@ -51,6 +51,6 @@ func TestApprovalNotifierPushesAndDropsDeadTokens(t *testing.T) {
 // With no sender (APNs unconfigured) the notifier is a no-op, not a panic.
 func TestNotifyApprovalCreatedNoSenderIsNoop(t *testing.T) {
 	require.NotPanics(t, func() {
-		approvalNotifier{}.NotifyApprovalCreated(context.Background(), "x")
+		approvalNotifier{}.NotifyApprovalCreated(t.Context(), "x")
 	})
 }

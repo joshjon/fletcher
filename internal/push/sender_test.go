@@ -1,7 +1,6 @@
 package push
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -109,7 +108,7 @@ func TestSendSuccess(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	res, err := s.Send(context.Background(), "device-token-1", Notification{
+	res, err := s.Send(t.Context(), "device-token-1", Notification{
 		Title: "Fletcher",
 		Body:  "An action needs your approval.",
 		Data:  map[string]string{"approval_id": "approval_123"},
@@ -143,7 +142,7 @@ func TestSendGoneTokens(t *testing.T) {
 				w.WriteHeader(tt.status)
 				_, _ = w.Write([]byte(`{"reason":"` + tt.reason + `"}`))
 			})
-			res, err := s.Send(context.Background(), "dead-token", Notification{Title: "t"})
+			res, err := s.Send(t.Context(), "dead-token", Notification{Title: "t"})
 			require.NoError(t, err, "a permanently dead token is a result, not an error")
 			require.True(t, res.Gone)
 		})
@@ -182,7 +181,7 @@ func TestSendFailures(t *testing.T) {
 				w.WriteHeader(tt.status)
 				_, _ = w.Write([]byte(tt.body))
 			})
-			res, err := s.Send(context.Background(), "token", Notification{Title: "t"})
+			res, err := s.Send(t.Context(), "token", Notification{Title: "t"})
 			require.Error(t, err)
 			require.ErrorContains(t, err, tt.wantErr)
 			require.False(t, res.Gone)

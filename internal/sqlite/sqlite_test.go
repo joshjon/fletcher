@@ -1,7 +1,6 @@
 package sqlite_test
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 
 func TestOpenAndMigrateRoundTrip(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "fletcher.db")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, err := sqlite.Open(ctx, dbPath)
 	require.NoError(t, err)

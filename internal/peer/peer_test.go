@@ -1,7 +1,6 @@
 package peer_test
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -14,7 +13,7 @@ import (
 
 func newService(t *testing.T) *peer.Service {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "f.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -22,8 +21,9 @@ func newService(t *testing.T) *peer.Service {
 }
 
 func TestNextAvailableAddressStartsAtTwoAndSkipsTaken(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	got, err := s.NextAvailableAddress(ctx)
 	require.NoError(t, err)
@@ -41,7 +41,8 @@ func TestNextAvailableAddressStartsAtTwoAndSkipsTaken(t *testing.T) {
 }
 
 func TestPublicEndpointPassThrough(t *testing.T) {
-	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "f.db"))
+	t.Parallel()
+	db, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -52,8 +53,9 @@ func TestPublicEndpointPassThrough(t *testing.T) {
 }
 
 func TestCreatePeerReturnsKeypairOnce(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	got, err := s.Create(ctx, peer.CreateParams{
 		Name:       "laptop",
@@ -71,8 +73,9 @@ func TestCreatePeerReturnsKeypairOnce(t *testing.T) {
 }
 
 func TestCreateRejectsDuplicateName(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := s.Create(ctx, peer.CreateParams{Name: "x", AllowedIPs: []string{"10.99.0.2/32"}})
 	require.NoError(t, err)
@@ -82,26 +85,29 @@ func TestCreateRejectsDuplicateName(t *testing.T) {
 }
 
 func TestCreateValidatesInputs(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
 	cases := []peer.CreateParams{
 		{AllowedIPs: []string{"10.99.0.2/32"}}, // missing name
 		{Name: "x"},                            // missing allowed IPs
 	}
 	for _, p := range cases {
-		_, err := s.Create(context.Background(), p)
+		_, err := s.Create(t.Context(), p)
 		require.Error(t, err)
 	}
 }
 
 func TestGetMissingReturnsNotFound(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
-	_, err := s.Get(context.Background(), "peer_missing")
+	_, err := s.Get(t.Context(), "peer_missing")
 	require.ErrorIs(t, err, peer.ErrNotFound)
 }
 
 func TestListAndDelete(t *testing.T) {
+	t.Parallel()
 	s := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	c1, err := s.Create(ctx, peer.CreateParams{Name: "a", AllowedIPs: []string{"10.99.0.2/32"}})
 	require.NoError(t, err)
 	_, err = s.Create(ctx, peer.CreateParams{Name: "b", AllowedIPs: []string{"10.99.0.3/32"}})

@@ -22,6 +22,7 @@ require (
 	github.com/urfave/cli/v3 v3.9.0
 	github.com/vishvananda/netlink v1.3.1
 	go.jetify.com/typeid v1.3.0
+	go.uber.org/goleak v1.3.0
 	golang.org/x/mod v0.36.0
 	golang.org/x/sys v0.45.0
 	golang.org/x/term v0.43.0

@@ -4,7 +4,6 @@ package firecrackerdriver
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,7 +36,7 @@ func makeExt4(t *testing.T) string {
 
 func TestWriteAndReadRootfsFile(t *testing.T) {
 	img := makeExt4(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// A nested path exercises the parent-directory creation, and a non-trivial
 	// payload (with NUL and high bytes) exercises the binary-safe write.
@@ -64,7 +63,7 @@ func TestWriteAndReadRootfsFile(t *testing.T) {
 
 func TestWriteRootfsFileReplaces(t *testing.T) {
 	img := makeExt4(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := writeRootfsFile(ctx, img, initFingerprintPath, []byte("oldhash"), "0100644"); err != nil {
 		t.Fatalf("first write: %v", err)
@@ -79,7 +78,7 @@ func TestWriteRootfsFileReplaces(t *testing.T) {
 
 func TestOnDiskInitFingerprintAbsent(t *testing.T) {
 	img := makeExt4(t)
-	if got := onDiskInitFingerprint(context.Background(), img); got != "" {
+	if got := onDiskInitFingerprint(t.Context(), img); got != "" {
 		t.Fatalf("absent marker = %q, want empty", got)
 	}
 }

@@ -38,7 +38,7 @@ func (f fakeServerKey) ServerPublicKey(context.Context) (wireguard.Key, error)  
 // the leg that previously deadlocked (CompletePair was only reachable
 // over the tunnel that could not yet exist).
 func TestPairingListenerCompletesPairOverPinnedTLS(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "f.db"))
 	require.NoError(t, err)

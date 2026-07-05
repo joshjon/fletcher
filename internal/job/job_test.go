@@ -1,7 +1,6 @@
 package job_test
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -20,7 +19,7 @@ func newService(t *testing.T) *job.Service {
 func newServiceWithDefaultImage(t *testing.T, defaultImage string) *job.Service {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "fletcher.db")
-	db, err := sqlite.Open(context.Background(), dbPath)
+	db, err := sqlite.Open(t.Context(), dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -28,8 +27,9 @@ func newServiceWithDefaultImage(t *testing.T, defaultImage string) *job.Service 
 }
 
 func TestCreateAndGetJobRoundTrip(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	created, err := svc.Create(ctx, job.CreateParams{
 		Trigger: job.TriggerEphemeral,
@@ -47,14 +47,16 @@ func TestCreateAndGetJobRoundTrip(t *testing.T) {
 }
 
 func TestGetMissingJobReturnsNotFound(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
-	_, err := svc.Get(context.Background(), "job_doesnotexist")
+	_, err := svc.Get(t.Context(), "job_doesnotexist")
 	require.ErrorIs(t, err, job.ErrNotFound)
 }
 
 func TestCreateValidatesRequiredFields(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cases := []struct {
 		name string
@@ -76,8 +78,9 @@ func TestCreateValidatesRequiredFields(t *testing.T) {
 }
 
 func TestCreateDefaultsImage(t *testing.T) {
+	t.Parallel()
 	svc := newServiceWithDefaultImage(t, "my-base")
-	created, err := svc.Create(context.Background(), job.CreateParams{
+	created, err := svc.Create(t.Context(), job.CreateParams{
 		Trigger: job.TriggerEphemeral,
 		Command: "echo hi",
 	})
@@ -86,8 +89,9 @@ func TestCreateDefaultsImage(t *testing.T) {
 }
 
 func TestCreateRequiresImageWhenNoDefault(t *testing.T) {
+	t.Parallel()
 	svc := newServiceWithDefaultImage(t, "") // no default configured
-	_, err := svc.Create(context.Background(), job.CreateParams{
+	_, err := svc.Create(t.Context(), job.CreateParams{
 		Trigger: job.TriggerEphemeral,
 		Command: "echo hi",
 	})
@@ -95,8 +99,9 @@ func TestCreateRequiresImageWhenNoDefault(t *testing.T) {
 }
 
 func TestCreateDefaultsNameFromCommand(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
-	created, err := svc.Create(context.Background(), job.CreateParams{
+	created, err := svc.Create(t.Context(), job.CreateParams{
 		Trigger: job.TriggerEphemeral,
 		Command: "claude -p 'say hi'",
 		Image:   "fletcher-base",
@@ -106,8 +111,9 @@ func TestCreateDefaultsNameFromCommand(t *testing.T) {
 }
 
 func TestCreateCronJobIsScheduled(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
-	created, err := svc.Create(context.Background(), job.CreateParams{
+	created, err := svc.Create(t.Context(), job.CreateParams{
 		Trigger:  job.TriggerCron,
 		Name:     "hourly-scrape",
 		Command:  "scrape.sh",
@@ -123,8 +129,9 @@ func TestCreateCronJobIsScheduled(t *testing.T) {
 }
 
 func TestListAndCount(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for range 3 {
 		_, err := svc.Create(ctx, job.CreateParams{
@@ -148,8 +155,9 @@ func TestListAndCount(t *testing.T) {
 }
 
 func TestCancelTransitionsQueuedJobAndIgnoresTerminal(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	created, err := svc.Create(ctx, job.CreateParams{
 		Trigger: job.TriggerEphemeral,
@@ -173,8 +181,9 @@ func TestCancelTransitionsQueuedJobAndIgnoresTerminal(t *testing.T) {
 }
 
 func TestUpdateSchedule(t *testing.T) {
+	t.Parallel()
 	svc := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	created, err := svc.Create(ctx, job.CreateParams{
 		Trigger: job.TriggerCron, Name: "nightly", Command: "echo hi", Image: "ubuntu", Schedule: "0 0 * * *",

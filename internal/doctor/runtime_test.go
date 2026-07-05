@@ -47,7 +47,7 @@ func TestCheckJobRuntimeOK(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
 		Status: "ok", Runtime: "firecracker", Snapshot: "ext4", BaseImageAvailable: true,
 	})
-	res := CheckJobRuntime(sock).Check(context.Background())
+	res := CheckJobRuntime(sock).Check(t.Context())
 	require.Equal(t, StatusOK, res.Status)
 	require.Nil(t, res.Plan)
 	require.Contains(t, res.Detail, "firecracker")
@@ -57,7 +57,7 @@ func TestCheckJobRuntimeMockWarns(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
 		Status: "ok", Runtime: "mock", Snapshot: "mock", BaseImageAvailable: true,
 	})
-	res := CheckJobRuntime(sock).Check(context.Background())
+	res := CheckJobRuntime(sock).Check(t.Context())
 	require.Equal(t, StatusWarn, res.Status)
 	require.NotNil(t, res.Plan)
 	require.Equal(t, "real-runtime", res.Plan.ID)
@@ -69,13 +69,13 @@ func TestCheckJobRuntimeOKWithoutBaseImage(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
 		Status: "ok", Runtime: "firecracker", Snapshot: "ext4", BaseImageAvailable: false,
 	})
-	res := CheckJobRuntime(sock).Check(context.Background())
+	res := CheckJobRuntime(sock).Check(t.Context())
 	require.Equal(t, StatusOK, res.Status)
 	require.Nil(t, res.Plan)
 }
 
 func TestCheckJobRuntimeSkipsWhenDaemonDown(t *testing.T) {
-	res := CheckJobRuntime("/tmp/fletcher-nonexistent-rt.sock").Check(context.Background())
+	res := CheckJobRuntime("/tmp/fletcher-nonexistent-rt.sock").Check(t.Context())
 	require.Equal(t, StatusSkip, res.Status)
 	require.Nil(t, res.Plan)
 }
@@ -85,7 +85,7 @@ func TestCheckBaseImageOK(t *testing.T) {
 		Status: "ok", Runtime: "firecracker", Snapshot: "ext4",
 		BaseImageAvailable: true, BaseImageUpdateChecked: true,
 	})
-	res := CheckBaseImage(sock).Check(context.Background())
+	res := CheckBaseImage(sock).Check(t.Context())
 	require.Equal(t, StatusOK, res.Status)
 	require.Nil(t, res.Plan)
 	require.Equal(t, "imported", res.Detail)
@@ -99,7 +99,7 @@ func TestCheckBaseImagePendingCheck(t *testing.T) {
 		Status: "ok", Runtime: "firecracker", Snapshot: "ext4",
 		BaseImageAvailable: true, BaseImageUpdateChecked: false,
 	})
-	res := CheckBaseImage(sock).Check(context.Background())
+	res := CheckBaseImage(sock).Check(t.Context())
 	require.Equal(t, StatusOK, res.Status)
 	require.Nil(t, res.Plan)
 	require.Contains(t, res.Detail, "checking")
@@ -109,7 +109,7 @@ func TestCheckBaseImageNoImageFails(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
 		Status: "ok", Runtime: "firecracker", Snapshot: "ext4", BaseImageAvailable: false,
 	})
-	res := CheckBaseImage(sock).Check(context.Background())
+	res := CheckBaseImage(sock).Check(t.Context())
 	// A missing base image blocks all job/session creation: Fail status and a
 	// blocker plan, kept consistent so the summary and the plan agree.
 	require.Equal(t, StatusFail, res.Status)
@@ -123,7 +123,7 @@ func TestCheckBaseImageUpdateWarns(t *testing.T) {
 		Status: "ok", Runtime: "firecracker", Snapshot: "ext4",
 		BaseImageAvailable: true, BaseImageUpdateAvailable: true, BaseImageUpdateChecked: true,
 	})
-	res := CheckBaseImage(sock).Check(context.Background())
+	res := CheckBaseImage(sock).Check(t.Context())
 	require.Equal(t, StatusWarn, res.Status)
 	require.NotNil(t, res.Plan)
 	require.Equal(t, "update-base-image", res.Plan.ID)
@@ -136,13 +136,13 @@ func TestCheckBaseImageSkipsForMockSnapshot(t *testing.T) {
 	sock := serveRuntimeAdmin(t, &fletcherv1.HealthResponse{
 		Status: "ok", Runtime: "mock", Snapshot: "mock", BaseImageAvailable: false,
 	})
-	res := CheckBaseImage(sock).Check(context.Background())
+	res := CheckBaseImage(sock).Check(t.Context())
 	require.Equal(t, StatusSkip, res.Status)
 	require.Nil(t, res.Plan)
 }
 
 func TestCheckBaseImageSkipsWhenDaemonDown(t *testing.T) {
-	res := CheckBaseImage("/tmp/fletcher-nonexistent-rt.sock").Check(context.Background())
+	res := CheckBaseImage("/tmp/fletcher-nonexistent-rt.sock").Check(t.Context())
 	require.Equal(t, StatusSkip, res.Status)
 	require.Nil(t, res.Plan)
 }

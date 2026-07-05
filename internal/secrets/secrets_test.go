@@ -1,7 +1,6 @@
 package secrets_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,7 +15,7 @@ import (
 func newStore(t *testing.T) (*secrets.Store, string) {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := sqlite.Open(context.Background(), filepath.Join(dir, "f.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -29,7 +28,7 @@ func newStore(t *testing.T) (*secrets.Store, string) {
 
 func TestSetAndGetRoundTrip(t *testing.T) {
 	s, _ := newStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	require.NoError(t, s.Set(ctx, "anthropic_api_key", "sk-ant-secret"))
 
@@ -40,13 +39,13 @@ func TestSetAndGetRoundTrip(t *testing.T) {
 
 func TestGetMissingSecretReturnsNotFound(t *testing.T) {
 	s, _ := newStore(t)
-	_, err := s.Get(context.Background(), "missing")
+	_, err := s.Get(t.Context(), "missing")
 	require.ErrorIs(t, err, secrets.ErrNotFound)
 }
 
 func TestDeleteRemovesSecretAndCache(t *testing.T) {
 	s, _ := newStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	require.NoError(t, s.Set(ctx, "k", "v"))
 	require.NoError(t, s.Delete(ctx, "k"))
 	_, err := s.Get(ctx, "k")
@@ -55,7 +54,7 @@ func TestDeleteRemovesSecretAndCache(t *testing.T) {
 
 func TestListReturnsMetadataOnlyAndSorted(t *testing.T) {
 	s, _ := newStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	require.NoError(t, s.Set(ctx, "zebra", "v"))
 	require.NoError(t, s.Set(ctx, "apple", "v"))
 
@@ -76,7 +75,7 @@ func TestOpenAutoGeneratesIdentityWithRestrictedPerms(t *testing.T) {
 func TestOpenLoadsExistingIdentitySoSecretsSurvive(t *testing.T) {
 	// Round 1: create store, write a secret.
 	dir := t.TempDir()
-	db, err := sqlite.Open(context.Background(), filepath.Join(dir, "f.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -84,12 +83,12 @@ func TestOpenLoadsExistingIdentitySoSecretsSurvive(t *testing.T) {
 	keyPath := filepath.Join(dir, "age.key")
 	s1, err := secrets.Open(sqliteq.New(db), keyPath)
 	require.NoError(t, err)
-	require.NoError(t, s1.Set(context.Background(), "k", "v"))
+	require.NoError(t, s1.Set(t.Context(), "k", "v"))
 
 	// Round 2: reopen with the same identity; secret should decrypt.
 	s2, err := secrets.Open(sqliteq.New(db), keyPath)
 	require.NoError(t, err)
-	got, err := s2.Get(context.Background(), "k")
+	got, err := s2.Get(t.Context(), "k")
 	require.NoError(t, err)
 	require.Equal(t, "v", got)
 }
@@ -99,7 +98,7 @@ func TestOpenRefusesUnparsableIdentity(t *testing.T) {
 	keyPath := filepath.Join(dir, "age.key")
 	require.NoError(t, os.WriteFile(keyPath, []byte("not an age identity"), 0o600))
 
-	db, err := sqlite.Open(context.Background(), filepath.Join(dir, "f.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))

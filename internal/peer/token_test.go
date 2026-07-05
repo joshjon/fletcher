@@ -7,6 +7,7 @@ import (
 )
 
 func TestGenerateTokenIsRandomAndHashStable(t *testing.T) {
+	t.Parallel()
 	a, err := generateToken()
 	require.NoError(t, err)
 	b, err := generateToken()

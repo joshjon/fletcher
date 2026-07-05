@@ -31,7 +31,7 @@ func newSupervisorRig(t *testing.T) *supervisorRig {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "fletcher.db")
-	db, err := sqlite.Open(context.Background(), dbPath)
+	db, err := sqlite.Open(t.Context(), dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -64,21 +64,22 @@ func waitForStatus(t *testing.T, svc *job.Service, id string, want job.Status, t
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		got, err := svc.Get(context.Background(), id)
+		got, err := svc.Get(t.Context(), id)
 		require.NoError(t, err)
 		if got.Status == want {
 			return got
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	last, _ := svc.Get(context.Background(), id)
+	last, _ := svc.Get(t.Context(), id)
 	t.Fatalf("job %s never reached status %q (last=%q)", id, want, last.Status)
 	return job.Job{}
 }
 
 func TestSupervisorRunsSuccessfulJob(t *testing.T) {
+	t.Parallel()
 	r := newSupervisorRig(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	wait := r.start(ctx)
 
 	created, err := r.svc.Create(ctx, job.CreateParams{
@@ -100,8 +101,9 @@ func TestSupervisorRunsSuccessfulJob(t *testing.T) {
 }
 
 func TestSupervisorFiresDueCronJob(t *testing.T) {
+	t.Parallel()
 	r := newSupervisorRig(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 
 	cronJob, err := r.svc.Create(ctx, job.CreateParams{
 		Trigger:  job.TriggerCron,
@@ -145,7 +147,7 @@ func waitForChildRun(t *testing.T, svc *job.Service, parentID string, timeout ti
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		jobs, err := svc.List(context.Background(), job.ListParams{Limit: 100})
+		jobs, err := svc.List(t.Context(), job.ListParams{Limit: 100})
 		require.NoError(t, err)
 		for _, j := range jobs {
 			if j.ParentID != nil && *j.ParentID == parentID {
@@ -159,8 +161,9 @@ func waitForChildRun(t *testing.T, svc *job.Service, parentID string, timeout ti
 }
 
 func TestSupervisorMarksFailingJob(t *testing.T) {
+	t.Parallel()
 	r := newSupervisorRig(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	wait := r.start(ctx)
 
 	created, err := r.svc.Create(ctx, job.CreateParams{
@@ -180,8 +183,9 @@ func TestSupervisorMarksFailingJob(t *testing.T) {
 }
 
 func TestSupervisorCancelsRunningJob(t *testing.T) {
+	t.Parallel()
 	r := newSupervisorRig(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	wait := r.start(ctx)
 
 	created, err := r.svc.Create(ctx, job.CreateParams{
@@ -206,8 +210,9 @@ func TestSupervisorCancelsRunningJob(t *testing.T) {
 }
 
 func TestSupervisorReconcilesOrphanRunningOnBoot(t *testing.T) {
+	t.Parallel()
 	r := newSupervisorRig(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	created, err := r.svc.Create(ctx, job.CreateParams{
 		Trigger: job.TriggerEphemeral,

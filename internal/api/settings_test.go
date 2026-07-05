@@ -33,7 +33,7 @@ func TestListSettingsSurfacesDefaults(t *testing.T) {
 		"log_level": "info",        // would be the default, but this key is set
 	}, nil)
 
-	resp, err := svc.ListSettings(context.Background(), connect.NewRequest(&fletcherv1.ListSettingsRequest{}))
+	resp, err := svc.ListSettings(t.Context(), connect.NewRequest(&fletcherv1.ListSettingsRequest{}))
 	require.NoError(t, err)
 
 	got := make(map[string]*fletcherv1.Setting)
@@ -57,7 +57,7 @@ func TestListSettingsReportsRequiresRestart(t *testing.T) {
 	}}
 	svc := api.NewSettingsService(backend, map[string]string{}, nil)
 
-	resp, err := svc.ListSettings(context.Background(), connect.NewRequest(&fletcherv1.ListSettingsRequest{}))
+	resp, err := svc.ListSettings(t.Context(), connect.NewRequest(&fletcherv1.ListSettingsRequest{}))
 	require.NoError(t, err)
 
 	got := make(map[string]*fletcherv1.Setting)
@@ -84,13 +84,13 @@ func TestReloadSettings(t *testing.T) {
 		reloaded: []string{"default_image", "default_gateway"},
 		pending:  []string{"public_web"},
 	})
-	resp, err := svc.ReloadSettings(context.Background(), connect.NewRequest(&fletcherv1.ReloadSettingsRequest{}))
+	resp, err := svc.ReloadSettings(t.Context(), connect.NewRequest(&fletcherv1.ReloadSettingsRequest{}))
 	require.NoError(t, err)
 	require.Equal(t, []string{"default_image", "default_gateway"}, resp.Msg.GetReloaded())
 	require.Equal(t, []string{"public_web"}, resp.Msg.GetPendingRestart())
 
 	noReload := api.NewSettingsService(backend, map[string]string{}, nil)
-	_, err = noReload.ReloadSettings(context.Background(), connect.NewRequest(&fletcherv1.ReloadSettingsRequest{}))
+	_, err = noReload.ReloadSettings(t.Context(), connect.NewRequest(&fletcherv1.ReloadSettingsRequest{}))
 	require.Error(t, err)
 	require.Equal(t, connect.CodeUnimplemented, connect.CodeOf(err))
 }

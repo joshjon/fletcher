@@ -11,6 +11,7 @@ import (
 )
 
 func TestNormaliseCredentials(t *testing.T) {
+	t.Parallel()
 	t.Run("nil and empty pass through as nil", func(t *testing.T) {
 		got, err := normaliseCredentials(nil)
 		require.NoError(t, err)
@@ -35,6 +36,7 @@ func TestNormaliseCredentials(t *testing.T) {
 }
 
 func TestWriteGitCredential(t *testing.T) {
+	t.Parallel()
 	read := func(t *testing.T, root, rel string) string {
 		t.Helper()
 		data, err := os.ReadFile(filepath.Join(root, ".config", "git", rel))
@@ -113,6 +115,7 @@ func TestWriteGitCredential(t *testing.T) {
 }
 
 func TestCredentialEncodeDecodeRoundTrip(t *testing.T) {
+	t.Parallel()
 	cases := [][]string{
 		nil,
 		{"claude"},
@@ -133,6 +136,7 @@ func TestCredentialEncodeDecodeRoundTrip(t *testing.T) {
 }
 
 func TestCredentialEncodeEmptyIsEmptyString(t *testing.T) {
+	t.Parallel()
 	// The DB column has DEFAULT '' so the "no credentials" sentinel must be
 	// the empty string, not a JSON "null" or "[]" literal.
 	encoded, err := encodeCredentials(nil)
@@ -141,11 +145,13 @@ func TestCredentialEncodeEmptyIsEmptyString(t *testing.T) {
 }
 
 func TestCredentialDecodeRejectsGarbage(t *testing.T) {
+	t.Parallel()
 	_, err := decodeCredentials("not-json")
 	require.Error(t, err)
 }
 
 func TestSupervisorResolveCredentials(t *testing.T) {
+	t.Parallel()
 	t.Run("empty encoded returns no mounts", func(t *testing.T) {
 		sup := &Supervisor{credentialsRoot: "/anywhere"}
 		got, err := sup.resolveCredentials("")
@@ -159,8 +165,7 @@ func TestSupervisorResolveCredentials(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = sup.resolveCredentials(encoded)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "no credentials root configured")
+		require.ErrorContains(t, err, "no credentials root configured")
 	})
 
 	t.Run("missing host directory fails with the path it tried", func(t *testing.T) {
@@ -169,8 +174,7 @@ func TestSupervisorResolveCredentials(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = sup.resolveCredentials(encoded)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), AllowedCredentials[CredentialGit].HostRelPath)
+		require.ErrorContains(t, err, AllowedCredentials[CredentialGit].HostRelPath)
 	})
 
 	t.Run("present host directories resolve to mount entries", func(t *testing.T) {

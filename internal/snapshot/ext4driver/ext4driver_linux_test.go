@@ -4,7 +4,6 @@ package ext4driver_test
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,7 +32,7 @@ func TestCreateClonesTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snap, err := d.Create(context.Background(), "base")
+	snap, err := d.Create(t.Context(), "base")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -56,14 +55,14 @@ func TestCreateClonesTemplate(t *testing.T) {
 		t.Fatal("writing to the clone mutated the template")
 	}
 
-	if err := d.Delete(context.Background(), snap.ID); err != nil {
+	if err := d.Delete(t.Context(), snap.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if _, err := os.Stat(snap.Path); !os.IsNotExist(err) {
 		t.Fatalf("clone still present after Delete: %v", err)
 	}
 	// Delete of a missing snapshot is a no-op.
-	if err := d.Delete(context.Background(), snap.ID); err != nil {
+	if err := d.Delete(t.Context(), snap.ID); err != nil {
 		t.Fatalf("Delete of missing snapshot should be a no-op, got: %v", err)
 	}
 }
@@ -84,7 +83,7 @@ func TestCreateMissingTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Create(context.Background(), "nope"); err == nil {
+	if _, err := d.Create(t.Context(), "nope"); err == nil {
 		t.Fatal("expected error for missing template")
 	}
 }
@@ -94,7 +93,7 @@ func TestCreateEmptyImageRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Create(context.Background(), ""); err == nil {
+	if _, err := d.Create(t.Context(), ""); err == nil {
 		t.Fatal("expected error for empty image (Firecracker needs a rootfs)")
 	}
 }
@@ -105,7 +104,7 @@ func TestCreateRejectsPathTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"../escape", "sub/dir", "..", "."} {
-		if _, err := d.Create(context.Background(), name); err == nil {
+		if _, err := d.Create(t.Context(), name); err == nil {
 			t.Errorf("expected rejection of image name %q", name)
 		}
 	}
@@ -119,7 +118,7 @@ func TestCommitTemplateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	snap, err := d.Create(ctx, "base")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -172,7 +171,7 @@ func TestCommitTemplateValidatesNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	snap, err := d.Create(ctx, "base")
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +223,7 @@ func TestCommitTemplateInjectsFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	snap, err := d.Create(ctx, "base")
 	if err != nil {
 		t.Fatal(err)

@@ -1,7 +1,6 @@
 package peer_test
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -18,7 +17,7 @@ import (
 
 func newServiceWithOptions(t *testing.T, opts peer.Options) *peer.Service {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "f.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -52,6 +51,7 @@ func (f *fakeCert) lastHost() string {
 }
 
 func TestPairingEndpointDerivesFromPublicEndpoint(t *testing.T) {
+	t.Parallel()
 	s := newServiceWithOptions(t, peer.Options{PublicEndpoint: "home.example.com:51820"})
 	s.SetPairingCert(51821, &fakeCert{fingerprint: "deadbeef"})
 
@@ -62,6 +62,7 @@ func TestPairingEndpointDerivesFromPublicEndpoint(t *testing.T) {
 }
 
 func TestPairingEndpointEmptyWithoutPortOrCert(t *testing.T) {
+	t.Parallel()
 	// No pairing cert wired: nothing to advertise even with a public endpoint.
 	noCert := newServiceWithOptions(t, peer.Options{PublicEndpoint: "home.example.com:51820"})
 	require.Empty(t, noCert.PairingEndpoint())
@@ -75,6 +76,7 @@ func TestPairingEndpointEmptyWithoutPortOrCert(t *testing.T) {
 }
 
 func TestPairingEndpointTracksSetters(t *testing.T) {
+	t.Parallel()
 	s := newServiceWithOptions(t, peer.Options{})
 	require.Empty(t, s.PairingEndpoint())
 
@@ -89,6 +91,7 @@ func TestPairingEndpointTracksSetters(t *testing.T) {
 }
 
 func TestSetPublicEndpointRotatesPairingCertHost(t *testing.T) {
+	t.Parallel()
 	s := newServiceWithOptions(t, peer.Options{})
 	fake := &fakeCert{fingerprint: "fp"}
 	s.SetPairingCert(51821, fake)
@@ -107,6 +110,7 @@ func TestSetPublicEndpointRotatesPairingCertHost(t *testing.T) {
 // the public endpoint (and thus the cert SAN) does - the regeneration path
 // the iOS-compliance fix depends on.
 func TestPairingFingerprintRotatesWithEndpoint(t *testing.T) {
+	t.Parallel()
 	mgr := pairingtls.NewManager(t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, mgr.EnsureHost("a.example.com"))
 

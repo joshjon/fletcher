@@ -1,7 +1,6 @@
 package audit_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,7 +10,7 @@ import (
 
 func TestNoopRecorderAcceptsEvents(t *testing.T) {
 	var r audit.Recorder = audit.Noop{}
-	require.NoError(t, r.Record(context.Background(), audit.Event{
+	require.NoError(t, r.Record(t.Context(), audit.Event{
 		Kind:    "mcp.tool_call",
 		Subject: "job_abc",
 		Actor:   "agent_xyz",

@@ -58,7 +58,7 @@ func serveFakeAdminWith(t *testing.T, admin fakeAdmin) string {
 
 func TestCheckPublicEndpointReportsConfiguredEndpoint(t *testing.T) {
 	sock := serveFakeAdmin(t, "vpn.example.com:51820")
-	res := CheckPublicEndpoint(sock).Check(context.Background())
+	res := CheckPublicEndpoint(sock).Check(t.Context())
 	require.Equal(t, StatusOK, res.Status)
 	require.Nil(t, res.Plan)
 	require.Contains(t, res.Detail, "vpn.example.com:51820")
@@ -66,7 +66,7 @@ func TestCheckPublicEndpointReportsConfiguredEndpoint(t *testing.T) {
 
 func TestCheckPublicEndpointEmitsRestartPlanWhenEmpty(t *testing.T) {
 	sock := serveFakeAdmin(t, "")
-	res := CheckPublicEndpoint(sock).Check(context.Background())
+	res := CheckPublicEndpoint(sock).Check(t.Context())
 	require.Equal(t, StatusFail, res.Status)
 	require.NotNil(t, res.Plan)
 	// Shares the UPnP check's plan ID so the two collapse into one step.
@@ -75,14 +75,14 @@ func TestCheckPublicEndpointEmitsRestartPlanWhenEmpty(t *testing.T) {
 }
 
 func TestCheckPublicEndpointSkipsWhenDaemonUnreachable(t *testing.T) {
-	res := CheckPublicEndpoint("/tmp/fletcher-nonexistent-doctor.sock").Check(context.Background())
+	res := CheckPublicEndpoint("/tmp/fletcher-nonexistent-doctor.sock").Check(t.Context())
 	require.Equal(t, StatusSkip, res.Status)
 	require.Nil(t, res.Plan)
 }
 
 func TestCheckPairingEndpointReportsListener(t *testing.T) {
 	sock := serveFakeAdminWith(t, fakeAdmin{endpoint: "vpn.example.com:51820", pairing: "vpn.example.com:51821"})
-	res := CheckPairingEndpoint(sock).Check(context.Background())
+	res := CheckPairingEndpoint(sock).Check(t.Context())
 	require.Equal(t, StatusOK, res.Status)
 	require.Contains(t, res.Detail, "vpn.example.com:51821")
 }
@@ -91,12 +91,12 @@ func TestCheckPairingEndpointWarnsWhenAbsent(t *testing.T) {
 	// A public endpoint but no pairing listener: the iOS app cannot pair,
 	// but laptop/CLI pairing still works, so this warns rather than fails.
 	sock := serveFakeAdminWith(t, fakeAdmin{endpoint: "vpn.example.com:51820"})
-	res := CheckPairingEndpoint(sock).Check(context.Background())
+	res := CheckPairingEndpoint(sock).Check(t.Context())
 	require.Equal(t, StatusWarn, res.Status)
 	require.Nil(t, res.Plan)
 }
 
 func TestCheckPairingEndpointSkipsWhenDaemonUnreachable(t *testing.T) {
-	res := CheckPairingEndpoint("/tmp/fletcher-nonexistent-doctor.sock").Check(context.Background())
+	res := CheckPairingEndpoint("/tmp/fletcher-nonexistent-doctor.sock").Check(t.Context())
 	require.Equal(t, StatusSkip, res.Status)
 }

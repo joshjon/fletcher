@@ -60,7 +60,7 @@ func TestErrorInterceptorMapsNotFound(t *testing.T) {
 	client, stop := startTestServer(t, admin, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(stop)
 
-	_, err := client.Health(context.Background(), connect.NewRequest(&fletcherv1.HealthRequest{}))
+	_, err := client.Health(t.Context(), connect.NewRequest(&fletcherv1.HealthRequest{}))
 	require.Error(t, err)
 	var ce *connect.Error
 	require.True(t, errors.As(err, &ce))
@@ -77,7 +77,7 @@ func TestErrorInterceptorMapsInvalidArgument(t *testing.T) {
 	client, stop := startTestServer(t, admin, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(stop)
 
-	_, err := client.Health(context.Background(), connect.NewRequest(&fletcherv1.HealthRequest{}))
+	_, err := client.Health(t.Context(), connect.NewRequest(&fletcherv1.HealthRequest{}))
 	var ce *connect.Error
 	require.True(t, errors.As(err, &ce))
 	require.Equal(t, connect.CodeInvalidArgument, ce.Code())
@@ -92,7 +92,7 @@ func TestErrorInterceptorSanitisesUncategorisedErrors(t *testing.T) {
 	client, stop := startTestServer(t, admin, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(stop)
 
-	_, err := client.Health(context.Background(), connect.NewRequest(&fletcherv1.HealthRequest{}))
+	_, err := client.Health(t.Context(), connect.NewRequest(&fletcherv1.HealthRequest{}))
 	var ce *connect.Error
 	require.True(t, errors.As(err, &ce))
 	require.Equal(t, connect.CodeInternal, ce.Code())
@@ -110,7 +110,7 @@ func TestRequestIDInterceptorAttachesIDToContext(t *testing.T) {
 	client, stop := startTestServer(t, admin, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(stop)
 
-	resp, err := client.Health(context.Background(), connect.NewRequest(&fletcherv1.HealthRequest{}))
+	resp, err := client.Health(t.Context(), connect.NewRequest(&fletcherv1.HealthRequest{}))
 	require.NoError(t, err)
 	require.Equal(t, "ok", resp.Msg.GetStatus())
 	require.NotEmpty(t, seen, "request id should be set in handler ctx")
@@ -121,7 +121,7 @@ func TestContextLogHandlerAddsRequestIDAttribute(t *testing.T) {
 	base := slog.NewTextHandler(&buf, nil)
 	h := api.NewContextLogHandler(base)
 	logger := slog.New(h)
-	ctx := api.WithRequestID(context.Background(), "req_abc")
+	ctx := api.WithRequestID(t.Context(), "req_abc")
 	logger.InfoContext(ctx, "hello")
 	require.Contains(t, buf.String(), "request_id=req_abc")
 }

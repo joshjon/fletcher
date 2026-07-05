@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +19,7 @@ func TestForgetSessionHostKey(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	// A missing known_hosts means there is nothing to forget, not an error.
-	require.NoError(t, forgetSessionHostKey(context.Background(), "dev"))
+	require.NoError(t, forgetSessionHostKey(t.Context(), "dev"))
 
 	dir, err := fletcherSSHDir()
 	require.NoError(t, err)
@@ -29,7 +28,7 @@ func TestForgetSessionHostKey(t *testing.T) {
 	require.NoError(t, os.WriteFile(knownHosts,
 		[]byte("dev ssh-ed25519 AAAAfakekeydev\nother ssh-ed25519 AAAAfakekeyother\n"), 0o600))
 
-	require.NoError(t, forgetSessionHostKey(context.Background(), "dev"))
+	require.NoError(t, forgetSessionHostKey(t.Context(), "dev"))
 
 	got, err := os.ReadFile(knownHosts)
 	require.NoError(t, err)

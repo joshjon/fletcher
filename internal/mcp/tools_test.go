@@ -54,8 +54,7 @@ func TestEgressHTTPClientBlocksLoopback(t *testing.T) {
 	if resp != nil {
 		_ = resp.Body.Close()
 	}
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "blocked")
+	require.ErrorContains(t, err, "blocked")
 }
 
 // stubApprovals records creations and resolves every Wait with the configured
@@ -104,7 +103,7 @@ func (s *stubPublisher) BuildFromSession(_ context.Context, sessionRef, _, name 
 func callPublish(t *testing.T, pub ImagePublisher, appr ApprovalBackend, args map[string]any) *mcpgo.CallToolResult {
 	t.Helper()
 	tool := publishImageTool(pub, appr)
-	res, err := tool.Handler(context.Background(), mcpgo.CallToolRequest{
+	res, err := tool.Handler(t.Context(), mcpgo.CallToolRequest{
 		Params: mcpgo.CallToolParams{Name: "publish_image", Arguments: args},
 	})
 	require.NoError(t, err)
@@ -220,7 +219,7 @@ func (s *stubReports) CreateReport(_ context.Context, r Report) (string, error) 
 func TestReportToolPostsReport(t *testing.T) {
 	sink := &stubReports{}
 	tool := reportTool(sink)
-	res, err := tool.Handler(context.Background(), mcpgo.CallToolRequest{
+	res, err := tool.Handler(t.Context(), mcpgo.CallToolRequest{
 		Params: mcpgo.CallToolParams{Name: "report", Arguments: map[string]any{
 			"title":   "Web app ready",
 			"summary": "Live at the published port.",
@@ -243,7 +242,7 @@ func TestReportToolPostsReport(t *testing.T) {
 
 func TestReportToolRequiresTitle(t *testing.T) {
 	tool := reportTool(&stubReports{})
-	res, err := tool.Handler(context.Background(), mcpgo.CallToolRequest{
+	res, err := tool.Handler(t.Context(), mcpgo.CallToolRequest{
 		Params: mcpgo.CallToolParams{Name: "report", Arguments: map[string]any{}},
 	})
 	require.NoError(t, err)

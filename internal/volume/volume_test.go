@@ -43,7 +43,7 @@ func (f *fakeProvisioner) DeleteVolume(_ context.Context, id string) error {
 
 func newManager(t *testing.T) (*volume.Manager, sqliteq.Querier, *fakeProvisioner) {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "fletcher.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "fletcher.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -55,7 +55,7 @@ func newManager(t *testing.T) (*volume.Manager, sqliteq.Querier, *fakeProvisione
 
 func TestCreateListDelete(t *testing.T) {
 	mgr, _, prov := newManager(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	v, err := mgr.Create(ctx, "data", 0)
 	require.NoError(t, err)
@@ -83,14 +83,14 @@ func TestCreateListDelete(t *testing.T) {
 func TestCreateRejectsBadNames(t *testing.T) {
 	mgr, _, _ := newManager(t)
 	for _, bad := range []string{"", "Has Caps", "../x", ".dot", "-dash", "a b"} {
-		_, err := mgr.Create(context.Background(), bad, 0)
+		_, err := mgr.Create(t.Context(), bad, 0)
 		require.Error(t, err, "name %q", bad)
 	}
 }
 
 func TestAttachmentBlocksDeleteAndReattach(t *testing.T) {
 	mgr, q, _ := newManager(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	v, err := mgr.Create(ctx, "data", 0)
 	require.NoError(t, err)
@@ -108,7 +108,7 @@ func TestAttachmentBlocksDeleteAndReattach(t *testing.T) {
 	require.Equal(t, errs.CategoryConflict, errs.CategoryOf(err))
 	err = mgr.Delete(ctx, "data")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "attached to session")
+	require.Equal(t, errs.CategoryFailedPrecondition, errs.CategoryOf(err))
 
 	// The volume reports its attachment.
 	got, err := mgr.Get(ctx, "data")
@@ -123,7 +123,7 @@ func TestAttachmentBlocksDeleteAndReattach(t *testing.T) {
 
 func createSessionRow(t *testing.T, q sqliteq.Querier, name string, volumeID *string) {
 	t.Helper()
-	_, err := q.CreateSession(context.Background(), sqliteq.CreateSessionParams{
+	_, err := q.CreateSession(t.Context(), sqliteq.CreateSessionParams{
 		ID:           "session_test",
 		Name:         name,
 		Image:        "img",

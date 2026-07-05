@@ -1,7 +1,6 @@
 package api_test
 
 import (
-	"context"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -19,7 +18,7 @@ func TestHealthReportsStartedAtAndStatus(t *testing.T) {
 		BaseImageAvailable: true,
 	})
 
-	resp, err := svc.Health(context.Background(), connect.NewRequest(&fletcherv1.HealthRequest{}))
+	resp, err := svc.Health(t.Context(), connect.NewRequest(&fletcherv1.HealthRequest{}))
 	require.NoError(t, err)
 	require.Equal(t, "ok", resp.Msg.GetStatus())
 	require.Equal(t, startedAt, resp.Msg.GetStartedAt())
@@ -35,7 +34,7 @@ func TestHealthReportsStartedAtAndStatus(t *testing.T) {
 // keys its restart remediation off.
 func TestHealthReportsEmptyEndpointWhenUnset(t *testing.T) {
 	svc := api.NewAdminService(0, nil, api.RuntimeStatus{})
-	resp, err := svc.Health(context.Background(), connect.NewRequest(&fletcherv1.HealthRequest{}))
+	resp, err := svc.Health(t.Context(), connect.NewRequest(&fletcherv1.HealthRequest{}))
 	require.NoError(t, err)
 	require.Empty(t, resp.Msg.GetPublicEndpoint())
 }

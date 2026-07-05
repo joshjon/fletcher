@@ -27,7 +27,7 @@ func TestMapperEnsureRemembers(t *testing.T) {
 		return Result{Method: "nat-pmp", ExternalPort: r.InternalPort}, nil
 	}
 
-	res, err := m.Ensure(context.Background(), Request{Protocol: ProtocolTCP, InternalPort: 51821})
+	res, err := m.Ensure(t.Context(), Request{Protocol: ProtocolTCP, InternalPort: 51821})
 	require.NoError(t, err)
 	require.Equal(t, "nat-pmp", res.Method)
 	require.Len(t, m.requests(), 1)
@@ -38,7 +38,7 @@ func TestMapperRemembersEvenOnFailure(t *testing.T) {
 	m.mapFn = func(context.Context, Request) (Result, error) {
 		return Result{}, errors.New("no router")
 	}
-	_, err := m.Ensure(context.Background(), Request{Protocol: ProtocolUDP, InternalPort: 51820})
+	_, err := m.Ensure(t.Context(), Request{Protocol: ProtocolUDP, InternalPort: 51820})
 	require.Error(t, err)
 	// Remembered so a later refresh can recover once the router is reachable.
 	require.Len(t, m.requests(), 1)
@@ -59,7 +59,7 @@ func TestMapperReleaseSkipsUninstalled(t *testing.T) {
 		unmapCalls++
 		return nil
 	}
-	_, err := m.Ensure(context.Background(), Request{Protocol: ProtocolUDP, InternalPort: 51820})
+	_, err := m.Ensure(t.Context(), Request{Protocol: ProtocolUDP, InternalPort: 51820})
 	require.Error(t, err)
 
 	m.releaseAll()
@@ -76,13 +76,13 @@ func TestMapperRefreshReMapsAll(t *testing.T) {
 		mu.Unlock()
 		return Result{Method: "upnp"}, nil
 	}
-	_, _ = m.Ensure(context.Background(), Request{Protocol: ProtocolUDP, InternalPort: 51820})
-	_, _ = m.Ensure(context.Background(), Request{Protocol: ProtocolTCP, InternalPort: 51821})
+	_, _ = m.Ensure(t.Context(), Request{Protocol: ProtocolUDP, InternalPort: 51820})
+	_, _ = m.Ensure(t.Context(), Request{Protocol: ProtocolTCP, InternalPort: 51821})
 	mu.Lock()
 	count = 0
 	mu.Unlock()
 
-	m.refresh(context.Background())
+	m.refresh(t.Context())
 	mu.Lock()
 	defer mu.Unlock()
 	require.Equal(t, 2, count, "refresh should re-map every remembered request")
@@ -99,8 +99,8 @@ func TestMapperReleaseAllUnmapsEach(t *testing.T) {
 		mu.Unlock()
 		return nil
 	}
-	_, _ = m.Ensure(context.Background(), Request{Protocol: ProtocolUDP, InternalPort: 51820})
-	_, _ = m.Ensure(context.Background(), Request{Protocol: ProtocolTCP, InternalPort: 51821})
+	_, _ = m.Ensure(t.Context(), Request{Protocol: ProtocolUDP, InternalPort: 51820})
+	_, _ = m.Ensure(t.Context(), Request{Protocol: ProtocolTCP, InternalPort: 51821})
 
 	m.releaseAll()
 	mu.Lock()

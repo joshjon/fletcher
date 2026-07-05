@@ -15,7 +15,7 @@ import (
 func TestRunReturnsZeroForSuccessfulCommand(t *testing.T) {
 	d := mockdriver.New()
 	var stdout, stderr bytes.Buffer
-	res, err := d.Run(context.Background(), runtime.Spec{
+	res, err := d.Run(t.Context(), runtime.Spec{
 		JobID:   "job_test",
 		Command: "echo hello && echo world 1>&2",
 	}, &stdout, &stderr)
@@ -27,14 +27,14 @@ func TestRunReturnsZeroForSuccessfulCommand(t *testing.T) {
 
 func TestRunReturnsNonZeroForFailingCommand(t *testing.T) {
 	d := mockdriver.New()
-	res, err := d.Run(context.Background(), runtime.Spec{Command: "exit 7"}, nil, nil)
+	res, err := d.Run(t.Context(), runtime.Spec{Command: "exit 7"}, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, int32(7), res.ExitCode)
 }
 
 func TestRunHonoursContextCancellation(t *testing.T) {
 	d := mockdriver.New()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		cancel()

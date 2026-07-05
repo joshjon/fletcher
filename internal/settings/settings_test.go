@@ -39,30 +39,30 @@ func (q *memQuerier) DeleteSetting(_ context.Context, key string) (int64, error)
 func newStore() *Store { return NewStore(&memQuerier{m: map[string]string{}}) }
 
 func TestSetRejectsUnknownKey(t *testing.T) {
-	require.Error(t, newStore().Set(context.Background(), "bogus", "x"))
+	require.Error(t, newStore().Set(t.Context(), "bogus", "x"))
 }
 
 func TestSetValidatesEnumAndPort(t *testing.T) {
 	s := newStore()
-	require.Error(t, s.Set(context.Background(), KeyRuntime, "qemu"))   // not in enum
-	require.NoError(t, s.Set(context.Background(), KeyRuntime, "runc")) // valid
-	require.Error(t, s.Set(context.Background(), KeyWireGuardPort, "0"))
-	require.Error(t, s.Set(context.Background(), KeyWireGuardPort, "abc"))
-	require.NoError(t, s.Set(context.Background(), KeyWireGuardPort, "51820"))
+	require.Error(t, s.Set(t.Context(), KeyRuntime, "qemu"))   // not in enum
+	require.NoError(t, s.Set(t.Context(), KeyRuntime, "runc")) // valid
+	require.Error(t, s.Set(t.Context(), KeyWireGuardPort, "0"))
+	require.Error(t, s.Set(t.Context(), KeyWireGuardPort, "abc"))
+	require.NoError(t, s.Set(t.Context(), KeyWireGuardPort, "51820"))
 
-	require.Error(t, s.Set(context.Background(), KeyNoUPnP, "yes"))    // not true/false
-	require.NoError(t, s.Set(context.Background(), KeyNoUPnP, "true")) // valid
+	require.Error(t, s.Set(t.Context(), KeyNoUPnP, "yes"))    // not true/false
+	require.NoError(t, s.Set(t.Context(), KeyNoUPnP, "true")) // valid
 
-	require.Error(t, s.Set(context.Background(), KeyGatewayListen, "11500"))         // no host
-	require.Error(t, s.Set(context.Background(), KeyGatewayListen, "0.0.0.0:bogus")) // bad port
-	require.NoError(t, s.Set(context.Background(), KeyGatewayListen, "0.0.0.0:11500"))
-	require.NoError(t, s.Set(context.Background(), KeyMCPListen, "127.0.0.1:11600"))
+	require.Error(t, s.Set(t.Context(), KeyGatewayListen, "11500"))         // no host
+	require.Error(t, s.Set(t.Context(), KeyGatewayListen, "0.0.0.0:bogus")) // bad port
+	require.NoError(t, s.Set(t.Context(), KeyGatewayListen, "0.0.0.0:11500"))
+	require.NoError(t, s.Set(t.Context(), KeyMCPListen, "127.0.0.1:11600"))
 }
 
 func TestDescribeCoversAllKeysAndReflectsSet(t *testing.T) {
 	s := newStore()
-	require.NoError(t, s.Set(context.Background(), KeyLogLevel, "debug"))
-	views, err := s.Describe(context.Background())
+	require.NoError(t, s.Set(t.Context(), KeyLogLevel, "debug"))
+	views, err := s.Describe(t.Context())
 	require.NoError(t, err)
 	require.Len(t, views, len(registry))
 	for _, v := range views {

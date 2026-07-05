@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -47,7 +48,7 @@ func TestDeriveEndpointRetriesUntilRouterReady(t *testing.T) {
 		return portmap.Result{ExternalIP: "203.0.113.5", ExternalPort: 51820}, nil
 	}
 
-	res, derived := deriveEndpoint(context.Background(), discardLogger(), ensure, portmap.Request{}, true)
+	res, derived := deriveEndpoint(t.Context(), discardLogger(), ensure, portmap.Request{}, true)
 	require.NotNil(t, res)
 	require.Equal(t, "203.0.113.5:51820", derived)
 	require.EqualValues(t, 3, calls.Load())
@@ -64,7 +65,7 @@ func TestDeriveEndpointGivesUpAfterWindow(t *testing.T) {
 		return portmap.Result{}, errors.New("no gateway response")
 	}
 
-	res, derived := deriveEndpoint(context.Background(), discardLogger(), ensure, portmap.Request{}, true)
+	res, derived := deriveEndpoint(t.Context(), discardLogger(), ensure, portmap.Request{}, true)
 	require.Nil(t, res)
 	require.Empty(t, derived)
 	require.GreaterOrEqual(t, calls.Load(), int32(2))
@@ -81,7 +82,7 @@ func TestDeriveEndpointSingleAttemptWhenNotRetrying(t *testing.T) {
 		return portmap.Result{}, errors.New("no gateway response")
 	}
 
-	res, derived := deriveEndpoint(context.Background(), discardLogger(), ensure, portmap.Request{}, false)
+	res, derived := deriveEndpoint(t.Context(), discardLogger(), ensure, portmap.Request{}, false)
 	require.Nil(t, res)
 	require.Empty(t, derived)
 	require.EqualValues(t, 1, calls.Load())
@@ -96,7 +97,7 @@ func TestDeriveEndpointReturnsMappingWithoutEndpoint(t *testing.T) {
 		return portmap.Result{ExternalPort: 51820}, nil
 	}
 
-	res, derived := deriveEndpoint(context.Background(), discardLogger(), ensure, portmap.Request{}, false)
+	res, derived := deriveEndpoint(t.Context(), discardLogger(), ensure, portmap.Request{}, false)
 	require.NotNil(t, res)
 	require.Empty(t, derived)
 }
@@ -116,7 +117,7 @@ func TestRemoteAPIListenActorServesAndShutsDown(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})}
 
-	execute, interrupt := remoteAPIListenActor(context.Background(), addr, srv, discardLogger())
+	execute, interrupt := remoteAPIListenActor(t.Context(), addr, srv, discardLogger())
 	done := make(chan error, 1)
 	go func() { done <- execute() }()
 
@@ -142,32 +143,47 @@ func TestRemoteAPIListenActorServesAndShutsDown(t *testing.T) {
 	}
 }
 
+// countingHandler is a slog handler that counts the records it receives, so a
+// test can observe how many times a retry loop logged an attempt.
+type countingHandler struct{ n *atomic.Int32 }
+
+func (h countingHandler) Enabled(context.Context, slog.Level) bool  { return true }
+func (h countingHandler) Handle(context.Context, slog.Record) error { h.n.Add(1); return nil }
+func (h countingHandler) WithAttrs([]slog.Attr) slog.Handler        { return h }
+func (h countingHandler) WithGroup(string) slog.Handler             { return h }
+
 // An address that is not yet bindable (the VPN interface is down) must keep the
 // actor retrying rather than failing, and the retry loop must exit promptly on
-// ctx cancel so shutdown does not hang.
+// ctx cancel so shutdown does not hang. Runs under synctest so the production
+// backoff timers (seconds) fire on the synthetic clock.
 func TestRemoteAPIListenActorRetriesUntilCancelled(t *testing.T) {
-	first, max := remoteBindFirstBackoff, remoteBindMaxBackoff
-	remoteBindFirstBackoff = 5 * time.Millisecond
-	remoteBindMaxBackoff = 10 * time.Millisecond
-	t.Cleanup(func() { remoteBindFirstBackoff, remoteBindMaxBackoff = first, max })
+	synctest.Test(t, func(t *testing.T) {
+		// 240.0.0.0/4 is reserved and assigned to no local interface, so the bind
+		// fails immediately and the actor stays in its retry loop. Each failed
+		// bind logs one "not bindable yet" record, which is the observable
+		// retry count.
+		var retries atomic.Int32
+		logger := slog.New(countingHandler{n: &retries})
 
-	// 240.0.0.0/4 is reserved and assigned to no local interface, so the bind
-	// fails immediately and the actor stays in its retry loop.
-	ctx, cancel := context.WithCancel(context.Background())
-	srv := &http.Server{Handler: http.NewServeMux()}
-	execute, _ := remoteAPIListenActor(ctx, "240.0.0.1:11700", srv, discardLogger())
+		ctx, cancel := context.WithCancel(t.Context())
+		srv := &http.Server{Handler: http.NewServeMux()}
+		execute, _ := remoteAPIListenActor(ctx, "240.0.0.1:11700", srv, logger)
 
-	done := make(chan error, 1)
-	go func() { done <- execute() }()
+		done := make(chan error, 1)
+		go func() { done <- execute() }()
 
-	time.Sleep(30 * time.Millisecond) // let it spin through a few retries
-	cancel()
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("actor did not exit after ctx cancel")
-	}
+		// Backoff doubles 2s -> 30s (capped), so a synthetic minute covers the
+		// first several retries.
+		time.Sleep(time.Minute)
+		cancel()
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("actor did not exit after ctx cancel")
+		}
+		require.GreaterOrEqual(t, retries.Load(), int32(3), "actor should have retried the bind")
+	})
 }
 
 func TestLooksLikeRegistryRef(t *testing.T) {

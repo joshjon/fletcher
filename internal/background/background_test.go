@@ -42,7 +42,7 @@ func swapDefaultLogger(t *testing.T, w *syncBuffer) {
 
 func TestGoExecutesAndCarriesContext(t *testing.T) {
 	type ctxKey struct{}
-	parent := context.WithValue(context.Background(), ctxKey{}, "value")
+	parent := context.WithValue(t.Context(), ctxKey{}, "value")
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -61,7 +61,7 @@ func TestGoRecoversAndLogsPanic(t *testing.T) {
 	var buf syncBuffer
 	swapDefaultLogger(t, &buf)
 
-	background.Go(context.Background(), func(_ context.Context) {
+	background.Go(t.Context(), func(_ context.Context) {
 		panic("boom")
 	})
 	require.Eventually(t, func() bool {
@@ -73,7 +73,7 @@ func TestGoNamedUsesProvidedName(t *testing.T) {
 	var buf syncBuffer
 	swapDefaultLogger(t, &buf)
 
-	background.GoNamed(context.Background(), "custom-worker", func(_ context.Context) {
+	background.GoNamed(t.Context(), "custom-worker", func(_ context.Context) {
 		panic("x")
 	})
 	require.Eventually(t, func() bool {

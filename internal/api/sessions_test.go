@@ -103,7 +103,7 @@ func TestGetSessionPopulatesDeployInfo(t *testing.T) {
 	resolver := fakeDeployResolver{entrypoint: []string{"/app", "serve"}, port: 8080, ok: true}
 	runApp := session.Session{ID: "s1", Name: "app", Image: "myapp", RunApp: true}
 	get := func(svc *api.SessionsService) *fletcherv1.DeployInfo {
-		resp, err := svc.GetSession(context.Background(), connect.NewRequest(&fletcherv1.GetSessionRequest{Ref: "app"}))
+		resp, err := svc.GetSession(t.Context(), connect.NewRequest(&fletcherv1.GetSessionRequest{Ref: "app"}))
 		require.NoError(t, err)
 		return resp.Msg.GetSession().GetDeploy()
 	}
@@ -141,7 +141,7 @@ func TestListPortsAttachesTLSStatus(t *testing.T) {
 	certs := fakeCerts{status: "valid", expires: 1234567890}
 
 	resp, err := api.NewSessionsService(backend, api.SessionsDeps{Certs: certs}).
-		ListPorts(context.Background(), connect.NewRequest(&fletcherv1.ListPortsRequest{Ref: "s"}))
+		ListPorts(t.Context(), connect.NewRequest(&fletcherv1.ListPortsRequest{Ref: "s"}))
 	require.NoError(t, err)
 	got := resp.Msg.GetPorts()
 	require.Len(t, got, 3)
@@ -152,7 +152,7 @@ func TestListPortsAttachesTLSStatus(t *testing.T) {
 
 	// No cert resolver (public web off): no status even for a public port.
 	resp2, err := api.NewSessionsService(backend, api.SessionsDeps{}).
-		ListPorts(context.Background(), connect.NewRequest(&fletcherv1.ListPortsRequest{Ref: "s"}))
+		ListPorts(t.Context(), connect.NewRequest(&fletcherv1.ListPortsRequest{Ref: "s"}))
 	require.NoError(t, err)
 	require.Empty(t, resp2.Msg.GetPorts()[0].GetTlsStatus())
 }
@@ -165,14 +165,14 @@ func TestRedeploySession(t *testing.T) {
 	calls := 0
 	resp, err := api.NewSessionsService(fakeSessionsBackend{sess: sess}, api.SessionsDeps{
 		Refresher: fakeRefresher{refreshed: true, calls: &calls},
-	}).RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app"}))
+	}).RedeploySession(t.Context(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app"}))
 	require.NoError(t, err)
 	require.True(t, resp.Msg.GetImageRefreshed())
 	require.Equal(t, 1, calls, "refresher is consulted once")
 	require.Equal(t, "app", resp.Msg.GetSession().GetName())
 
 	resp2, err := api.NewSessionsService(fakeSessionsBackend{sess: sess}, api.SessionsDeps{}).
-		RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app"}))
+		RedeploySession(t.Context(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app"}))
 	require.NoError(t, err)
 	require.False(t, resp2.Msg.GetImageRefreshed())
 }
@@ -189,7 +189,7 @@ func TestRedeploySessionWithImage(t *testing.T) {
 	resp, err := api.NewSessionsService(
 		fakeSessionsBackend{sess: sess, redeploys: &redeploys},
 		api.SessionsDeps{Refresher: fakeRefresher{templates: []string{"webapp-v2"}, imports: &imports}},
-	).RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app", Image: "webapp-v2"}))
+	).RedeploySession(t.Context(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app", Image: "webapp-v2"}))
 	require.NoError(t, err)
 	require.False(t, resp.Msg.GetImageRefreshed())
 	require.Equal(t, []string{"webapp-v2"}, redeploys)
@@ -201,7 +201,7 @@ func TestRedeploySessionWithImage(t *testing.T) {
 	resp, err = api.NewSessionsService(
 		fakeSessionsBackend{sess: sess, redeploys: &redeploys},
 		api.SessionsDeps{Refresher: fakeRefresher{imports: &imports}},
-	).RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app", Image: "ghcr.io/x/app:v2"}))
+	).RedeploySession(t.Context(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app", Image: "ghcr.io/x/app:v2"}))
 	require.NoError(t, err)
 	require.True(t, resp.Msg.GetImageRefreshed())
 	require.Equal(t, []string{"ghcr.io/x/app:v2->webapp"}, imports)
@@ -212,7 +212,7 @@ func TestRedeploySessionWithImage(t *testing.T) {
 	_, err = api.NewSessionsService(
 		fakeSessionsBackend{sess: sess, redeploys: &redeploys},
 		api.SessionsDeps{Refresher: fakeRefresher{importErr: context.DeadlineExceeded}},
-	).RedeploySession(context.Background(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app", Image: "ghcr.io/x/app:v2"}))
+	).RedeploySession(t.Context(), connect.NewRequest(&fletcherv1.RedeploySessionRequest{Ref: "app", Image: "ghcr.io/x/app:v2"}))
 	require.Error(t, err)
 	require.Empty(t, redeploys)
 }

@@ -24,14 +24,14 @@ import (
 func newSecrets(t *testing.T, apiKey string) *secrets.Store {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := sqlite.Open(context.Background(), filepath.Join(dir, "f.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
 
 	s, err := secrets.Open(sqliteq.New(db), filepath.Join(dir, "age.key"))
 	require.NoError(t, err)
-	require.NoError(t, s.Set(context.Background(), gateway.SecretName, apiKey))
+	require.NoError(t, s.Set(t.Context(), gateway.SecretName, apiKey))
 	return s
 }
 
@@ -101,7 +101,7 @@ func TestGatewayForwardsToBackendWithSecret(t *testing.T) {
 
 func TestGatewayReturnsUnauthorizedWhenNoSecret(t *testing.T) {
 	dir := t.TempDir()
-	db, err := sqlite.Open(context.Background(), filepath.Join(dir, "f.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -165,7 +165,7 @@ func TestGatewayMessagesPassesBodyThroughWithSecretStamped(t *testing.T) {
 
 func TestGatewayMessagesReturnsUnauthorizedWhenNoSecret(t *testing.T) {
 	dir := t.TempDir()
-	db, err := sqlite.Open(context.Background(), filepath.Join(dir, "f.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "f.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -253,7 +253,7 @@ func TestAnthropicBackendForwardMessagesPassesBodyAndKey(t *testing.T) {
 	clientHeader.Set("x-api-key", "placeholder-from-agent")
 
 	in := []byte(`{"model":"claude-opus-4-7","max_tokens":50,"messages":[{"role":"user","content":"hi"}]}`)
-	resp, err := backend.ForwardMessages(context.Background(), in, "sk-ant-real", clientHeader)
+	resp, err := backend.ForwardMessages(t.Context(), in, "sk-ant-real", clientHeader)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 

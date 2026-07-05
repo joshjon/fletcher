@@ -62,7 +62,7 @@ func newDriver(t *testing.T, forwards []firecrackerdriver.Forward) (*firecracker
 func TestFirecrackerRun(t *testing.T) {
 	d, rootfs := newDriver(t, nil)
 	var stdout, stderr bytes.Buffer
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 
 	res, err := d.Run(ctx, runtime.Spec{
@@ -89,7 +89,7 @@ func TestFirecrackerRun(t *testing.T) {
 func TestFirecrackerNoEgress(t *testing.T) {
 	d, rootfs := newDriver(t, nil)
 	var stdout, stderr bytes.Buffer
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 
 	_, err := d.Run(ctx, runtime.Spec{
@@ -122,7 +122,7 @@ func TestFirecrackerGatewayForward(t *testing.T) {
 	d, rootfs := newDriver(t, []firecrackerdriver.Forward{{ListenAddr: listenAddr, HostSocket: sock}})
 
 	var stdout, stderr bytes.Buffer
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 
 	res, err := d.Run(ctx, runtime.Spec{
@@ -147,7 +147,7 @@ func TestFirecrackerGatewayForward(t *testing.T) {
 func TestFirecrackerSession(t *testing.T) {
 	d, rootfs := newDriver(t, nil)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 	defer cancel()
 
 	handle, err := d.StartSession(ctx, runtime.SessionSpec{

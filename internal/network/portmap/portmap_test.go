@@ -11,7 +11,7 @@ import (
 )
 
 func TestMapRejectsInvalidProtocol(t *testing.T) {
-	_, err := portmap.Map(context.Background(), portmap.Request{
+	_, err := portmap.Map(t.Context(), portmap.Request{
 		InternalPort: 11500,
 		Protocol:     "ICMP",
 	})
@@ -19,7 +19,7 @@ func TestMapRejectsInvalidProtocol(t *testing.T) {
 }
 
 func TestMapRequiresInternalPort(t *testing.T) {
-	_, err := portmap.Map(context.Background(), portmap.Request{
+	_, err := portmap.Map(t.Context(), portmap.Request{
 		Protocol: portmap.ProtocolTCP,
 	})
 	require.Error(t, err)
@@ -30,7 +30,7 @@ func TestMapRequiresInternalPort(t *testing.T) {
 //   - a mapping was installed (test-machine has a UPnP router; rare in CI)
 //   - or the call returned an error before the timeout (the expected case)
 func TestMapDiscoveryRunsInProcess(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	t.Cleanup(cancel)
 	_, err := portmap.Map(ctx, portmap.Request{
 		InternalPort:  11500,

@@ -1,7 +1,6 @@
 package report_test
 
 import (
-	"context"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -28,7 +27,7 @@ func (r *recordingSink) Publish(e events.Event) {
 
 func newService(t *testing.T) (*report.Service, *recordingSink) {
 	t.Helper()
-	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "fletcher.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "fletcher.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, sqlite.Migrate(db))
@@ -38,7 +37,7 @@ func newService(t *testing.T) (*report.Service, *recordingSink) {
 
 func TestCreateStoresAndAnnounces(t *testing.T) {
 	svc, sink := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	created, err := svc.Create(ctx, report.CreateParams{
 		SourceType: "session",
@@ -71,7 +70,7 @@ func TestCreateStoresAndAnnounces(t *testing.T) {
 
 func TestCreateValidates(t *testing.T) {
 	svc, _ := newService(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := svc.Create(ctx, report.CreateParams{Title: ""})
 	require.Error(t, err)
