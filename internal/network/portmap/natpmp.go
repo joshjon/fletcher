@@ -59,7 +59,7 @@ func mapNATPMP(ctx context.Context, req Request, gateway net.IP) (Result, error)
 	}
 	externalIP := net.IPv4(extResp[8], extResp[9], extResp[10], extResp[11]).String()
 
-	lifetime := uint32(req.LeaseDuration / time.Second) //nolint:gosec // a lease in seconds fits a uint32
+	lifetime := leaseSeconds(req.LeaseDuration)
 	// Map request: version 0, opcode, 2 reserved, internal port, suggested
 	// external port, lifetime (seconds).
 	body := make([]byte, 12)
@@ -99,13 +99,24 @@ func unmapNATPMP(ctx context.Context, req Request, gateway net.IP) error {
 	body[1] = op
 	binary.BigEndian.PutUint16(body[4:6], req.InternalPort)
 	// External port 0 + lifetime 0 = delete.
-	_, err = natpmpExchange(ctx, conn, body, 16)
-	return err
+	resp, err := natpmpExchange(ctx, conn, body, 16)
+	if err != nil {
+		return err
+	}
+	// A nonzero result code means the gateway refused the delete; report it
+	// so the caller's UPnP fallback runs instead of silently leaving the
+	// mapping installed.
+	if rc := binary.BigEndian.Uint16(resp[2:4]); rc != 0 {
+		return fmt.Errorf("natpmp unmap result code %d", rc)
+	}
+	return nil
 }
 
 // natpmpExchange sends a request and reads the matching response, retrying
 // with the spec's escalating timeouts. minLen guards against truncated
-// replies; the version byte must be 0.
+// replies; the version byte must be 0 and the response opcode must be the
+// request opcode with the high bit set (RFC 6886), so a stray datagram is
+// not mistaken for our reply.
 func natpmpExchange(ctx context.Context, conn *net.UDPConn, body []byte, minLen int) ([]byte, error) {
 	buf := make([]byte, 32)
 	var lastErr error
@@ -139,6 +150,10 @@ func natpmpExchange(ctx context.Context, conn *net.UDPConn, body []byte, minLen 
 		}
 		if buf[0] != 0 {
 			lastErr = fmt.Errorf("natpmp unexpected version %d", buf[0])
+			continue
+		}
+		if want := 0x80 | body[1]; buf[1] != want {
+			lastErr = fmt.Errorf("natpmp unexpected response opcode %d (want %d)", buf[1], want)
 			continue
 		}
 		return buf[:n], nil

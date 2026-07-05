@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"time"
 
@@ -131,7 +132,7 @@ func mapUPnP(ctx context.Context, req Request, internalIP string) (Result, error
 	clients2, _, err := internetgateway2.NewWANIPConnection2ClientsCtx(ctx)
 	if err == nil && len(clients2) > 0 {
 		c := clients2[0]
-		lease := uint32(req.LeaseDuration.Seconds())
+		lease := leaseSeconds(req.LeaseDuration)
 		if err := c.AddPortMappingCtx(ctx,
 			"",                   // RemoteHost (empty = any)
 			req.ExternalPort,     // ExternalPort
@@ -162,7 +163,7 @@ func mapUPnP(ctx context.Context, req Request, internalIP string) (Result, error
 		return Result{}, errors.New("no UPnP IGD found on the LAN")
 	}
 	c := clients1[0]
-	lease := uint32(req.LeaseDuration.Seconds())
+	lease := leaseSeconds(req.LeaseDuration)
 	if err := c.AddPortMappingCtx(ctx,
 		"",
 		req.ExternalPort,
@@ -183,6 +184,19 @@ func mapUPnP(ctx context.Context, req Request, internalIP string) (Result, error
 		InternalIP:    internalIP,
 		LeaseDuration: time.Duration(lease) * time.Second,
 	}, nil
+}
+
+// leaseSeconds renders a lease duration as the protocol's uint32 seconds,
+// clamped to [0, math.MaxUint32] so an oversized duration cannot wrap.
+func leaseSeconds(d time.Duration) uint32 {
+	secs := d / time.Second
+	switch {
+	case secs < 0:
+		return 0
+	case secs > math.MaxUint32:
+		return math.MaxUint32
+	}
+	return uint32(secs)
 }
 
 // defaultLANIP returns the IPv4 address on the interface that owns the

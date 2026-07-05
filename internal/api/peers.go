@@ -61,9 +61,12 @@ type ServerKeyProvider interface {
 // PeerSyncer pushes the current peer registry into the running
 // WireGuard tunnel, if any. Production wires this to a closure that
 // rebuilds the list from PeersBackend and calls Tunnel.SetPeers; nil is
-// a no-op (Mac dev, no tunnel configured, etc.).
+// a no-op (Mac dev, no tunnel configured, etc.). Best-effort by design:
+// failures are logged by the implementation, not returned - a peer is
+// already persisted when this fires, and the tunnel picks up changes on
+// the next restart regardless.
 type PeerSyncer interface {
-	SyncPeers(ctx context.Context) error
+	SyncPeers(ctx context.Context)
 }
 
 // PeersService implements fletcherv1connect.PeerServiceHandler.
@@ -81,20 +84,14 @@ func NewPeersService(peers PeersBackend, serverKey ServerKeyProvider, syncer Pee
 	return &PeersService{peers: peers, serverKey: serverKey, syncer: syncer}
 }
 
-// syncPeers fires SyncPeers if a syncer is wired. Failures are logged
-// but not returned: a peer is already persisted in the DB at this
-// point, and the tunnel will pick up changes on next restart even if
-// the live sync fails.
+// syncPeers fires SyncPeers if a syncer is wired. The syncer is
+// best-effort and logs its own failures, keeping the RPC success path
+// clean.
 func (s *PeersService) syncPeers(ctx context.Context) {
 	if s.syncer == nil {
 		return
 	}
-	if err := s.syncer.SyncPeers(ctx); err != nil {
-		// We have no logger handle here; the syncer is expected to log
-		// internally before returning. Swallowing keeps the RPC success
-		// path clean.
-		_ = err
-	}
+	s.syncer.SyncPeers(ctx)
 }
 
 // PairPeer is the one-call pairing path: the daemon auto-allocates a

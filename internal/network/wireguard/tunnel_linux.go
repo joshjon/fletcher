@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"sync"
 
 	"github.com/vishvananda/netlink"
@@ -128,7 +129,8 @@ func (t *LinuxTunnel) SetPeers(_ context.Context, peers []PeerConfig) error {
 	if err := t.dev.IpcSet(uapi); err != nil {
 		return fmt.Errorf("apply uapi config: %w", err)
 	}
-	t.cfg.Peers = peers
+	// Clone so a caller mutating its slice later cannot corrupt the stored set.
+	t.cfg.Peers = slices.Clone(peers)
 	t.logger.Info("wireguard peer set updated", slog.Int("peers", len(peers)))
 	return nil
 }

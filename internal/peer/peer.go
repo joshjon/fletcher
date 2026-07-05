@@ -284,7 +284,9 @@ func (s *Service) nextAvailableAddress(ctx context.Context, extraTaken []string)
 	}
 	server := prefix.Addr().Next()
 	candidate := server.Next()
-	for prefix.Contains(candidate) && candidate.Next().IsValid() {
+	// Requiring the candidate's successor to stay inside the prefix keeps the
+	// prefix's last address (the IPv4 subnet broadcast) unallocated.
+	for prefix.Contains(candidate) && prefix.Contains(candidate.Next()) {
 		if !taken[candidate] && !candidate.IsMulticast() {
 			return candidate.String() + "/32", nil
 		}
