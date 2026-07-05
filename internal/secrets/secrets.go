@@ -7,6 +7,7 @@ package secrets
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -102,7 +103,7 @@ func (s *Store) Get(ctx context.Context, name string) (string, error) {
 
 	ciphertext, err := s.q.GetSecret(ctx, name)
 	if err != nil {
-		if isSQLNotFound(err) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
 		}
 		return "", fmt.Errorf("get secret: %w", err)
@@ -211,10 +212,4 @@ func generateIdentityFile(path string) (*age.X25519Identity, error) {
 		return nil, fmt.Errorf("write identity: %w", err)
 	}
 	return id, nil
-}
-
-// isSQLNotFound matches the sql.ErrNoRows path without importing
-// database/sql here (sqlc returns the typed sentinel back).
-func isSQLNotFound(err error) bool {
-	return err != nil && err.Error() == "sql: no rows in result set"
 }

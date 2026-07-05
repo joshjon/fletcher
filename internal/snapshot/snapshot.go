@@ -4,7 +4,15 @@
 // this interface.
 package snapshot
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrTemplateExists is returned (wrapped) by TemplateCommitter implementations
+// when the target template name is taken and force was not set. Callers match
+// it with errors.Is instead of the error text, which varies per driver.
+var ErrTemplateExists = errors.New("template already exists")
 
 // Snapshot is the handle to a fork of a base environment.
 type Snapshot struct {

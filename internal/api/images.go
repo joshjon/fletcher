@@ -146,9 +146,10 @@ func (s *ImagesService) Import(ctx context.Context, req *connect.Request[fletche
 		Force:     req.Msg.GetForce(),
 	})
 	if err != nil {
-		// Surface the descriptive message (bad ref / auth / exists) with a clean
-		// non-internal code rather than an opaque Internal error.
-		return nil, errs.Newf(errs.CategoryFailedPrecondition, "%s", err.Error())
+		// ImportRegistry categorizes its user-facing failures (bad ref, pull,
+		// exists); anything uncategorized is internal detail the interceptor
+		// sanitizes rather than sending to the client verbatim.
+		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.ImportResponse{
 		Name:        res.Name,

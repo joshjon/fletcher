@@ -19,6 +19,7 @@ import (
 
 	"github.com/joshjon/fletcher/internal/errs"
 	"github.com/joshjon/fletcher/internal/snapshot"
+	"github.com/joshjon/fletcher/internal/sqlite"
 	sqliteq "github.com/joshjon/fletcher/internal/sqlite/gen"
 )
 
@@ -98,7 +99,7 @@ func (m *Manager) Create(ctx context.Context, name string, sizeBytes int64) (Vol
 	})
 	if err != nil {
 		_ = m.provisioner.DeleteVolume(context.WithoutCancel(ctx), id.String())
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		if sqlite.IsUniqueViolation(err) {
 			return Volume{}, errs.Newf(errs.CategoryConflict, "a volume named %q already exists", name)
 		}
 		return Volume{}, fmt.Errorf("record volume: %w", err)

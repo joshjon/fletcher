@@ -12,11 +12,24 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	migratesqlite "github.com/golang-migrate/migrate/v4/database/sqlite"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	_ "modernc.org/sqlite" // pure-Go SQLite driver, registered as "sqlite"
+	sqlitedriver "modernc.org/sqlite" // pure-Go SQLite driver, registered as "sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
+
+// IsUniqueViolation reports whether err is a SQLite UNIQUE (or PRIMARY KEY)
+// constraint failure, e.g. an insert racing another on a unique name column.
+// Callers use this instead of matching the driver's message text, which is
+// not part of its API contract.
+func IsUniqueViolation(err error) bool {
+	if e, ok := errors.AsType[*sqlitedriver.Error](err); ok {
+		code := e.Code()
+		return code == sqlite3.SQLITE_CONSTRAINT_UNIQUE || code == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
+	}
+	return false
+}
 
 // Open opens a SQLite database at dbPath with the daemon's standard pragmas
 // (foreign keys on, WAL journal, sensible busy timeout).

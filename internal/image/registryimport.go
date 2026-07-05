@@ -19,6 +19,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/joshjon/fletcher/internal/appspec"
+	"github.com/joshjon/fletcher/internal/errs"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestagent"
 )
 
@@ -57,7 +58,7 @@ type ImportResult struct {
 func ImportRegistry(ctx context.Context, opts ImportOptions) (ImportResult, error) {
 	ref, err := name.ParseReference(opts.Ref)
 	if err != nil {
-		return ImportResult{}, fmt.Errorf("parse image ref %q: %w", opts.Ref, err)
+		return ImportResult{}, errs.Newf(errs.CategoryInvalidArgument, "parse image ref %q: %v", opts.Ref, err)
 	}
 
 	remoteOpts := []remote.Option{
@@ -72,7 +73,8 @@ func ImportRegistry(ctx context.Context, opts ImportOptions) (ImportResult, erro
 
 	img, err := remote.Image(ref, remoteOpts...)
 	if err != nil {
-		return ImportResult{}, fmt.Errorf("pull %q (check the ref and --registry-auth for a private image): %w", opts.Ref, err)
+		return ImportResult{}, errs.Newf(errs.CategoryFailedPrecondition,
+			"pull %q (check the ref and --registry-auth for a private image): %v", opts.Ref, err)
 	}
 	cfg, err := img.ConfigFile()
 	if err != nil {
@@ -86,7 +88,7 @@ func ImportRegistry(ctx context.Context, opts ImportOptions) (ImportResult, erro
 	target := filepath.Join(opts.ImagesDir, opts.Name+".ext4")
 	if _, err := os.Stat(target); err == nil {
 		if !opts.Force {
-			return ImportResult{}, fmt.Errorf("template %q already exists (use --force to replace)", opts.Name)
+			return ImportResult{}, errs.Newf(errs.CategoryConflict, "template %q already exists (use --force to replace)", opts.Name)
 		}
 		if err := os.Remove(target); err != nil {
 			return ImportResult{}, fmt.Errorf("remove existing template: %w", err)

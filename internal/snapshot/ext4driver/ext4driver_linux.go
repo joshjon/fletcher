@@ -118,7 +118,7 @@ func (d *Driver) CommitTemplate(ctx context.Context, id, name string, force bool
 	}
 	dst := filepath.Join(d.imagesDir, name+templateExt)
 	if _, err := os.Stat(dst); err == nil && !force {
-		return fmt.Errorf("ext4: template %q already exists", name)
+		return fmt.Errorf("ext4: template %q: %w", name, snapshot.ErrTemplateExists)
 	}
 	tmp := dst + ".partial"
 	if err := cloneFile(ctx, src, tmp); err != nil {
