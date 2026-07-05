@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -475,8 +476,10 @@ func (s *SessionsService) ShellSession(ctx context.Context, stream *connect.Bidi
 	pr, pw := io.Pipe()
 	resize := make(chan runtime.WinSize, 8)
 	stdout := writerFunc(func(p []byte) (int, error) {
+		// Copy: the runtime's frame payload may be reused after Write returns
+		// (same contract as StreamSessionLogs/DownloadFile/ProxySession).
 		if serr := stream.Send(&fletcherv1.ShellSessionResponse{
-			Msg: &fletcherv1.ShellSessionResponse_Data{Data: p},
+			Msg: &fletcherv1.ShellSessionResponse_Data{Data: bytes.Clone(p)},
 		}); serr != nil {
 			return 0, serr
 		}
