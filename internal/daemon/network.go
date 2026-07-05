@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/joshjon/fletcher/internal/network/portmap"
@@ -63,7 +64,7 @@ func bringUpNetwork(
 	cfg Config,
 	logger *slog.Logger,
 	peers *peer.Service,
-	serverKey api_ServerKeyLoader,
+	serverKey serverKeyLoader,
 	mapper *portmap.Mapper,
 ) (*networkSetup, error) {
 	listenPort := cfg.WireGuardListenPort
@@ -122,7 +123,7 @@ func bringUpNetwork(
 		return nil, fmt.Errorf("load existing peers: %w", err)
 	}
 
-	tunnel := wireguard.NewLinuxTunnel(logger)
+	tunnel := wireguard.NewTunnel(logger)
 	startCfg := wireguard.TunnelConfig{
 		InterfaceName: "fletcher0",
 		Address:       tunnelAddr,
@@ -282,15 +283,15 @@ func loadPeerConfigs(ctx context.Context, peers *peer.Service) ([]wireguard.Peer
 	for i, p := range all {
 		out[i] = wireguard.PeerConfig{
 			PublicKey:  p.PublicKey,
-			AllowedIPs: append([]string(nil), p.AllowedIPs...),
+			AllowedIPs: slices.Clone(p.AllowedIPs),
 		}
 	}
 	return out, nil
 }
 
-// api_ServerKeyLoader matches the subset of api.ServerKeyProvider the
+// serverKeyLoader matches the subset of api.ServerKeyProvider the
 // networking layer needs. We avoid importing the api package directly
 // (circular dep risk) by restating the one method.
-type api_ServerKeyLoader interface { //nolint:revive // underscore name avoids confusion with api.ServerKeyProvider
+type serverKeyLoader interface {
 	ServerPrivateKey(ctx context.Context) (wireguard.Key, error)
 }

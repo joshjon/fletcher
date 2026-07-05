@@ -23,7 +23,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -222,12 +222,22 @@ func lookupUser(name string) (resolvedUser, error) {
 	if err != nil {
 		return resolvedUser{}, err
 	}
+	uid, gid, err := parseUIDGID(u)
+	if err != nil {
+		return resolvedUser{}, err
+	}
+	return resolvedUser{uid: uid, gid: gid}, nil
+}
+
+// parseUIDGID parses a looked-up account's uid/gid strings, rejecting
+// negatives and values that would wrap uint32.
+func parseUIDGID(u *user.User) (uint32, uint32, error) {
 	uid, uerr := strconv.Atoi(u.Uid)
 	gid, gerr := strconv.Atoi(u.Gid)
 	if uerr != nil || gerr != nil || uid < 0 || gid < 0 || uid > math.MaxUint32 || gid > math.MaxUint32 {
-		return resolvedUser{}, fmt.Errorf("bad uid/gid for %q", name)
+		return 0, 0, fmt.Errorf("bad uid/gid for %q", u.Username)
 	}
-	return resolvedUser{uid: uint32(uid), gid: uint32(gid)}, nil
+	return uint32(uid), uint32(gid), nil
 }
 
 // lookupGroupID resolves a group name or numeric gid.
@@ -771,11 +781,14 @@ func listDir(conn net.Conn, spec guestproto.FileSpec) {
 		}
 		entries = append(entries, de)
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].IsDir != entries[j].IsDir {
-			return entries[i].IsDir // directories first
+	slices.SortFunc(entries, func(a, b guestproto.DirEntry) int {
+		if a.IsDir != b.IsDir {
+			if a.IsDir {
+				return -1 // directories first
+			}
+			return 1
 		}
-		return entries[i].Name < entries[j].Name
+		return strings.Compare(a.Name, b.Name)
 	})
 
 	if err := guestproto.WriteDirListing(conn, guestproto.DirListing{
@@ -974,12 +987,11 @@ func lookupLoginUser() loginUser {
 	if err != nil {
 		return loginUser{}
 	}
-	uid, uerr := strconv.Atoi(u.Uid)
-	gid, gerr := strconv.Atoi(u.Gid)
-	if uerr != nil || gerr != nil || uid < 0 || gid < 0 || uid > math.MaxUint32 || gid > math.MaxUint32 {
+	uid, gid, err := parseUIDGID(u)
+	if err != nil {
 		return loginUser{}
 	}
-	return loginUser{uid: uint32(uid), gid: uint32(gid), home: u.HomeDir, ok: true}
+	return loginUser{uid: uid, gid: gid, home: u.HomeDir, ok: true}
 }
 
 // applyLoginUser makes cmd run as the login user when resolved. For a PTY shell,
@@ -1159,7 +1171,7 @@ func withDefaults(env []string, lu loginUser) []string {
 	if lu.ok {
 		home, name = lu.home, loginUserName
 	}
-	out := append([]string(nil), env...)
+	out := slices.Clone(env)
 	if !hasKey(out, "PATH") {
 		out = append(out, "PATH="+defaultGuestPath)
 	}

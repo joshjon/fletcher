@@ -521,9 +521,6 @@ func proxyToUnix(client net.Conn, socketPath string) {
 	<-done
 }
 
-//go:fix inline
-func ptr[T any](v T) *T { return new(v) }
-
 // sanitiseID keeps a job ID usable as a directory name (typeids are already
 // safe, but guard against an empty or path-bearing value).
 func sanitiseID(id string) string {

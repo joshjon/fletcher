@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -193,8 +193,8 @@ func mergeEnv(current, changes []*fletcherv1.EnvVar) []*fletcherv1.EnvVar {
 }
 
 func sortedEnv(vars []*fletcherv1.EnvVar) []*fletcherv1.EnvVar {
-	out := append([]*fletcherv1.EnvVar(nil), vars...)
-	sort.Slice(out, func(i, j int) bool { return out[i].GetName() < out[j].GetName() })
+	out := slices.Clone(vars)
+	slices.SortFunc(out, func(a, b *fletcherv1.EnvVar) int { return strings.Compare(a.GetName(), b.GetName()) })
 	return out
 }
 

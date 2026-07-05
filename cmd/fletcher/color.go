@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"os"
 )
 
@@ -56,16 +55,3 @@ func blue(s string) string   { return colorize(codeBlue, s) }
 func gray(s string) string   { return colorize(codeGray, s) }
 func bold(s string) string   { return colorize(codeBold, s) }
 func dim(s string) string    { return colorize(codeDim, s) }
-
-// suppressColorIf disables colour when w isn't a TTY (e.g. piped to
-// a file). Use this when a single command path needs to override the
-// global default - for example, JSON output mode should always be
-// uncoloured regardless of NO_COLOR / TTY state.
-func suppressColorIf(w io.Writer) {
-	if f, ok := w.(*os.File); ok {
-		if fi, err := f.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
-			return
-		}
-	}
-	disableColor()
-}

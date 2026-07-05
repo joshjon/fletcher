@@ -27,7 +27,6 @@ const releaseTimeout = 2 * time.Second
 type entry struct {
 	req       Request
 	installed bool
-	method    string
 }
 
 // Mapper keeps a set of port mappings alive. Callers register desired
@@ -43,7 +42,6 @@ type Mapper struct {
 
 	mu      sync.Mutex
 	desired map[string]*entry
-	method  string // last protocol that worked, for status reporting
 }
 
 // NewMapper builds an empty Mapper.
@@ -68,7 +66,7 @@ func mappingKey(r Request) string {
 // marked installed - and so only released on shutdown - once a map succeeds.
 func (m *Mapper) Ensure(ctx context.Context, r Request) (Result, error) {
 	res, err := m.mapFn(ctx, r)
-	m.record(r, res, err)
+	m.record(r, err)
 	if err == nil {
 		m.logger.Info("router port-forward installed",
 			slog.String("method", res.Method),
@@ -86,7 +84,7 @@ func (m *Mapper) Ensure(ctx context.Context, r Request) (Result, error) {
 }
 
 // record updates the remembered state for r after a map attempt.
-func (m *Mapper) record(r Request, res Result, err error) {
+func (m *Mapper) record(r Request, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	e, ok := m.desired[mappingKey(r)]
@@ -99,16 +97,6 @@ func (m *Mapper) record(r Request, res Result, err error) {
 		return
 	}
 	e.installed = true
-	e.method = res.Method
-	m.method = res.Method
-}
-
-// Method reports the protocol of the last successful mapping ("nat-pmp" or
-// "upnp"), or "" if none has succeeded. Used by doctor for honest status.
-func (m *Mapper) Method() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.method
 }
 
 // requests returns the requests to refresh (all desired).
@@ -155,8 +143,8 @@ func (m *Mapper) Run(ctx context.Context) error {
 
 func (m *Mapper) refresh(ctx context.Context) {
 	for _, r := range m.requests() {
-		res, err := m.mapFn(ctx, r)
-		m.record(r, res, err)
+		_, err := m.mapFn(ctx, r)
+		m.record(r, err)
 		if err != nil {
 			// Debug, not Warn: the initial Ensure already warned loudly if
 			// mapping is unavailable; a 10-minute Warn cadence would just be

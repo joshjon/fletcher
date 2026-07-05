@@ -7,13 +7,14 @@ import (
 
 	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
+	"github.com/joshjon/fletcher/internal/job"
 )
 
 // CredentialsBackend is what the CredentialService handler needs from the
 // session manager: save a git host login as a reusable box credential, list the
 // saved ones, and delete one. (Agent login seeding was removed - see M16.)
 type CredentialsBackend interface {
-	SaveGitCredential(host, username, token, gitName, gitEmail string) error
+	SaveGitCredential(cred job.GitCredential) error
 	SavedCredentials() []string
 	DeleteSavedCredential(name string) error
 }
@@ -33,10 +34,13 @@ func NewCredentialsService(backend CredentialsBackend) *CredentialsService {
 // box's saved logins from structured fields, so new sessions seeded with the
 // "git" credential can clone over HTTPS.
 func (s *CredentialsService) SaveGitCredential(_ context.Context, req *connect.Request[fletcherv1.SaveGitCredentialRequest]) (*connect.Response[fletcherv1.SaveGitCredentialResponse], error) {
-	if err := s.backend.SaveGitCredential(
-		req.Msg.GetHost(), req.Msg.GetUsername(), req.Msg.GetToken(),
-		req.Msg.GetGitUserName(), req.Msg.GetGitUserEmail(),
-	); err != nil {
+	if err := s.backend.SaveGitCredential(job.GitCredential{
+		Host:     req.Msg.GetHost(),
+		Username: req.Msg.GetUsername(),
+		Token:    req.Msg.GetToken(),
+		Name:     req.Msg.GetGitUserName(),
+		Email:    req.Msg.GetGitUserEmail(),
+	}); err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.SaveGitCredentialResponse{}), nil

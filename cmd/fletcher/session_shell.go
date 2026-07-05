@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -141,7 +142,7 @@ func forwardStdin(stream *shellStream, send func(*fletcherv1.ShellSessionRequest
 		n, rerr := os.Stdin.Read(buf)
 		if n > 0 {
 			if serr := send(&fletcherv1.ShellSessionRequest{
-				Msg: &fletcherv1.ShellSessionRequest_Stdin{Stdin: append([]byte(nil), buf[:n]...)},
+				Msg: &fletcherv1.ShellSessionRequest_Stdin{Stdin: bytes.Clone(buf[:n])},
 			}); serr != nil {
 				return
 			}

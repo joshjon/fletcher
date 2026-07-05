@@ -361,9 +361,6 @@ func approvalFromRow(r sqliteq.PendingApproval) Approval {
 	return a
 }
 
-//go:fix inline
-func ptrInt64(v int64) *int64 { return new(v) }
-
 func nilIfEmpty(s string) *string {
 	if s == "" {
 		return nil

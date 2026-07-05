@@ -334,6 +334,33 @@ func (m *Manager) requireRuntime() error {
 	return nil
 }
 
+// resolveCreateParams validates a Create's inputs and fills configured
+// defaults (image, egress policy, gateway), so Create itself starts from
+// resolved values. Also enforces runtime presence and session caps.
+func (m *Manager) resolveCreateParams(ctx context.Context, p CreateParams) (CreateParams, error) {
+	if err := m.requireRuntime(); err != nil {
+		return CreateParams{}, err
+	}
+	if strings.TrimSpace(p.Name) == "" {
+		return CreateParams{}, errs.New(errs.CategoryInvalidArgument, "name is required")
+	}
+	if strings.TrimSpace(p.EgressPolicy) == "" {
+		p.EgressPolicy = m.opt().DefaultEgressPolicy
+	}
+	p.EgressPolicy = egress.Normalize(p.EgressPolicy)
+	p.Gateway = resolveGateway(p.Gateway, m.opt().DefaultGateway)
+	if strings.TrimSpace(p.Image) == "" {
+		p.Image = m.opt().DefaultImage
+	}
+	if strings.TrimSpace(p.Image) == "" {
+		return CreateParams{}, errs.New(errs.CategoryInvalidArgument, "image is required")
+	}
+	if err := m.checkCaps(ctx); err != nil {
+		return CreateParams{}, err
+	}
+	return p, nil
+}
+
 // CreateParams parameterise Create. Zero values mean "use the configured
 // default" where one exists (Image, EgressPolicy, Gateway) and "off/none"
 // otherwise (RunApp, VolumeRef, Credentials, EnvVars).
@@ -360,38 +387,21 @@ type CreateParams struct {
 
 // Create provisions a session's persistent fork, boots its VM, and records it.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (Session, error) {
+	p, err := m.resolveCreateParams(ctx, p)
+	if err != nil {
+		return Session{}, err
+	}
 	name, image := p.Name, p.Image
-	egressPolicy, gateway := p.EgressPolicy, p.Gateway
-	runApp, volumeRef, credentials, envVars := p.RunApp, p.VolumeRef, p.Credentials, p.EnvVars
-	if err := m.requireRuntime(); err != nil {
-		return Session{}, err
-	}
-	if strings.TrimSpace(name) == "" {
-		return Session{}, errs.New(errs.CategoryInvalidArgument, "name is required")
-	}
-	if strings.TrimSpace(egressPolicy) == "" {
-		egressPolicy = m.opt().DefaultEgressPolicy
-	}
-	egressPolicy = egress.Normalize(egressPolicy)
-	gateway = resolveGateway(gateway, m.opt().DefaultGateway)
-	if strings.TrimSpace(image) == "" {
-		image = m.opt().DefaultImage
-	}
-	if strings.TrimSpace(image) == "" {
-		return Session{}, errs.New(errs.CategoryInvalidArgument, "image is required")
-	}
-	if err := m.checkCaps(ctx); err != nil {
-		return Session{}, err
-	}
+	egressPolicy, gateway, runApp, envVars := p.EgressPolicy, p.Gateway, p.RunApp, p.EnvVars
 
 	var volumeID, volumePath string
-	if strings.TrimSpace(volumeRef) != "" {
+	if strings.TrimSpace(p.VolumeRef) != "" {
 		if m.volumes == nil {
 			return Session{}, errs.New(errs.CategoryFailedPrecondition,
 				"this daemon cannot attach volumes (requires the firecracker runtime's ext4 snapshots)")
 		}
 		var err error
-		volumeID, volumePath, err = m.volumes.ResolveAttachable(ctx, volumeRef)
+		volumeID, volumePath, err = m.volumes.ResolveAttachable(ctx, p.VolumeRef)
 		if err != nil {
 			return Session{}, err
 		}
@@ -399,7 +409,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Session, error) {
 
 	// Resolve seeded credentials before allocating a fork so a bad/absent login
 	// fails fast. Create-only: a later Start never reseeds (see resolveCredentials).
-	credFiles, err := m.resolveCredentials(credentials)
+	credFiles, err := m.resolveCredentials(p.Credentials)
 	if err != nil {
 		return Session{}, err
 	}

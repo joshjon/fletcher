@@ -9,9 +9,9 @@ package settings
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -138,12 +138,7 @@ func RequiresRestart(key string) bool {
 
 // LiveKeys returns the setting keys ReloadSettings applies live, sorted.
 func LiveKeys() []string {
-	out := make([]string, 0, len(liveKeys))
-	for k := range liveKeys {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(liveKeys))
 }
 
 // View is one setting's full picture for `fletcher settings list`.

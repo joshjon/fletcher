@@ -8,7 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -156,11 +156,14 @@ func sessionLsCmd() *cli.Command {
 			msg := resp.Msg
 			tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 			entries := msg.GetEntries()
-			sort.SliceStable(entries, func(i, j int) bool {
-				if entries[i].GetIsDir() != entries[j].GetIsDir() {
-					return entries[i].GetIsDir()
+			slices.SortStableFunc(entries, func(a, b *fletcherv1.DirEntry) int {
+				if a.GetIsDir() != b.GetIsDir() {
+					if a.GetIsDir() {
+						return -1
+					}
+					return 1
 				}
-				return entries[i].GetName() < entries[j].GetName()
+				return strings.Compare(a.GetName(), b.GetName())
 			})
 			for _, e := range entries {
 				name := e.GetName()

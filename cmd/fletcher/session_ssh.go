@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -76,7 +77,7 @@ func runSSHProxy(ctx context.Context, cmd *cli.Command, ref string) error {
 			n, rerr := os.Stdin.Read(buf)
 			if n > 0 {
 				if serr := stream.Send(&fletcherv1.ProxySessionRequest{
-					Msg: &fletcherv1.ProxySessionRequest_Data{Data: append([]byte(nil), buf[:n]...)},
+					Msg: &fletcherv1.ProxySessionRequest_Data{Data: bytes.Clone(buf[:n])},
 				}); serr != nil {
 					return
 				}

@@ -19,9 +19,9 @@ var ErrTunnelNotSupported = errors.New("wireguard tunnel not supported on this p
 // it outside Linux.
 type stubTunnel struct{}
 
-// NewLinuxTunnel returns a stub on non-Linux platforms so the daemon's
+// NewTunnel returns a stub on non-Linux platforms so the daemon's
 // wiring compiles. Calls to Start error with ErrTunnelNotSupported.
-func NewLinuxTunnel(_ *slog.Logger) Tunnel { return stubTunnel{} }
+func NewTunnel(_ *slog.Logger) Tunnel { return stubTunnel{} }
 
 func (stubTunnel) Start(_ context.Context, _ TunnelConfig) error {
 	return ErrTunnelNotSupported

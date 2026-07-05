@@ -152,6 +152,10 @@ func encodePairBlob(b pairBlob) string {
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
+// decodePairBlob is the reference decoder for encodePairBlob's output. The
+// real consumers are native clients (the iOS app decodes the QR); no CLI path
+// calls this. It exists as a test seam so the round-trip tests pin the wire
+// format and validation rules those clients mirror.
 func decodePairBlob(s string) (pairBlob, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(s))
 	if err != nil {

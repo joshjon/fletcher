@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -60,6 +60,6 @@ func ListTemplates(imagesDir string) ([]Template, error) {
 		}
 		out = append(out, t)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b Template) int { return strings.Compare(a.Name, b.Name) })
 	return out, nil
 }

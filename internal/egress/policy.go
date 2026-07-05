@@ -40,10 +40,11 @@ type Policy interface {
 	Name() string
 }
 
-// Deny refuses all egress. It backs the `none` and `tools` policies: with
-// those the fork still has the daemon MCP tools, just no transparent proxy
-// (in practice the proxy is simply not wired for them, but Deny is the safe
-// default if one is ever pointed at it).
+// Deny refuses all egress. Nothing constructs it in production: the "none"
+// policy is enforced by not wiring the proxy at all (the runtime drops the
+// egress forward and strips the HTTP(S)_PROXY env). Deny is kept as the safe
+// deny-all Policy for tests and for any future path that needs to point a
+// proxy at a hard no.
 type Deny struct{}
 
 // Allow always returns false: Deny permits no egress.

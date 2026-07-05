@@ -16,7 +16,7 @@ func testMapper(t *testing.T) *Mapper {
 	return NewMapper(slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
-func TestMapperEnsureRemembersAndRecordsMethod(t *testing.T) {
+func TestMapperEnsureRemembers(t *testing.T) {
 	m := testMapper(t)
 	var calls []Request
 	var mu sync.Mutex
@@ -30,7 +30,6 @@ func TestMapperEnsureRemembersAndRecordsMethod(t *testing.T) {
 	res, err := m.Ensure(context.Background(), Request{Protocol: ProtocolTCP, InternalPort: 51821})
 	require.NoError(t, err)
 	require.Equal(t, "nat-pmp", res.Method)
-	require.Equal(t, "nat-pmp", m.Method())
 	require.Len(t, m.requests(), 1)
 }
 
@@ -43,7 +42,6 @@ func TestMapperRemembersEvenOnFailure(t *testing.T) {
 	require.Error(t, err)
 	// Remembered so a later refresh can recover once the router is reachable.
 	require.Len(t, m.requests(), 1)
-	require.Empty(t, m.Method())
 }
 
 // TestMapperReleaseSkipsUninstalled is the regression guard for the CI

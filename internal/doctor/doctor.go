@@ -9,16 +9,18 @@
 package doctor
 
 import (
+	"cmp"
 	"context"
-	"sort"
+	"slices"
 )
 
 // Status is the verdict of one check.
 type Status int
 
-// Status values, ordered from best to worst for sorting.
+// Status values, ordered from best to worst for sorting. StatusOK starts at
+// 1 so a zero Result{} reads as unknown instead of silently passing as ok.
 const (
-	StatusOK Status = iota
+	StatusOK Status = iota + 1
 	StatusWarn
 	StatusFail
 	StatusSkip // platform doesn't support this check (e.g. /dev/net/tun on macOS dev)
@@ -159,13 +161,11 @@ func CollectPlan(results []Result) []PlanStep {
 	for _, e := range byID {
 		out = append(out, e.step)
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		ei := byID[out[i].ID]
-		ej := byID[out[j].ID]
-		if out[i].Priority != out[j].Priority {
-			return out[i].Priority < out[j].Priority
+	slices.SortStableFunc(out, func(a, b PlanStep) int {
+		if a.Priority != b.Priority {
+			return cmp.Compare(a.Priority, b.Priority)
 		}
-		return ei.order < ej.order
+		return cmp.Compare(byID[a.ID].order, byID[b.ID].order)
 	})
 	return out
 }

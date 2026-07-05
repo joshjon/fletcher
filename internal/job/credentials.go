@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/joshjon/fletcher/internal/errs"
@@ -89,10 +90,18 @@ func DeleteSavedCredential(root, name string) error {
 	return nil
 }
 
-// Credential returns the catalog entry for a credential name.
-func Credential(name string) (AllowedCredential, bool) {
-	c, ok := AllowedCredentials[name]
-	return c, ok
+// GitCredential is one git host login plus an optional committer identity,
+// grouped so the four same-typed string fields cannot be swapped at a call
+// site. A blank Name/Email leaves any previously saved identity untouched.
+type GitCredential struct {
+	// Host is the bare hostname the login authenticates (e.g. github.com).
+	Host string
+	// Username and Token are the HTTPS login pair (token = PAT or app token).
+	Username string
+	Token    string
+	// Name and Email are the optional git committer identity.
+	Name  string
+	Email string
 }
 
 // WriteGitCredential saves a git host login under the box's credentials root as
@@ -102,15 +111,14 @@ func Credential(name string) (AllowedCredential, bool) {
 // (git-credential-store's default search path) and a `config` file enabling
 // that store helper plus any committer identity. Call once per host - an
 // existing line for the same host is replaced and other hosts are kept, so
-// github.com and gitlab.com coexist. A blank name/email leaves any previously
-// saved identity untouched.
-func WriteGitCredential(root, host, username, token, gitName, gitEmail string) error {
+// github.com and gitlab.com coexist.
+func WriteGitCredential(root string, cred GitCredential) error {
 	if root == "" {
 		return errs.New(errs.CategoryFailedPrecondition, "the daemon has no credentials root configured")
 	}
-	host = strings.TrimSpace(host)
-	username = strings.TrimSpace(username)
-	token = strings.TrimSpace(token)
+	host := strings.TrimSpace(cred.Host)
+	username := strings.TrimSpace(cred.Username)
+	token := strings.TrimSpace(cred.Token)
 	if host == "" || username == "" || token == "" {
 		return errs.New(errs.CategoryInvalidArgument, "git credential needs a host, username, and token")
 	}
@@ -127,7 +135,7 @@ func WriteGitCredential(root, host, username, token, gitName, gitEmail string) e
 	if err := upsertGitCredentialLine(filepath.Join(dir, "credentials"), host, username, token); err != nil {
 		return fmt.Errorf("write git credentials: %w", err)
 	}
-	if err := writeGitConfig(filepath.Join(dir, "config"), gitName, gitEmail); err != nil {
+	if err := writeGitConfig(filepath.Join(dir, "config"), cred.Name, cred.Email); err != nil {
 		return fmt.Errorf("write git config: %w", err)
 	}
 	return nil
@@ -214,12 +222,7 @@ func readGitIdentity(path string) gitIdentity {
 
 // CredentialNames returns every supported credential name, sorted.
 func CredentialNames() []string {
-	names := make([]string, 0, len(AllowedCredentials))
-	for name := range AllowedCredentials {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(AllowedCredentials))
 }
 
 // ResolveCredentialFiles reads the named credential directories under root and
@@ -339,12 +342,7 @@ func normaliseCredentials(in []string) ([]string, error) {
 		}
 		seen[name] = struct{}{}
 	}
-	out := make([]string, 0, len(seen))
-	for name := range seen {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out, nil
+	return slices.Sorted(maps.Keys(seen)), nil
 }
 
 // encodeCredentials serialises the (already-validated, sorted) list to the
@@ -375,17 +373,5 @@ func decodeCredentials(s string) ([]string, error) {
 }
 
 func allowedCredentialNames() string {
-	names := make([]string, 0, len(AllowedCredentials))
-	for name := range AllowedCredentials {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	var out strings.Builder
-	for i, n := range names {
-		if i > 0 {
-			out.WriteString(", ")
-		}
-		out.WriteString(n)
-	}
-	return out.String()
+	return strings.Join(slices.Sorted(maps.Keys(AllowedCredentials)), ", ")
 }

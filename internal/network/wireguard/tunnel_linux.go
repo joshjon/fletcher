@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"slices"
 	"sync"
 
@@ -31,10 +30,10 @@ type LinuxTunnel struct {
 	cfg      TunnelConfig
 }
 
-// NewLinuxTunnel constructs an unstarted Tunnel backed by wireguard-go +
+// NewTunnel constructs an unstarted Tunnel backed by wireguard-go +
 // netlink. Returns Tunnel (not *LinuxTunnel) so the call site matches
 // the non-Linux build's signature.
-func NewLinuxTunnel(logger *slog.Logger) Tunnel {
+func NewTunnel(logger *slog.Logger) Tunnel {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -174,7 +173,3 @@ func configureLink(name, addrCIDR string, mtu int) error {
 	}
 	return nil
 }
-
-// ensure the linter doesn't complain about the unused stdlib import on
-// build configurations that strip it.
-var _ = net.IPv4zero

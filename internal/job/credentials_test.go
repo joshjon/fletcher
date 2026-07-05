@@ -44,7 +44,7 @@ func TestWriteGitCredential(t *testing.T) {
 
 	t.Run("writes the store helper, host line, and identity", func(t *testing.T) {
 		root := t.TempDir()
-		require.NoError(t, WriteGitCredential(root, "github.com", "me", "t0ken", "Me", "me@example.com"))
+		require.NoError(t, WriteGitCredential(root, GitCredential{Host: "github.com", Username: "me", Token: "t0ken", Name: "Me", Email: "me@example.com"}))
 
 		require.Equal(t, "https://me:t0ken@github.com\n", read(t, root, "credentials"))
 		cfg := read(t, root, "config")
@@ -55,8 +55,8 @@ func TestWriteGitCredential(t *testing.T) {
 
 	t.Run("a second host is appended, both kept", func(t *testing.T) {
 		root := t.TempDir()
-		require.NoError(t, WriteGitCredential(root, "github.com", "me", "gh", "", ""))
-		require.NoError(t, WriteGitCredential(root, "gitlab.com", "me", "gl", "", ""))
+		require.NoError(t, WriteGitCredential(root, GitCredential{Host: "github.com", Username: "me", Token: "gh"}))
+		require.NoError(t, WriteGitCredential(root, GitCredential{Host: "gitlab.com", Username: "me", Token: "gl"}))
 
 		creds := read(t, root, "credentials")
 		require.Contains(t, creds, "https://me:gh@github.com")
@@ -65,16 +65,16 @@ func TestWriteGitCredential(t *testing.T) {
 
 	t.Run("re-saving a host replaces its line, not duplicates it", func(t *testing.T) {
 		root := t.TempDir()
-		require.NoError(t, WriteGitCredential(root, "github.com", "me", "old", "", ""))
-		require.NoError(t, WriteGitCredential(root, "github.com", "me", "new", "", ""))
+		require.NoError(t, WriteGitCredential(root, GitCredential{Host: "github.com", Username: "me", Token: "old"}))
+		require.NoError(t, WriteGitCredential(root, GitCredential{Host: "github.com", Username: "me", Token: "new"}))
 
 		require.Equal(t, "https://me:new@github.com\n", read(t, root, "credentials"))
 	})
 
 	t.Run("a blank identity on a later call keeps the saved one", func(t *testing.T) {
 		root := t.TempDir()
-		require.NoError(t, WriteGitCredential(root, "github.com", "me", "gh", "Me", "me@example.com"))
-		require.NoError(t, WriteGitCredential(root, "gitlab.com", "me", "gl", "", ""))
+		require.NoError(t, WriteGitCredential(root, GitCredential{Host: "github.com", Username: "me", Token: "gh", Name: "Me", Email: "me@example.com"}))
+		require.NoError(t, WriteGitCredential(root, GitCredential{Host: "gitlab.com", Username: "me", Token: "gl"}))
 
 		cfg := read(t, root, "config")
 		require.Contains(t, cfg, "name = Me")
@@ -90,7 +90,7 @@ func TestWriteGitCredential(t *testing.T) {
 			{"https://github.com", "me", "t"},
 			{"github.com/me", "me", "t"},
 		} {
-			err := WriteGitCredential(root, tc.host, tc.user, tc.token, "", "")
+			err := WriteGitCredential(root, GitCredential{Host: tc.host, Username: tc.user, Token: tc.token})
 			require.Error(t, err)
 			require.Equal(t, errs.CategoryInvalidArgument, errs.CategoryOf(err))
 		}
@@ -98,7 +98,7 @@ func TestWriteGitCredential(t *testing.T) {
 
 	t.Run("seeds into a session via ResolveCredentialFiles", func(t *testing.T) {
 		root := t.TempDir()
-		require.NoError(t, WriteGitCredential(root, "github.com", "me", "t0ken", "", ""))
+		require.NoError(t, WriteGitCredential(root, GitCredential{Host: "github.com", Username: "me", Token: "t0ken"}))
 
 		files, err := ResolveCredentialFiles(root, []string{CredentialGit})
 		require.NoError(t, err)
