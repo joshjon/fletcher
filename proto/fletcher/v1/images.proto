@@ -17,6 +17,12 @@ service ImageService {
   // ListImages lists the imported templates, so a client can offer an image
   // picker instead of a free-text field.
   rpc ListImages(ListImagesRequest) returns (ListImagesResponse) {}
+  // StartImport continues on the host after the client disconnects. Reuse the
+  // request_id when retrying an ambiguous response; credentials are not stored.
+  rpc StartImport(StartImportRequest) returns (StartImportResponse) {}
+  rpc ListImports(ListImportsRequest) returns (ListImportsResponse) {}
+  // DeleteImage refuses templates referenced by sessions, active jobs or the default.
+  rpc DeleteImage(DeleteImageRequest) returns (DeleteImageResponse) {}
   // BuildFromSession builds a project's Dockerfile - living in a running
   // session's workspace - into a deployable template, entirely inside Fletcher
   // (M19): the daemon tars the project out of the session and builds it with
@@ -120,6 +126,31 @@ message ImportRequest {
   // force replaces an existing template of the same name.
   bool force = 5;
 }
+
+message StartImportRequest {
+  string request_id = 1;
+  string ref = 2;
+  string name = 3;
+  bool force = 4;
+  string registry_username = 5;
+  string registry_password = 6;
+  // update resolves the stored registry source for name, rather than taking ref.
+  bool update = 7;
+}
+message StartImportResponse { ImageImport operation = 1; }
+message ListImportsRequest {}
+message ListImportsResponse { repeated ImageImport operations = 1; }
+message ImageImport {
+  string id = 1;
+  string ref = 2;
+  string name = 3;
+  // state is running, succeeded or failed. Interrupted imports fail on startup.
+  string state = 4;
+  string error = 5;
+  int64 created_at = 6;
+}
+message DeleteImageRequest { string name = 1; }
+message DeleteImageResponse {}
 
 message ImportResponse {
   string name = 1;

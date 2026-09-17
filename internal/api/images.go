@@ -30,13 +30,14 @@ type ImagesService struct {
 	imagesDir string
 	format    string
 	builder   ImageBuilder
+	manager   *image.Manager
 }
 
 // NewImagesService wires the service to the daemon's images directory, snapshot
 // format (server-side import currently supports ext4 / Firecracker), and the
 // session-native image builder.
-func NewImagesService(imagesDir, format string, builder ImageBuilder) *ImagesService {
-	return &ImagesService{imagesDir: imagesDir, format: format, builder: builder}
+func NewImagesService(imagesDir, format string, builder ImageBuilder, manager *image.Manager) *ImagesService {
+	return &ImagesService{imagesDir: imagesDir, format: format, builder: builder, manager: manager}
 }
 
 // BuildFromSession builds a session's project Dockerfile into a template (M19).

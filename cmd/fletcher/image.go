@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,21 +29,19 @@ import (
 // user) can own and run them. Matches User= in init/fletcher.service.
 const daemonUser = "fletcher"
 
-// imageCmd manages the btrfs rootfs templates the runc/btrfs runtime forks
-// from. A job's --image names a template under <btrfs-root>/images/<name>;
-// the snapshot driver CoW-snapshots it per run. Until the
-// firecracker-containerd OCI pull pipeline lands (DESIGN.md §3/§13), these
-// templates are produced by flattening a locally-built OCI image.
+// imageCmd manages rootfs templates through the daemon, with an explicit
+// local import path for images built on the Linux host.
 func imageCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "image",
-		Usage: "manage base-image rootfs templates for the runc/btrfs runtime",
+		Usage: "manage imported image templates locally or through the daemon",
 		Commands: []*cli.Command{
 			imageImportCmd(),
 			imagePullCmd(),
 			imageUpdateCmd(),
 			imageListCmd(),
 			imageRemoveCmd(),
+			imageImportsCmd(),
 		},
 	}
 }
@@ -140,10 +139,15 @@ func imagePullCmd() *cli.Command {
 		Description: `Pulls and flattens a registry image into a rootfs template on the
 daemon's host, server-side - so it works from a remote client with no
 local docker or filesystem access to the box. For a private registry,
-pass --registry-auth user:token. Building from a local Dockerfile is a
-host-side operation; use 'image import' for that.`,
+pass --registry-auth user:token. The command waits for completion by default;
+--detach returns immediately. Accepted work continues if the client disconnects;
+use 'image imports' to inspect its result. Building from a local Dockerfile is
+a host-side operation; use 'image import' for that.`,
 		Flags: []cli.Flag{
 			socketFlag(),
+			outputFlag(),
+			yesFlag(),
+			&cli.BoolFlag{Name: "detach", Usage: "return immediately; inspect progress with 'image imports'"},
 			&cli.StringFlag{Name: "name", Usage: "template name (default: the ref's repository name)"},
 			&cli.StringFlag{Name: "registry-auth", Usage: "private registry credentials as user:token"},
 			&cli.BoolFlag{Name: "force", Usage: "replace an existing template of the same name"},
@@ -153,8 +157,14 @@ host-side operation; use 'image import' for that.`,
 			if ref == "" {
 				return errors.New("a docker image reference is required, e.g. ghcr.io/you/app:v1")
 			}
+			if cmd.Bool("force") {
+				if err := confirmManagement(cmd, "Replace the existing image template?"); err != nil {
+					return err
+				}
+			}
 			user, pass := parseRegistryAuth(cmd.String("registry-auth"))
-			resp, err := newImageClient(cmd).Import(ctx, connect.NewRequest(&fletcherv1.ImportRequest{
+			resp, err := newImageClient(cmd).StartImport(ctx, connect.NewRequest(&fletcherv1.StartImportRequest{
+				RequestId:        rand.Text(),
 				Ref:              ref,
 				Name:             cmd.String("name"),
 				RegistryUsername: user,
@@ -164,11 +174,7 @@ host-side operation; use 'image import' for that.`,
 			if err != nil {
 				return err
 			}
-			fmt.Printf("imported %s as %q (digest %s)\n", ref, resp.Msg.GetName(), resp.Msg.GetDigest())
-			if p := resp.Msg.GetExposedPort(); p != 0 {
-				fmt.Printf("image exposes port %d\n", p)
-			}
-			return nil
+			return finishImageImport(ctx, cmd, resp.Msg)
 		},
 	}
 }
@@ -183,15 +189,20 @@ and re-flattens it, replacing the template in place. Existing sessions
 keep their already-cloned forks; only new jobs and sessions use the
 updated template. With no name it updates the daemon's default_image.
 
-Needs root and docker, like 'image import'. The snapshot root and image
-name default to the daemon's configured btrfs_root and default_image, so
-the common case is just:
+By default this starts a registry update through the daemon, without root
+or local Docker. It waits for completion; --detach returns immediately and
+'image imports' shows the result.
 
-  sudo fletcher image update
+  fletcher image update
 
-Pass --btrfs-root or a [name] to override either.`,
-		Flags: []cli.Flag{btrfsRootFlag(), socketFlag()},
+An explicit --btrfs-root (including FLETCHER_BTRFS_ROOT) selects the legacy
+local import path, which needs root and Docker and can rebuild local-only
+images. That path is intended for host-side image development.`,
+		Flags: []cli.Flag{btrfsRootFlag(), socketFlag(), yesFlag(), outputFlag(), &cli.BoolFlag{Name: "detach", Usage: "return immediately for a remote update"}},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.String("btrfs-root") == "" {
+				return remoteImageUpdate(ctx, cmd)
+			}
 			if runtime.GOOS != "linux" {
 				return errors.New("image update is Linux-only")
 			}
@@ -281,10 +292,18 @@ func settingValue(ctx context.Context, cmd *cli.Command, key string) (string, er
 
 func imageListCmd() *cli.Command {
 	return &cli.Command{
-		Name:  "ls",
-		Usage: "list imported rootfs templates",
-		Flags: []cli.Flag{btrfsRootFlag()},
-		Action: func(_ context.Context, cmd *cli.Command) error {
+		Name:    "list",
+		Aliases: []string{"ls"},
+		Usage:   "list imported rootfs templates",
+		Flags:   []cli.Flag{btrfsRootFlag(), socketFlag(), outputFlag()},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if cmd.String("btrfs-root") == "" {
+				r, err := newImageClient(cmd).ListImages(ctx, connect.NewRequest(&fletcherv1.ListImagesRequest{}))
+				if err != nil {
+					return err
+				}
+				return renderManagement(cmd.String("output"), r.Msg)
+			}
 			root := cmd.String("btrfs-root")
 			if root == "" {
 				return errors.New("set --btrfs-root (or FLETCHER_BTRFS_ROOT) to the daemon's snapshot root")
@@ -318,11 +337,19 @@ func imageListCmd() *cli.Command {
 
 func imageRemoveCmd() *cli.Command {
 	return &cli.Command{
-		Name:      "rm",
+		Name:      "delete",
+		Aliases:   []string{"rm"},
 		Usage:     "remove an imported rootfs template",
 		ArgsUsage: "<name>",
-		Flags:     []cli.Flag{btrfsRootFlag()},
+		Flags:     []cli.Flag{btrfsRootFlag(), socketFlag(), yesFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			if err := confirmManagement(cmd, "Delete this image template?"); err != nil {
+				return err
+			}
+			if cmd.String("btrfs-root") == "" {
+				_, err := newImageClient(cmd).DeleteImage(ctx, connect.NewRequest(&fletcherv1.DeleteImageRequest{Name: cmd.Args().First()}))
+				return err
+			}
 			if runtime.GOOS != "linux" {
 				return errors.New("image rm is Linux-only (btrfs)")
 			}

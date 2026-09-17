@@ -406,8 +406,10 @@ func (x *ListPeersRequest) GetOffset() int32 {
 }
 
 type ListPeersResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Peers         []*Peer                `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Peers []*Peer                `protobuf:"bytes,1,rep,name=peers,proto3" json:"peers,omitempty"`
+	// current_peer_id identifies the authenticated caller, empty on the local socket.
+	CurrentPeerId string `protobuf:"bytes,2,opt,name=current_peer_id,json=currentPeerId,proto3" json:"current_peer_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -447,6 +449,13 @@ func (x *ListPeersResponse) GetPeers() []*Peer {
 		return x.Peers
 	}
 	return nil
+}
+
+func (x *ListPeersResponse) GetCurrentPeerId() string {
+	if x != nil {
+		return x.CurrentPeerId
+	}
+	return ""
 }
 
 type DeletePeerRequest struct {
@@ -540,7 +549,10 @@ func (x *DeletePeerResponse) GetExisted() bool {
 type PairPeerRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// name is the only required input; everything else is daemon-resolved.
-	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// direct_vpn requires the configured remote API endpoint instead of a public
+	// WireGuard endpoint. The caller uses api_token and remote_api_endpoint only.
+	DirectVpn     bool `protobuf:"varint,2,opt,name=direct_vpn,json=directVpn,proto3" json:"direct_vpn,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -580,6 +592,13 @@ func (x *PairPeerRequest) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *PairPeerRequest) GetDirectVpn() bool {
+	if x != nil {
+		return x.DirectVpn
+	}
+	return false
 }
 
 type BeginPairRequest struct {
@@ -1166,15 +1185,18 @@ const file_fletcher_v1_peers_proto_rawDesc = "" +
 	"\x04peer\x18\x01 \x01(\v2\x11.fletcher.v1.PeerR\x04peer\"@\n" +
 	"\x10ListPeersRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06offset\x18\x02 \x01(\x05R\x06offset\"<\n" +
+	"\x06offset\x18\x02 \x01(\x05R\x06offset\"d\n" +
 	"\x11ListPeersResponse\x12'\n" +
-	"\x05peers\x18\x01 \x03(\v2\x11.fletcher.v1.PeerR\x05peers\"#\n" +
+	"\x05peers\x18\x01 \x03(\v2\x11.fletcher.v1.PeerR\x05peers\x12&\n" +
+	"\x0fcurrent_peer_id\x18\x02 \x01(\tR\rcurrentPeerId\"#\n" +
 	"\x11DeletePeerRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\".\n" +
 	"\x12DeletePeerResponse\x12\x18\n" +
-	"\aexisted\x18\x01 \x01(\bR\aexisted\"%\n" +
+	"\aexisted\x18\x01 \x01(\bR\aexisted\"D\n" +
 	"\x0fPairPeerRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"&\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"direct_vpn\x18\x02 \x01(\bR\tdirectVpn\"&\n" +
 	"\x10BeginPairRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x91\x03\n" +
 	"\x11BeginPairResponse\x12!\n" +

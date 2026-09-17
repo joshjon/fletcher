@@ -11,3 +11,8 @@ sql:
         emit_json_tags: false
         emit_pointers_for_null_types: true
         emit_exact_table_names: false
+        overrides:
+          - column: image_imports.is_replacement
+            go_type: bool
+          - column: image_imports.is_update
+            go_type: bool

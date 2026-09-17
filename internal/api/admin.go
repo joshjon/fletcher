@@ -32,6 +32,10 @@ type RuntimeStatus struct {
 	// BaseImageAvailable is true when at least one base-image template exists for
 	// the active snapshot driver.
 	BaseImageAvailable bool
+	// HasBaseImage reads live template availability after imports and deletion.
+	HasBaseImage func() bool
+	// HasImageUpdate suppresses stale update hints after a template replacement.
+	HasImageUpdate func() bool
 	// BaseImageUpdate is set by a background registry check when the default
 	// image's template is older than the registry's current version. It may be
 	// nil (no check wired up), which Health reports as no update available.
@@ -43,7 +47,7 @@ type RuntimeStatus struct {
 }
 
 // AdminService implements the daemon-administration RPCs (health checks etc.)
-// exposed over the local Unix socket.
+// exposed over the local socket and authenticated management API.
 type AdminService struct {
 	fletcherv1connect.UnimplementedAdminServiceHandler
 	startedAt int64
@@ -70,6 +74,13 @@ func (s *AdminService) Health(_ context.Context, _ *connect.Request[fletcherv1.H
 	}
 	updateAvailable := s.runtime.BaseImageUpdate != nil && s.runtime.BaseImageUpdate.Load()
 	updateChecked := s.runtime.BaseImageChecked != nil && s.runtime.BaseImageChecked.Load()
+	available := s.runtime.BaseImageAvailable
+	if s.runtime.HasBaseImage != nil {
+		available = s.runtime.HasBaseImage()
+	}
+	if s.runtime.HasImageUpdate != nil {
+		updateAvailable = s.runtime.HasImageUpdate()
+	}
 	return connect.NewResponse(&fletcherv1.HealthResponse{
 		Status:                   "ok",
 		Version:                  info.Version,
@@ -78,7 +89,7 @@ func (s *AdminService) Health(_ context.Context, _ *connect.Request[fletcherv1.H
 		PublicEndpoint:           endpoint,
 		Runtime:                  s.runtime.Runtime,
 		Snapshot:                 s.runtime.Snapshot,
-		BaseImageAvailable:       s.runtime.BaseImageAvailable,
+		BaseImageAvailable:       available,
 		BaseImageUpdateAvailable: updateAvailable,
 		BaseImageUpdateChecked:   updateChecked,
 		PairingEndpoint:          pairingEndpoint,

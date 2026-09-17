@@ -1,0 +1,69 @@
+syntax = "proto3";
+package fletcher.v1;
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// HostService manages this daemon only, over the authenticated management API.
+// Paired devices are trusted administrators. There is no arbitrary host shell.
+service HostService {
+  rpc GetHost(GetHostRequest) returns (GetHostResponse) {}
+  // GetDaemonLogs returns a bounded tail from this process, not the system journal.
+  rpc GetDaemonLogs(GetDaemonLogsRequest) returns (GetDaemonLogsResponse) {}
+  // RestartDaemon acknowledges a graceful restart through existing supervision.
+  // Reuse request_id on retries; expected_started_at prevents restarting a new process.
+  rpc RestartDaemon(RestartDaemonRequest) returns (RestartDaemonResponse) {}
+  rpc GetStorage(GetStorageRequest) returns (GetStorageResponse) {}
+  // RunDiagnostics reuses the local doctor's read-only checks. External probes
+  // are opt-in; router mappings are never created or changed by this RPC.
+  rpc RunDiagnostics(RunDiagnosticsRequest) returns (RunDiagnosticsResponse) {}
+  // ClearBuildCache refuses while a build holds the cache. No session data is deleted.
+  rpc ClearBuildCache(ClearBuildCacheRequest) returns (ClearBuildCacheResponse) {}
+}
+message GetHostRequest {}
+message GetHostResponse {
+  string version = 1;
+  string commit = 2;
+  int64 started_at = 3;
+  bool can_restart = 4;
+  string restart_unavailable_reason = 5;
+  repeated HostCheck checks = 6;
+}
+message HostCheck {
+  string name = 1;
+  // status is ok, warning or error.
+  string status = 2;
+  string detail = 3;
+}
+message GetDaemonLogsRequest { int32 lines = 1; }
+message GetDaemonLogsResponse {
+  string text = 1;
+  // generation identifies the process producing this bounded log tail.
+  int64 generation = 2;
+}
+message RestartDaemonRequest {
+  string request_id = 1;
+  int64 expected_started_at = 2;
+}
+message RestartDaemonResponse { bool accepted = 1; }
+message GetStorageRequest {}
+message GetStorageResponse {
+  uint64 total_bytes = 1;
+  uint64 available_bytes = 2;
+  // Categories report allocated blocks, not exclusive physical usage. Reflink
+  // blocks may be counted in more than one file; do not add them to predict free space.
+  repeated StorageCategory categories = 3;
+  int64 measured_at = 4;
+}
+message StorageCategory {
+  string name = 1;
+  uint64 allocated_bytes = 2;
+  uint64 logical_bytes = 3;
+  uint64 files = 4;
+}
+message RunDiagnosticsRequest { bool include_external_checks = 1; }
+message RunDiagnosticsResponse {
+  repeated HostCheck checks = 1;
+  string action_plan = 2;
+  int64 checked_at = 3;
+}
+message ClearBuildCacheRequest {}
+message ClearBuildCacheResponse {}

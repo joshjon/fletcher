@@ -116,7 +116,9 @@ type Service struct {
 	pairingPort    int
 	pairingCert    PairingCertProvider
 
-	pending *pendingPairs
+	pending    *pendingPairs
+	requestsMu sync.Mutex
+	requests   map[string]map[*requestLease]struct{}
 }
 
 // Options configures a Service's pair-time defaults.
@@ -457,10 +459,16 @@ func (s *Service) List(ctx context.Context, limit, offset int32) ([]Peer, error)
 
 // Delete removes a peer. Returns false (no error) if the peer was missing.
 func (s *Service) Delete(ctx context.Context, id string) (bool, error) {
+	s.requestsMu.Lock()
+	defer s.requestsMu.Unlock()
 	n, err := s.q.DeletePeer(ctx, id)
 	if err != nil {
 		return false, fmt.Errorf("delete peer: %w", err)
 	}
+	for lease := range s.requests[id] {
+		lease.cancel()
+	}
+	delete(s.requests, id)
 	return n > 0, nil
 }
 

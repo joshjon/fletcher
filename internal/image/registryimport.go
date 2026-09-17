@@ -2,6 +2,8 @@ package image
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -56,6 +58,9 @@ type ImportResult struct {
 // root, but a full base image needing setuid binaries or non-root file ownership
 // should use the root-privileged CLI `image import` instead.
 func ImportRegistry(ctx context.Context, opts ImportOptions) (ImportResult, error) {
+	if !ValidName(opts.Name) {
+		return ImportResult{}, errs.New(errs.CategoryInvalidArgument, "invalid image name (use lowercase letters, digits, '.', '_' or '-')")
+	}
 	ref, err := name.ParseReference(opts.Ref)
 	if err != nil {
 		return ImportResult{}, errs.Newf(errs.CategoryInvalidArgument, "parse image ref %q: %v", opts.Ref, err)
@@ -90,9 +95,6 @@ func ImportRegistry(ctx context.Context, opts ImportOptions) (ImportResult, erro
 		if !opts.Force {
 			return ImportResult{}, errs.Newf(errs.CategoryConflict, "template %q already exists (use --force to replace)", opts.Name)
 		}
-		if err := os.Remove(target); err != nil {
-			return ImportResult{}, fmt.Errorf("remove existing template: %w", err)
-		}
 	}
 	if err := os.MkdirAll(opts.ImagesDir, 0o750); err != nil {
 		return ImportResult{}, fmt.Errorf("create images dir: %w", err)
@@ -110,13 +112,6 @@ func ImportRegistry(ctx context.Context, opts ImportOptions) (ImportResult, erro
 
 	// Inject the guest init and the app launch spec, so the template boots and
 	// (in app mode) runs the image's own entrypoint.
-	initDest := filepath.Join(staging, guestagent.InitPath)
-	if err := os.MkdirAll(filepath.Dir(initDest), 0o755); err != nil { //nolint:gosec // standard /sbin perms in the rootfs
-		return ImportResult{}, fmt.Errorf("create init dir: %w", err)
-	}
-	if err := guestagent.WriteTo(initDest); err != nil {
-		return ImportResult{}, fmt.Errorf("inject guest agent: %w", err)
-	}
 	spec := appspec.Spec{
 		Entrypoint: cfg.Config.Entrypoint,
 		Cmd:        cfg.Config.Cmd,
@@ -124,12 +119,11 @@ func ImportRegistry(ctx context.Context, opts ImportOptions) (ImportResult, erro
 		WorkingDir: cfg.Config.WorkingDir,
 		User:       cfg.Config.User,
 	}
-	if err := appspec.Write(spec, filepath.Join(staging, appspec.Path)); err != nil {
-		return ImportResult{}, fmt.Errorf("write app spec: %w", err)
+	if err := injectBootFiles(staging, spec); err != nil {
+		return ImportResult{}, err
 	}
 
-	if err := buildExt4(ctx, staging, target); err != nil {
-		_ = os.Remove(target)
+	if err := publishExt4(ctx, staging, target, opts.Force, buildExt4); err != nil {
 		return ImportResult{}, err
 	}
 
@@ -148,6 +142,69 @@ func ImportRegistry(ctx context.Context, opts ImportOptions) (ImportResult, erro
 	}
 
 	return ImportResult{Name: opts.Name, Digest: digest.String(), ExposedPort: exposedPort}, nil
+}
+
+func injectBootFiles(staging string, spec appspec.Spec) error {
+	init, err := guestagent.Bytes()
+	if err != nil {
+		return err
+	}
+	if err := writeRootfsFile(staging, guestagent.InitPath, init, 0o755); err != nil {
+		return fmt.Errorf("inject guest init: %w", err)
+	}
+	data, err := json.MarshalIndent(spec, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeRootfsFile(staging, appspec.Path, data, 0o644)
+}
+
+// writeRootfsFile confines injection to the image, including untrusted symlinks.
+func writeRootfsFile(staging, guestPath string, data []byte, mode os.FileMode) error {
+	root, err := os.OpenRoot(staging)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	rel := strings.TrimPrefix(guestPath, "/")
+	if err := root.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
+		return err
+	}
+	if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := root.WriteFile(rel, data, mode); err != nil {
+		return err
+	}
+	return root.Chmod(rel, mode)
+}
+
+// publishExt4 stages beside the destination; failure leaves the old template usable.
+func publishExt4(ctx context.Context, staging, target string, force bool, build func(context.Context, string, string) error) error {
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".import-*")
+	if err != nil {
+		return fmt.Errorf("stage image: %w", err)
+	}
+	_ = tmp.Close()
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if err := build(ctx, staging, tmp.Name()); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if force {
+		err = os.Rename(tmp.Name(), target)
+	} else {
+		err = os.Link(tmp.Name(), target)
+	}
+	if errors.Is(err, os.ErrExist) {
+		return errs.New(errs.CategoryConflict, "template already exists")
+	}
+	if err != nil {
+		return fmt.Errorf("publish image: %w", err)
+	}
+	return nil
 }
 
 // extractRootfs flattens the image's layers and writes the rootfs into dir via

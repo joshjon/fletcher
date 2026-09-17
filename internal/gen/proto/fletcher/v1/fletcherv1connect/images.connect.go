@@ -37,6 +37,15 @@ const (
 	ImageServiceImportProcedure = "/fletcher.v1.ImageService/Import"
 	// ImageServiceListImagesProcedure is the fully-qualified name of the ImageService's ListImages RPC.
 	ImageServiceListImagesProcedure = "/fletcher.v1.ImageService/ListImages"
+	// ImageServiceStartImportProcedure is the fully-qualified name of the ImageService's StartImport
+	// RPC.
+	ImageServiceStartImportProcedure = "/fletcher.v1.ImageService/StartImport"
+	// ImageServiceListImportsProcedure is the fully-qualified name of the ImageService's ListImports
+	// RPC.
+	ImageServiceListImportsProcedure = "/fletcher.v1.ImageService/ListImports"
+	// ImageServiceDeleteImageProcedure is the fully-qualified name of the ImageService's DeleteImage
+	// RPC.
+	ImageServiceDeleteImageProcedure = "/fletcher.v1.ImageService/DeleteImage"
 	// ImageServiceBuildFromSessionProcedure is the fully-qualified name of the ImageService's
 	// BuildFromSession RPC.
 	ImageServiceBuildFromSessionProcedure = "/fletcher.v1.ImageService/BuildFromSession"
@@ -59,6 +68,12 @@ type ImageServiceClient interface {
 	// ListImages lists the imported templates, so a client can offer an image
 	// picker instead of a free-text field.
 	ListImages(context.Context, *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error)
+	// StartImport continues on the host after the client disconnects. Reuse the
+	// request_id when retrying an ambiguous response; credentials are not stored.
+	StartImport(context.Context, *connect.Request[v1.StartImportRequest]) (*connect.Response[v1.StartImportResponse], error)
+	ListImports(context.Context, *connect.Request[v1.ListImportsRequest]) (*connect.Response[v1.ListImportsResponse], error)
+	// DeleteImage refuses templates referenced by sessions, active jobs or the default.
+	DeleteImage(context.Context, *connect.Request[v1.DeleteImageRequest]) (*connect.Response[v1.DeleteImageResponse], error)
 	// BuildFromSession builds a project's Dockerfile - living in a running
 	// session's workspace - into a deployable template, entirely inside Fletcher
 	// (M19): the daemon tars the project out of the session and builds it with
@@ -98,6 +113,24 @@ func NewImageServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(imageServiceMethods.ByName("ListImages")),
 			connect.WithClientOptions(opts...),
 		),
+		startImport: connect.NewClient[v1.StartImportRequest, v1.StartImportResponse](
+			httpClient,
+			baseURL+ImageServiceStartImportProcedure,
+			connect.WithSchema(imageServiceMethods.ByName("StartImport")),
+			connect.WithClientOptions(opts...),
+		),
+		listImports: connect.NewClient[v1.ListImportsRequest, v1.ListImportsResponse](
+			httpClient,
+			baseURL+ImageServiceListImportsProcedure,
+			connect.WithSchema(imageServiceMethods.ByName("ListImports")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteImage: connect.NewClient[v1.DeleteImageRequest, v1.DeleteImageResponse](
+			httpClient,
+			baseURL+ImageServiceDeleteImageProcedure,
+			connect.WithSchema(imageServiceMethods.ByName("DeleteImage")),
+			connect.WithClientOptions(opts...),
+		),
 		buildFromSession: connect.NewClient[v1.BuildFromSessionRequest, v1.BuildFromSessionResponse](
 			httpClient,
 			baseURL+ImageServiceBuildFromSessionProcedure,
@@ -123,6 +156,9 @@ func NewImageServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 type imageServiceClient struct {
 	_import               *connect.Client[v1.ImportRequest, v1.ImportResponse]
 	listImages            *connect.Client[v1.ListImagesRequest, v1.ListImagesResponse]
+	startImport           *connect.Client[v1.StartImportRequest, v1.StartImportResponse]
+	listImports           *connect.Client[v1.ListImportsRequest, v1.ListImportsResponse]
+	deleteImage           *connect.Client[v1.DeleteImageRequest, v1.DeleteImageResponse]
 	buildFromSession      *connect.Client[v1.BuildFromSessionRequest, v1.BuildFromSessionResponse]
 	startBuildFromSession *connect.Client[v1.StartBuildFromSessionRequest, v1.StartBuildFromSessionResponse]
 	getBuildStatus        *connect.Client[v1.GetBuildStatusRequest, v1.GetBuildStatusResponse]
@@ -136,6 +172,21 @@ func (c *imageServiceClient) Import(ctx context.Context, req *connect.Request[v1
 // ListImages calls fletcher.v1.ImageService.ListImages.
 func (c *imageServiceClient) ListImages(ctx context.Context, req *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error) {
 	return c.listImages.CallUnary(ctx, req)
+}
+
+// StartImport calls fletcher.v1.ImageService.StartImport.
+func (c *imageServiceClient) StartImport(ctx context.Context, req *connect.Request[v1.StartImportRequest]) (*connect.Response[v1.StartImportResponse], error) {
+	return c.startImport.CallUnary(ctx, req)
+}
+
+// ListImports calls fletcher.v1.ImageService.ListImports.
+func (c *imageServiceClient) ListImports(ctx context.Context, req *connect.Request[v1.ListImportsRequest]) (*connect.Response[v1.ListImportsResponse], error) {
+	return c.listImports.CallUnary(ctx, req)
+}
+
+// DeleteImage calls fletcher.v1.ImageService.DeleteImage.
+func (c *imageServiceClient) DeleteImage(ctx context.Context, req *connect.Request[v1.DeleteImageRequest]) (*connect.Response[v1.DeleteImageResponse], error) {
+	return c.deleteImage.CallUnary(ctx, req)
 }
 
 // BuildFromSession calls fletcher.v1.ImageService.BuildFromSession.
@@ -164,6 +215,12 @@ type ImageServiceHandler interface {
 	// ListImages lists the imported templates, so a client can offer an image
 	// picker instead of a free-text field.
 	ListImages(context.Context, *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error)
+	// StartImport continues on the host after the client disconnects. Reuse the
+	// request_id when retrying an ambiguous response; credentials are not stored.
+	StartImport(context.Context, *connect.Request[v1.StartImportRequest]) (*connect.Response[v1.StartImportResponse], error)
+	ListImports(context.Context, *connect.Request[v1.ListImportsRequest]) (*connect.Response[v1.ListImportsResponse], error)
+	// DeleteImage refuses templates referenced by sessions, active jobs or the default.
+	DeleteImage(context.Context, *connect.Request[v1.DeleteImageRequest]) (*connect.Response[v1.DeleteImageResponse], error)
 	// BuildFromSession builds a project's Dockerfile - living in a running
 	// session's workspace - into a deployable template, entirely inside Fletcher
 	// (M19): the daemon tars the project out of the session and builds it with
@@ -199,6 +256,24 @@ func NewImageServiceHandler(svc ImageServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(imageServiceMethods.ByName("ListImages")),
 		connect.WithHandlerOptions(opts...),
 	)
+	imageServiceStartImportHandler := connect.NewUnaryHandler(
+		ImageServiceStartImportProcedure,
+		svc.StartImport,
+		connect.WithSchema(imageServiceMethods.ByName("StartImport")),
+		connect.WithHandlerOptions(opts...),
+	)
+	imageServiceListImportsHandler := connect.NewUnaryHandler(
+		ImageServiceListImportsProcedure,
+		svc.ListImports,
+		connect.WithSchema(imageServiceMethods.ByName("ListImports")),
+		connect.WithHandlerOptions(opts...),
+	)
+	imageServiceDeleteImageHandler := connect.NewUnaryHandler(
+		ImageServiceDeleteImageProcedure,
+		svc.DeleteImage,
+		connect.WithSchema(imageServiceMethods.ByName("DeleteImage")),
+		connect.WithHandlerOptions(opts...),
+	)
 	imageServiceBuildFromSessionHandler := connect.NewUnaryHandler(
 		ImageServiceBuildFromSessionProcedure,
 		svc.BuildFromSession,
@@ -223,6 +298,12 @@ func NewImageServiceHandler(svc ImageServiceHandler, opts ...connect.HandlerOpti
 			imageServiceImportHandler.ServeHTTP(w, r)
 		case ImageServiceListImagesProcedure:
 			imageServiceListImagesHandler.ServeHTTP(w, r)
+		case ImageServiceStartImportProcedure:
+			imageServiceStartImportHandler.ServeHTTP(w, r)
+		case ImageServiceListImportsProcedure:
+			imageServiceListImportsHandler.ServeHTTP(w, r)
+		case ImageServiceDeleteImageProcedure:
+			imageServiceDeleteImageHandler.ServeHTTP(w, r)
 		case ImageServiceBuildFromSessionProcedure:
 			imageServiceBuildFromSessionHandler.ServeHTTP(w, r)
 		case ImageServiceStartBuildFromSessionProcedure:
@@ -244,6 +325,18 @@ func (UnimplementedImageServiceHandler) Import(context.Context, *connect.Request
 
 func (UnimplementedImageServiceHandler) ListImages(context.Context, *connect.Request[v1.ListImagesRequest]) (*connect.Response[v1.ListImagesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.ListImages is not implemented"))
+}
+
+func (UnimplementedImageServiceHandler) StartImport(context.Context, *connect.Request[v1.StartImportRequest]) (*connect.Response[v1.StartImportResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.StartImport is not implemented"))
+}
+
+func (UnimplementedImageServiceHandler) ListImports(context.Context, *connect.Request[v1.ListImportsRequest]) (*connect.Response[v1.ListImportsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.ListImports is not implemented"))
+}
+
+func (UnimplementedImageServiceHandler) DeleteImage(context.Context, *connect.Request[v1.DeleteImageRequest]) (*connect.Response[v1.DeleteImageResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.ImageService.DeleteImage is not implemented"))
 }
 
 func (UnimplementedImageServiceHandler) BuildFromSession(context.Context, *connect.Request[v1.BuildFromSessionRequest]) (*connect.Response[v1.BuildFromSessionResponse], error) {

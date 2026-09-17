@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -33,6 +34,7 @@ import (
 	"github.com/joshjon/fletcher/internal/events"
 	"github.com/joshjon/fletcher/internal/gateway"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
+	"github.com/joshjon/fletcher/internal/host"
 	"github.com/joshjon/fletcher/internal/image"
 	"github.com/joshjon/fletcher/internal/job"
 	fletchermcp "github.com/joshjon/fletcher/internal/mcp"
@@ -89,6 +91,7 @@ func checkForUpgrade(ctx context.Context, logger *slog.Logger) {
 type imageUpdateState struct {
 	available *atomic.Bool
 	checked   *atomic.Bool
+	digest    *atomic.Pointer[string]
 }
 
 // checkForImageUpdate asks the registry, in the background at boot, whether the
@@ -103,6 +106,11 @@ func checkForImageUpdate(ctx context.Context, cfg Config, logger *slog.Logger, s
 	defer state.checked.Store(true)
 	root := snapshotRootDir(cfg)
 	imagesDir := filepath.Join(root, "images")
+	if state.digest != nil {
+		if meta, found, err := image.ReadMeta(imagesDir, cfg.DefaultImage); err == nil && found {
+			state.digest.Store(&meta.Digest)
+		}
+	}
 	available, source, err := image.CheckForUpdate(ctx, imagesDir, cfg.DefaultImage)
 	if err != nil {
 		logger.Debug("image update check skipped", slog.String("err", err.Error()))
@@ -115,7 +123,7 @@ func checkForImageUpdate(ctx context.Context, cfg Config, logger *slog.Logger, s
 	logger.Info("a newer version of the default image is available",
 		slog.String("image", cfg.DefaultImage),
 		slog.String("source", source),
-		slog.String("update", "sudo fletcher image update"),
+		slog.String("update", "fletcher image update"),
 	)
 }
 
@@ -266,7 +274,10 @@ func validateConfig(cfg *Config, logger *slog.Logger) error {
 // occurs. On shutdown it closes the listener, removes the socket file, and
 // closes the database.
 func Run(ctx context.Context, cfg Config) error {
-	logger := newLogger(cfg.LogLevel)
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	logs := &host.Logs{}
+	logger := newLogger(cfg.LogLevel, logs)
 	logger.Info("starting fletcher daemon",
 		slog.String("socket", cfg.SocketPath),
 		slog.String("database", cfg.DatabasePath),
@@ -293,10 +304,11 @@ func Run(ctx context.Context, cfg Config) error {
 	// Snapshot the flag/env config before the settings overlay so ReloadSettings
 	// can re-derive the current effective config the same way boot does.
 	flagCfg := cfg
+	seedSettingDefaults(&flagCfg)
 	if err := applySettings(ctx, &cfg, settings.NewStore(queries), logger); err != nil {
 		return err
 	}
-	logger = newLogger(cfg.LogLevel) // reflect a log_level setting
+	logger = newLogger(cfg.LogLevel, logs) // reflect a log_level setting
 	if err := validateConfig(&cfg, logger); err != nil {
 		return err
 	}
@@ -305,27 +317,36 @@ func Run(ctx context.Context, cfg Config) error {
 	// network setup, so its result is usually ready by the first `fletcher
 	// doctor` after a restart. Run owns the atomics; buildServices wires them
 	// into the admin service so Health reflects them.
-	imageUpdate := imageUpdateState{available: &atomic.Bool{}, checked: &atomic.Bool{}}
+	imageUpdate := imageUpdateState{available: &atomic.Bool{}, checked: &atomic.Bool{}, digest: &atomic.Pointer[string]{}}
 	background.GoNamed(ctx, "daemon.checkForImageUpdate", func(ctx context.Context) {
 		checkForImageUpdate(ctx, cfg, logger, imageUpdate)
 	})
 
-	svcs, err := buildServices(ctx, cfg, flagCfg, queries, logger, imageUpdate)
+	svcs, err := buildServices(ctx, cfg, flagCfg, queries, logger, imageUpdate, host.Options{
+		Logs: logs, Restart: func() { cancel(errRemoteRestart) },
+	})
 	if err != nil {
 		return err
 	}
 
+	defer svcs.images.Close()
 	if err := svcs.run(ctx, logger); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}
 	logger.Info("daemon stopped")
+	if errors.Is(context.Cause(ctx), errRemoteRestart) {
+		return errRemoteRestart
+	}
 	return nil
 }
+
+var errRemoteRestart = errors.New("remote restart requested")
 
 // services bundles everything Run needs to wire into the oklog/run group.
 // Splitting construction out keeps Run's funlen reasonable while still
 // surfacing every component in one place.
 type services struct {
+	images          *image.Manager
 	cfg             Config
 	supervisor      *job.Supervisor
 	sessions        *session.Manager
@@ -363,7 +384,8 @@ type services struct {
 }
 
 //nolint:funlen // the single construction hub that wires every subsystem; splitting further would scatter the boot sequence
-func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Queries, logger *slog.Logger, imageUpdate imageUpdateState) (*services, error) {
+func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Queries, logger *slog.Logger, imageUpdate imageUpdateState, hostOpts host.Options) (*services, error) {
+	bootSettings := settingsDefaults(cfg)
 	connectLn, err := listenUnix(ctx, cfg.SocketPath)
 	if err != nil {
 		return nil, err
@@ -613,14 +635,27 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	jobSvc := job.NewService(queries, supervisor, cfg.DefaultImage, egressDefaultPolicy(cfg), defaultGateway(cfg))
 	reloader := &settingsReloader{
 		flagCfg:       flagCfg,
-		bootEffective: settingsDefaults(cfg),
+		bootEffective: bootSettings,
 		store:         settings.NewStore(queries),
 		sessions:      sessionMgr,
 		jobs:          jobSvc,
 		logger:        logger,
 	}
 
+	images, err := image.NewManager(ctx, queries, filepath.Join(snapshotRootDir(cfg), "images"), driverKind(cfg.SnapshotKind), flagCfg.DefaultImage, snapDriver, logger)
+	if err != nil {
+		return nil, err
+	}
+	hostOpts.StartedAt = startedAt.Unix()
+	hostOpts.SnapshotRoot, hostOpts.StateRoot = snapshotRootDir(cfg), filepath.Dir(cfg.DatabasePath)
+	hostOpts.Validate = reloader.Validate
+	hostOpts.ClearCache = sessionMgr.ClearBuildCache
+	hostOpts.Checks = hostChecks(cfg, queries, peerSvc, imageUpdate)
+	hostOpts.Diagnose = hostDiagnostics(cfg)
+
 	connectDeps := connectDeps{
+		imageManager:     images,
+		hostManager:      host.NewManager(ctx, hostOpts),
 		jobs:             jobSvc,
 		sessions:         sessionMgr,
 		volumes:          volumeMgr,
@@ -639,15 +674,16 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		models:           gatewayCatalog{baseURL: gatewayURL},
 		peerSync:         &tunnelPeerSyncer{peers: peerSvc, tunnel: netSetup.Tunnel, logger: logger},
 		settings:         settings.NewStore(queries),
-		settingsDefaults: settingsDefaults(cfg),
+		settingsDefaults: settingsDefaults(flagCfg),
 		settingsReloader: reloader,
 		certStatus:       certStatus,
 		runtimeStatus: api.RuntimeStatus{
-			Runtime:            driverKind(cfg.RuntimeKind),
-			Snapshot:           driverKind(cfg.SnapshotKind),
-			BaseImageAvailable: baseImageAvailable(cfg),
-			BaseImageUpdate:    imageUpdate.available,
-			BaseImageChecked:   imageUpdate.checked,
+			Runtime:          driverKind(cfg.RuntimeKind),
+			Snapshot:         driverKind(cfg.SnapshotKind),
+			HasBaseImage:     func() bool { return baseImageAvailable(cfg) },
+			HasImageUpdate:   func() bool { return currentImageUpdate(cfg, imageUpdate) },
+			BaseImageUpdate:  imageUpdate.available,
+			BaseImageChecked: imageUpdate.checked,
 		},
 	}
 
@@ -671,6 +707,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	pairingSrv, pairingLn, pairingAddr := buildPairingListener(ctx, cfg, netSetup, peerSvc, connectDeps, portMapper, logger)
 
 	return &services{
+		images:     images,
 		cfg:        cfg,
 		supervisor: supervisor,
 		sessions:   sessionMgr,
@@ -719,20 +756,22 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 // mux. Grouping them in a struct keeps newHTTPServer's signature tight
 // as more services land.
 type connectDeps struct {
-	jobs        api.JobsBackend
-	sessions    api.SessionsBackend
-	volumes     api.VolumesBackend
-	credentials api.CredentialsBackend
-	events      *events.Bus
-	reports     api.ReportsBackend
-	secrets     api.SecretsBackend
-	approvals   api.ApprovalsBackend
-	push        api.PushBackend
-	peers       api.PeersBackend
-	serverKey   api.ServerKeyProvider
-	models      api.CatalogBuilder
-	peerSync    api.PeerSyncer
-	settings    api.SettingsBackend
+	imageManager *image.Manager
+	hostManager  *host.Manager
+	jobs         api.JobsBackend
+	sessions     api.SessionsBackend
+	volumes      api.VolumesBackend
+	credentials  api.CredentialsBackend
+	events       *events.Bus
+	reports      api.ReportsBackend
+	secrets      api.SecretsBackend
+	approvals    api.ApprovalsBackend
+	push         api.PushBackend
+	peers        api.PeersBackend
+	serverKey    api.ServerKeyProvider
+	models       api.CatalogBuilder
+	peerSync     api.PeerSyncer
+	settings     api.SettingsBackend
 	// publicIP is the daemon's discovered public IP (host of the effective public
 	// endpoint), passed to the sessions service for --public DNS guidance.
 	publicIP string
@@ -1067,6 +1106,10 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		api.NewAdminService(startedAt, deps.peers, deps.runtimeStatus), interceptors,
 	)
 	mux.Handle(adminPath, adminHandler)
+	if deps.hostManager != nil {
+		path, handler := fletcherv1connect.NewHostServiceHandler(api.NewHostService(deps.hostManager), interceptors)
+		mux.Handle(path, handler)
+	}
 
 	jobsPath, jobsHandler := fletcherv1connect.NewJobServiceHandler(
 		api.NewJobsService(deps.jobs), interceptors,
@@ -1114,7 +1157,7 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 	mux.Handle(modelsPath, modelsHandler)
 
 	imagesPath, imagesHandler := fletcherv1connect.NewImageServiceHandler(
-		api.NewImagesService(deps.imagesDir, deps.snapshotKind, deps.imageBuilder), interceptors,
+		api.NewImagesService(deps.imagesDir, deps.snapshotKind, deps.imageBuilder, deps.imageManager), interceptors,
 	)
 	mux.Handle(imagesPath, imagesHandler)
 
@@ -1670,15 +1713,7 @@ func buildSnapshotDriver(cfg Config) (snapshot.Driver, error) {
 // `fletcher settings set` overrides the flag/env default. Bootstrap config
 // (database, socket, age key, listen addresses) is not settable and untouched.
 func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logger *slog.Logger) error {
-	// Session settings have no CLI flag; seed their defaults so a stored value
-	// (including an explicit 0 to disable) overrides and absence keeps the default.
-	cfg.SessionIdleTimeout = defaultSessionIdleTimeout
-	cfg.SessionMaxCount = defaultSessionMaxCount
-	cfg.SessionMaxDiskGB = defaultSessionMaxDiskGB
-	cfg.DefaultImage = defaultDefaultImage
-	cfg.DefaultEgressPolicy = defaultEgressPolicy
-	cfg.VMMemoryMB = defaultVMMemoryMB
-	cfg.DefaultGateway = defaultGatewayOn
+	seedSettingDefaults(cfg)
 
 	vals, err := store.Values(ctx)
 	if err != nil {
@@ -1690,6 +1725,17 @@ func applySettings(ctx context.Context, cfg *Config, store *settings.Store, logg
 		}
 	}
 	return nil
+}
+
+// seedSettingDefaults supplies defaults for settings with no startup flags.
+func seedSettingDefaults(cfg *Config) {
+	cfg.SessionIdleTimeout = defaultSessionIdleTimeout
+	cfg.SessionMaxCount = defaultSessionMaxCount
+	cfg.SessionMaxDiskGB = defaultSessionMaxDiskGB
+	cfg.DefaultImage = defaultDefaultImage
+	cfg.DefaultEgressPolicy = defaultEgressPolicy
+	cfg.VMMemoryMB = defaultVMMemoryMB
+	cfg.DefaultGateway = defaultGatewayOn
 }
 
 // applySetting overlays one stored setting onto cfg, returning false for an
@@ -1916,12 +1962,29 @@ type tokenAuthenticator interface {
 // unix socket is file-permission gated and stays auth-free.
 func authMiddleware(auth tokenAuthenticator, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := auth.AuthenticateToken(r.Context(), bearerToken(r.Header.Get("Authorization"))); err != nil {
+		p, ctx, release, err := authenticateRequest(r.Context(), auth, bearerToken(r.Header.Get("Authorization")))
+		defer release()
+		if err != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+		// The server private key stays on the host even for paired administrators.
+		if r.URL.Path == fletcherv1connect.PeerServiceServerConfigProcedure {
+			http.Error(w, "server key export is local-only", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(api.WithPeerID(ctx, p.ID)))
 	})
+}
+
+func authenticateRequest(ctx context.Context, auth tokenAuthenticator, token string) (peer.Peer, context.Context, func(), error) {
+	if tracker, ok := auth.(interface {
+		AuthenticateRequest(context.Context, string) (peer.Peer, context.Context, func(), error)
+	}); ok {
+		return tracker.AuthenticateRequest(ctx, token)
+	}
+	p, err := auth.AuthenticateToken(ctx, token)
+	return p, ctx, func() {}, err
 }
 
 func bearerToken(header string) string {
@@ -2100,11 +2163,11 @@ func baseImageAvailable(cfg Config) bool {
 	}
 }
 
-func newLogger(level string) *slog.Logger {
+func newLogger(level string, logs *host.Logs) *slog.Logger {
 	var lvl slog.Level
 	if err := lvl.UnmarshalText([]byte(level)); err != nil {
 		lvl = slog.LevelInfo
 	}
-	base := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})
+	base := slog.NewJSONHandler(io.MultiWriter(os.Stderr, logs), &slog.HandlerOptions{Level: lvl})
 	return slog.New(api.NewContextLogHandler(base))
 }

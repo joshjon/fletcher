@@ -64,6 +64,7 @@ func newApp() *cli.Command {
 			// Client commands: drive a daemon over the local socket or a remote
 			// tunnel; they run on any OS (this is all a Mac client needs).
 			client(healthCmd()),
+			client(hostCmd()),
 			client(loginCmd()),
 			client(logoutCmd()),
 			client(jobCmd()),
@@ -83,7 +84,7 @@ func newApp() *cli.Command {
 			daemonHost(serveCmd()),
 			daemonHost(daemonCmd()),
 			daemonHost(doctorCmd()),
-			daemonHost(imageCmd()),
+			client(imageCmd()),
 			forkRunCmd(), // hidden internal re-exec
 		},
 	}

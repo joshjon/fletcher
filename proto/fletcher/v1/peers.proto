@@ -80,7 +80,11 @@ message ListPeersRequest {
   int32 limit = 1;
   int32 offset = 2;
 }
-message ListPeersResponse { repeated Peer peers = 1; }
+message ListPeersResponse {
+  repeated Peer peers = 1;
+  // current_peer_id identifies the authenticated caller, empty on the local socket.
+  string current_peer_id = 2;
+}
 
 message DeletePeerRequest { string id = 1; }
 message DeletePeerResponse { bool existed = 1; }
@@ -88,6 +92,9 @@ message DeletePeerResponse { bool existed = 1; }
 message PairPeerRequest {
   // name is the only required input; everything else is daemon-resolved.
   string name = 1;
+  // direct_vpn requires the configured remote API endpoint instead of a public
+  // WireGuard endpoint. The caller uses api_token and remote_api_endpoint only.
+  bool direct_vpn = 2;
 }
 
 message BeginPairRequest {

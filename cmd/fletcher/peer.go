@@ -88,7 +88,7 @@ so a copied blob does not authorise API access.`,
 				renderMobilePairResult(os.Stdout, name, resp.Msg, !cmd.Bool("no-qr"))
 				return nil
 			}
-			resp, err := client.PairPeer(ctx, connect.NewRequest(&fletcherv1.PairPeerRequest{Name: name}))
+			resp, err := client.PairPeer(ctx, connect.NewRequest(&fletcherv1.PairPeerRequest{Name: name, DirectVpn: cmd.Bool("byo-vpn")}))
 			if err != nil {
 				return err
 			}

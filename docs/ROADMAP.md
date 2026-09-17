@@ -30,6 +30,28 @@ management must work without an agent or model-provider account. The agent
 milestones below remain implementation history, not a mandate to make an agent
 harness or to prioritise agent features over VM and app management.
 
+## Native host administration - code complete, hardware verification pending
+
+The approved sequence is implemented across the daemon and native-client repos:
+
+1. Device management and image library: pairing/revocation, current-peer identity,
+   registry imports with persisted operation IDs, updates and guarded deletion.
+2. Supervised remote restart and bounded process-log viewing, without a host shell
+   or additional service privileges.
+3. Storage accounting and idle build-cache cleanup, read-only doctor diagnostics,
+   and full operational-settings coverage with corrected restart drift/defaults.
+
+All paired peers remain administrators. Server key export is local-only; revoking
+a peer also cancels its active API streams. Imports survive client disconnects
+but are marked interrupted after an unclean daemon restart. The existing
+unprivileged registry-import ownership limitation still applies.
+
+Backend `make check` and native code generation are the automated gates; Apple
+builds, pairing flows and actual systemd restart/reconnection still need operator
+verification. See [host management](HOST-MANAGEMENT.md) for boundaries, CLI parity
+and the hardware checklist. Initial installation and broken-host recovery remain
+local; no hosted control plane or arbitrary remote OS administration was added.
+
 ## Initial implementation and hardware verification
 
 What runs end-to-end **on the mock runtime**: the daemon, job model + supervisor
@@ -2157,11 +2179,11 @@ visibility. Fix: build forks now discard their vmDir on cleanup, and a boot swee
 running and hibernated) removes any vmDir with no live session. Self-healing on every
 start. Verified: reclaimed 18 orphans, 49 GiB -> 15 GiB, live sessions untouched.
 
-**Storage overview/reclaim UI - DEFERRED (operator's Mac is mid-flight on the iOS
-repo).** A unified storage view (usage by category: images, session forks, volumes,
-build cache, hibernate snapshots, free disk) + reclaim actions (clear build cache,
-prune images), in the **iOS app + CLI**. Scoped with the operator (2026-06-22); held
-until the iOS repo is free, then build iOS-first.
+**Storage overview/reclaim UI - code complete, verification pending.** Native
+Host > Storage and `fletcher host storage` show capacity and non-exclusive
+allocated blocks. Cleanup covers idle build cache, guarded image deletion and
+existing detached-volume management. Hibernate/runtime files are counted under
+daemon state, not independently pruned. See [host management](HOST-MANAGEMENT.md).
 
 **User environment variables (plain + secret) - SHIPPED (`c9c3e15`), reaching the
 deployed app FIXED (2026-06-23, verified on hardware).** Sessions/deploys carry

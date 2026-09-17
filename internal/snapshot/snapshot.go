@@ -45,6 +45,12 @@ type VolumeProvisioner interface {
 	DeleteVolume(ctx context.Context, id string) error
 }
 
+// TemplateDeleter is the optional capability for removing an unused template.
+type TemplateDeleter interface {
+	// DeleteTemplate removes only the named template; a missing template is a no-op.
+	DeleteTemplate(ctx context.Context, name string) error
+}
+
 // TemplateCommitter is the optional capability a Driver advertises when it can
 // commit an existing snapshot back into a named image template - the
 // docker-commit analogue for forks. The caller is responsible for quiescing

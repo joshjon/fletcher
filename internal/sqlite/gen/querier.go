@@ -13,11 +13,13 @@ type Querier interface {
 	CancelJob(ctx context.Context, arg CancelJobParams) (int64, error)
 	CountApprovals(ctx context.Context) (int64, error)
 	CountApprovalsByStatus(ctx context.Context, status string) (int64, error)
+	CountImageReferences(ctx context.Context, name string) (int64, error)
 	CountJobs(ctx context.Context) (int64, error)
 	CountJobsByStatus(ctx context.Context, status string) (int64, error)
 	CountPeers(ctx context.Context) (int64, error)
 	CountSessions(ctx context.Context) (int64, error)
 	CreateApproval(ctx context.Context, arg CreateApprovalParams) (PendingApproval, error)
+	CreateImageImport(ctx context.Context, arg CreateImageImportParams) error
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
 	CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, error)
 	CreatePublishedPort(ctx context.Context, arg CreatePublishedPortParams) (PublishedPort, error)
@@ -35,6 +37,7 @@ type Querier interface {
 	DenyApproval(ctx context.Context, arg DenyApprovalParams) (int64, error)
 	ExpirePendingApprovals(ctx context.Context, arg ExpirePendingApprovalsParams) (int64, error)
 	GetApproval(ctx context.Context, id string) (PendingApproval, error)
+	GetImageImport(ctx context.Context, id string) (ImageImport, error)
 	GetJob(ctx context.Context, id string) (Job, error)
 	GetPeer(ctx context.Context, id string) (Peer, error)
 	GetPeerByAPITokenHash(ctx context.Context, apiTokenHash *string) (Peer, error)
@@ -45,10 +48,12 @@ type Querier interface {
 	GetSecret(ctx context.Context, name string) ([]byte, error)
 	GetSessionByRef(ctx context.Context, ref string) (Session, error)
 	GetVolumeByRef(ctx context.Context, ref string) (Volume, error)
+	InterruptImageImports(ctx context.Context, updatedAt int64) error
 	ListApprovals(ctx context.Context, arg ListApprovalsParams) ([]PendingApproval, error)
 	ListApprovalsByStatus(ctx context.Context, arg ListApprovalsByStatusParams) ([]PendingApproval, error)
 	ListDeviceTokens(ctx context.Context) ([]string, error)
 	ListDueCronJobs(ctx context.Context, nextRunAt *int64) ([]Job, error)
+	ListImageImports(ctx context.Context) ([]ImageImport, error)
 	ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, error)
 	ListJobsByStatus(ctx context.Context, arg ListJobsByStatusParams) ([]Job, error)
 	ListPeers(ctx context.Context, arg ListPeersParams) ([]Peer, error)
@@ -65,6 +70,7 @@ type Querier interface {
 	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) (int64, error)
 	SetJobNextRun(ctx context.Context, arg SetJobNextRunParams) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	UpdateImageImport(ctx context.Context, arg UpdateImageImportParams) error
 	UpdateJobSchedule(ctx context.Context, arg UpdateJobScheduleParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
 	UpdateSessionEnv(ctx context.Context, arg UpdateSessionEnvParams) error

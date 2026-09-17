@@ -87,6 +87,8 @@ for DNS and HTTPS requirements. [Jobs](docs/site/guide/jobs.md) and
 - [User guide](docs/site/guide/introduction.md) - installation, VM creation,
   app deployment, remote access, configuration and security. Start here if
   you're running Fletcher.
+- [Native host management](docs/HOST-MANAGEMENT.md) - devices, images,
+  restart, logs, diagnostics, storage and configuration from the apps.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) - delivery status: what is built,
   verified, deliberately cut, and planned.
 - [`DESIGN.md`](./DESIGN.md) - positioning, architecture, the thinking

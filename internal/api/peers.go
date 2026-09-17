@@ -100,7 +100,10 @@ func (s *PeersService) syncPeers(ctx context.Context) {
 // is unset.
 func (s *PeersService) PairPeer(ctx context.Context, req *connect.Request[fletcherv1.PairPeerRequest]) (*connect.Response[fletcherv1.PairPeerResponse], error) {
 	endpoint := s.peers.PublicEndpoint()
-	if endpoint == "" {
+	if req.Msg.GetDirectVpn() && s.peers.RemoteAPIEndpoint() == "" {
+		return nil, errs.New(errs.CategoryFailedPrecondition, "configure the remote API listen address before pairing a VPN device")
+	}
+	if endpoint == "" && !req.Msg.GetDirectVpn() {
 		return nil, errs.New(errs.CategoryFailedPrecondition,
 			"daemon has no public-endpoint configured; restart with --public-endpoint <host:port> or set FLETCHER_PUBLIC_ENDPOINT")
 	}
@@ -257,7 +260,7 @@ func (s *PeersService) ListPeers(ctx context.Context, req *connect.Request[fletc
 	for i, p := range got {
 		protos[i] = peerToProto(p)
 	}
-	return connect.NewResponse(&fletcherv1.ListPeersResponse{Peers: protos}), nil
+	return connect.NewResponse(&fletcherv1.ListPeersResponse{Peers: protos, CurrentPeerId: currentPeerID(ctx)}), nil
 }
 
 // DeletePeer removes a peer. Missing IDs return existed=false rather

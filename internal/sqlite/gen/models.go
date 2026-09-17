@@ -9,6 +9,18 @@ type DeviceToken struct {
 	CreatedAt int64
 }
 
+type ImageImport struct {
+	ID            string
+	Ref           string
+	Name          string
+	IsReplacement bool
+	IsUpdate      bool
+	State         string
+	Error         string
+	CreatedAt     int64
+	UpdatedAt     int64
+}
+
 type Job struct {
 	ID           string
 	Status       string

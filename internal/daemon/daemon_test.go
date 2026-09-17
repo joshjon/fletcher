@@ -49,6 +49,31 @@ func TestDaemonServesHealthAndShutsDownCleanly(t *testing.T) {
 	require.Equal(t, "ok", resp.Msg.GetStatus())
 	require.NotZero(t, resp.Msg.GetStartedAt())
 
+	settingsClient := fletcherv1connect.NewSettingsServiceClient(testHTTPClient(cfg.SocketPath), "http://unix")
+	reloaded, err := settingsClient.ReloadSettings(ctx, connect.NewRequest(&fletcherv1.ReloadSettingsRequest{}))
+	require.NoError(t, err)
+	require.Empty(t, reloaded.Msg.GetPendingRestart(), "runtime discovery must not create restart drift")
+	_, err = settingsClient.SetSetting(ctx, connect.NewRequest(&fletcherv1.SetSettingRequest{Key: "default_image", Value: "custom"}))
+	require.NoError(t, err)
+	_, err = settingsClient.DeleteSetting(ctx, connect.NewRequest(&fletcherv1.DeleteSettingRequest{Key: "default_image"}))
+	require.NoError(t, err)
+	listed, err := settingsClient.ListSettings(ctx, connect.NewRequest(&fletcherv1.ListSettingsRequest{}))
+	require.NoError(t, err)
+	for _, setting := range listed.Msg.GetSettings() {
+		if setting.GetKey() == "default_image" {
+			require.Equal(t, "fletcher-base", setting.GetValue())
+		}
+	}
+
+	hostClient := fletcherv1connect.NewHostServiceClient(testHTTPClient(cfg.SocketPath), "http://unix")
+	hostInfo, err := hostClient.GetHost(ctx, connect.NewRequest(&fletcherv1.GetHostRequest{}))
+	require.NoError(t, err)
+	require.Equal(t, resp.Msg.GetStartedAt(), hostInfo.Msg.GetStartedAt())
+	storage, err := hostClient.GetStorage(ctx, connect.NewRequest(&fletcherv1.GetStorageRequest{}))
+	require.NoError(t, err)
+	require.NotZero(t, storage.Msg.GetTotalBytes())
+	require.NotEmpty(t, storage.Msg.GetCategories())
+
 	// The socket must be group-accessible (0660), not owner-only: under
 	// systemd the daemon runs as fletcher:fletcher and the operator reaches
 	// it via fletcher-group membership. A 0600 socket would deny every group
@@ -98,8 +123,8 @@ func shortSocketPath(t *testing.T) string {
 	return filepath.Join(dir, "f.sock")
 }
 
-func newAdminClient(socket string) fletcherv1connect.AdminServiceClient {
-	httpClient := &http.Client{
+func testHTTPClient(socket string) *http.Client {
+	return &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				var d net.Dialer
@@ -107,5 +132,8 @@ func newAdminClient(socket string) fletcherv1connect.AdminServiceClient {
 			},
 		},
 	}
-	return fletcherv1connect.NewAdminServiceClient(httpClient, "http://unix")
+}
+
+func newAdminClient(socket string) fletcherv1connect.AdminServiceClient {
+	return fletcherv1connect.NewAdminServiceClient(testHTTPClient(socket), "http://unix")
 }
