@@ -1,25 +1,28 @@
 # Durable sessions
 
-A [job](/guide/jobs) runs one command in a fresh microVM and tears it down. A
-**session** is the other half: a persistent microVM you create once and keep.
-Its disk, the fork, survives stops and restarts, so a `git clone`, your edits,
-and an agent's on-disk history are all still there when you come back.
+A **session** is a persistent microVM you create once and keep. Its disk survives
+stops and restarts, so your files, installed tools and edits remain when you
+return. Open a shell, attach an IDE over SSH or run a program inside it.
 
-Sessions are how you use Fletcher interactively. Open a shell, attach an IDE over
-SSH, or leave an agent running.
+For one-shot or scheduled commands, see [Jobs and cron](/guide/jobs). Running an
+agent inside a session is optional.
 
 ::: info Requirements
 Sessions need the **Firecracker** runtime (they don't run on the runc fallback)
-and an imported base image, the same `fletcher-base` from [Your first
-agent](/guide/first-agent).
+and an imported base image. No agent or model account is required.
 :::
 
 ## Create and use a session
 
+Pull a base image through the daemon, then create a VM with the model gateway
+disabled:
+
 ```sh
-fletcher session create --name dev --image fletcher-base   # boots the VM
+fletcher image pull ghcr.io/joshjon/fletcher-base:debian-13 --name fletcher-base
+fletcher session create --name dev --image fletcher-base --gateway off
 fletcher session list                                      # state, disk, last-used
-fletcher session exec dev 'echo hello > /workspace/notes; cat /workspace/notes'
+fletcher session exec dev 'echo hello > /workspace/notes'
+fletcher session exec dev 'cat /workspace/notes'
 ```
 
 `exec` runs a one-off command and returns its output and exit code. For an

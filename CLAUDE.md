@@ -1,20 +1,21 @@
 # Fletcher
 
-Private agent compute on hardware the user owns. A single Go binary on one Linux box; native clients spin up isolated VMs and run agents/jobs/programs with nothing leaving the user's network.
+Personal compute and app hosting on hardware the user owns. A single Go daemon on one Linux host, managed through native iOS and macOS clients. The core experience is creating VMs and deploying container images. Cloud in a Bottle and exe.dev are broad product references, not integration requirements. Agents are an optional use inside those environments.
 
 **Read `DESIGN.md` first** for positioning, architecture, and rationale. **Read `STANDARDS.md`** for repo layout, build, lint, test, error, logging, CLI, concurrency, migration, dependency, release, and utility conventions. This file is operational guidance - what to do, what not to do - distilled from both.
 
 ## Thesis (do not drift from these)
 
-- **The moat is structural: it runs on metal the user owns.** Any choice that requires us to host infrastructure, meter usage, or route traffic through a service we operate is off-thesis. The developer hosts nothing.
-- **One primitive, many hats.** A job = environment + payload + trigger + sink. `ephemeral`, `cron`, `long-running` are three values of one field - never three subsystems. (§4)
-- **The fork is the sandbox; the daemon is the gate.** Agents run as native subprocesses inside a CoW fork with no creds and no egress route. Privileged ops are exposed as MCP tools on the daemon, which holds the credentials. Gate by *capability*, not by intercepting intent. (§5)
-- **No workflow engine in core.** Temporal is explicitly cut. Resume = supervisor goroutine reads active jobs from SQLite on boot, restarts agent processes against their on-disk sessions + restored fork snapshot + idempotent egress. (§5)
-- **Daemon is the model gateway.** All agents point their base-URL at the daemon; keys never enter forks. This is what makes the trust boundary in §5 hold. (§6)
+- **VMs and apps first.** The native client is the primary management interface, not an agent companion. VM creation and image deployment must be useful without an agent or model account. Do not turn the roadmap into an agent-harness feature race. (DESIGN sections 1, 2 and 7)
+- **Self-hosted compute, not a structural moat.** The user controls compute and storage. No hosted compute, mandatory hosted control plane or metering. Network access and external providers determine what leaves the host. Self-hosting and native clients are shared capabilities, not uniqueness claims. (DESIGN sections 1 and 8)
+- **One job model for background execution.** A job = environment + payload + trigger + sink. Keep trigger variants together. This does not make every interactive VM or app an agent task. (DESIGN section 4)
+- **The fork is the sandbox, the daemon mediates access.** Programs run natively inside isolated environments. Credential and egress guarantees depend on the configured mode. Do not promise that subscription credentials stay outside a guest where the user logs in. (DESIGN section 5)
+- **No workflow engine in core.** Temporal remains excluded. Lifecycle management uses the existing supervisor, persistent state and runtime interfaces. (DESIGN sections 3 and 5)
+- **The model gateway is optional.** When enabled, it holds provider API keys and mediates model calls. It is not required for VM or app management, and subscription login is a separate credential mode. (DESIGN section 6)
 
 ## Platform & build constraints
 
-- **Linux only for now.** macOS is deferred (§10). Do **not** scatter `exec("btrfs ...")` or `/dev/kvm` checks through job/agent/gateway code - all KVM/Firecracker calls live behind the runtime interface, all btrfs calls behind the snapshot interface. The interface seams exist so macOS becomes one more driver, not a rewrite.
+- **Linux host runtime only for now.** The macOS host runtime is deferred (DESIGN section 10), not the native macOS client. Do **not** scatter `exec("btrfs ...")` or `/dev/kvm` checks through job/agent/gateway code - all KVM/Firecracker calls live behind the runtime interface, all btrfs calls behind the snapshot interface. The interface seams exist so macOS becomes one more driver, not a rewrite.
 - **Single static binary, `CGO_ENABLED=0`.** Pure-Go SQLite (`modernc.org/sqlite`). Anything that pulls in CGO needs a strong justification.
 - **VMM bundled via `embed.FS`**, extracted on first run. One VMM process per VM at runtime.
 
@@ -40,14 +41,14 @@ Private agent compute on hardware the user owns. A single Go binary on one Linux
 - **Two networking planes never touch.** Clients are WireGuard peers to the daemon only. VM networking lives entirely inside the box. Preview URLs are the daemon reverse-proxying into a VM - clients never get a route into VM-land.
 - **Idempotency keys on every egress op.** Required regardless of any engine. A crash-resume must not double-apply.
 - **Approvals are `pending_approval` rows in SQLite + APNs push.** Survives reboot because the row does.
-- **Recurring jobs default to agent-authored-then-automated.** Agent writes the scraper once; a plain cron'd program runs it. Use agent-in-the-loop only when each run needs judgment.
+- **Recurring work can be an ordinary program.** Whether written by a person or an agent, a script can run on a schedule. Use an agent on each run only when the task needs one.
 
 ## Out of scope (do not propose)
 
-- macOS support (deferred, §10)
+- macOS host runtime (deferred, DESIGN section 10). The macOS client is in scope.
 - Multi-box mesh / hosted control plane / coordination SaaS
 - Built-in metering or billing
-- A skill marketplace (explicit non-goal - attack surface contradicts trust positioning, §8)
+- A skill marketplace or a first-party agent harness (DESIGN sections 2 and 8)
 - Cross-site VM-to-VM networking
 - Self-writing-skills me-too features
 - Anything that turns in-fork bash into orchestrated tasks (the fork is already the sandbox, §5)
@@ -70,7 +71,7 @@ Listed in §11; check actual repos/tools before designing around them:
 
 - When proposing architecture, cite the relevant §section of `DESIGN.md` so drift is visible.
 - For coding standards (layout, lint, test, error handling, logging, CLI, concurrency, etc.), follow `STANDARDS.md`. Cite it when proposing something that deviates.
-- If a suggestion would require the developer to host something, route traffic through a service we operate, or meter usage, stop and flag it; it's off-thesis.
+- Flag any proposal for developer-hosted infrastructure, routed traffic or metering. Core compute and lifecycle management must remain self-hosted. The separately deferred push-delivery exception is recorded in `docs/ROADMAP.md`, not permission to introduce a hosted control plane.
 - If a suggestion would split the job model into multiple subsystems, stop and flag it (§4).
 - If a suggestion adds Linux-specific calls outside the runtime/snapshot interfaces, stop and flag it (§10).
 

@@ -1,25 +1,27 @@
 # Runtimes & base images
 
-Fletcher runs jobs and sessions inside an isolated environment. Which kind of
-isolation you get depends on the host and the `runtime` setting.
+Fletcher runs persistent sessions and app deployments in Firecracker microVMs.
+Jobs also support other runtimes. The isolation available depends on the host
+and the `runtime` setting.
 
 ## The three runtimes
 
 | Runtime | Isolation | When it's used |
 |---|---|---|
-| **Firecracker** | Hardware-isolated microVM, no network egress | Default on a host with `/dev/kvm` |
+| **Firecracker** | Hardware-isolated microVM, daemon-mediated networking | Default on a host with `/dev/kvm` |
 | **runc** | Shared-kernel container (labeled degraded isolation) | Explicit fallback: `fletcher settings set runtime runc` |
 | **mock** | None, runs as a plain subprocess | Automatic fallback when there's no `/dev/kvm` |
 
-On a KVM host the daemon defaults to **Firecracker**. Each job boots a
-hardware-isolated microVM from its own kernel and a copy-on-write ext4 rootfs,
-reaching models only through the daemon's gateway and with no network egress at
-all (the VM has no NIC, just a vsock channel to the daemon).
+On a KVM host the daemon defaults to **Firecracker**. Each environment boots a
+microVM with its own kernel and a copy-on-write ext4 rootfs. The VM has no NIC
+and communicates with the daemon over vsock. Published ports and outbound
+requests are brokered by the daemon. Model-gateway use is optional.
 
 Without `/dev/kvm`, the daemon falls back to the **mock** runtime so you can
 still exercise the workflow. `fletcher job create --command "echo hi"` runs as a
 plain subprocess. **runc** is available as an explicit, shared-kernel fallback
-when you want real-ish isolation without KVM.
+for jobs that need shared-kernel isolation without KVM. Neither fallback
+provides persistent VM sessions or app deployments.
 
 Confirm what you have:
 

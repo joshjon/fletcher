@@ -176,7 +176,7 @@ i[data-icon]{display:inline-flex;}i[data-icon] svg{width:100%;height:100%;displa
     <div class="brand">
       <div class="mark"><i data-icon="terminal"></i></div>
       <h1>Fletcher</h1>
-      <p>Private agent compute on hardware you own. Pair your box to begin.</p>
+      <p>Create VMs and deploy apps on your Linux host. Pair your host to begin.</p>
     </div>
     <div class="scanner" onclick="connectFlow()">
       <div class="corner c-tl"></div><div class="corner c-tr"></div><div class="corner c-bl"></div><div class="corner c-br"></div>
@@ -347,7 +347,7 @@ largest: /workspace/node_modules (4.2G)</div>
         <div class="field" data-when="cron"><span class="lab">Schedule</span><span class="pick">Every day 7:00 <i data-icon="chev"></i></span></div>
         <div class="field" data-when="once cron"><span class="lab">Send result to</span><span class="pick">Inbox <i data-icon="chev"></i></span></div>
       </div>
-      <div class="muted" id="trigHint">A durable session you drop into and drive. Boots a microVM and opens Claude.</div></div>
+      <div class="muted" id="trigHint">A persistent environment you create and manage. Boots a microVM and opens a terminal.</div></div>
       <div class="pad" style="margin-top:18px"><button class="btn primary" onclick="dismiss()" id="trigCta">Create &amp; open terminal</button></div>
     </div>
   </div>
@@ -412,7 +412,7 @@ function present(id){document.getElementById('scrim').classList.add('on');docume
 function dismiss(){document.getElementById('scrim').classList.remove('on');document.querySelectorAll('.sheet.on').forEach(s=>s.classList.remove('on'));}
 function pickIdle(el){el.closest('.list').querySelectorAll('.ck').forEach(c=>c.classList.remove('on'));el.querySelector('.ck').classList.add('on');document.getElementById('idleVal').textContent=el.querySelector('.t').textContent.replace(' (never)','');}
 
-const trigCopy={interactive:['A durable session you drop into and drive. Boots a microVM and opens Claude.','Create & open terminal'],once:['Runs the task once in a fresh fork, posts the result to the sink, then tears down.','Run once'],cron:['An agent writes the task once; a plain cron job re-runs it on schedule and reports back.','Schedule it']};
+const trigCopy={interactive:['A persistent environment you create and manage. Boots a microVM and opens a terminal.','Create & open terminal'],once:['Runs the task once in a fresh fork, posts the result to the sink, then tears down.','Run once'],cron:['Run a program on a schedule and report its results.','Schedule it']};
 function setTrig(el){document.querySelectorAll('.seg div').forEach(d=>d.classList.remove('on'));el.classList.add('on');const t=el.dataset.trig;document.querySelectorAll('[data-when]').forEach(f=>f.style.display=f.dataset.when.split(' ').includes(t)?'flex':'none');document.getElementById('trigHint').textContent=trigCopy[t][0];document.getElementById('trigCta').textContent=trigCopy[t][1];}
 setTrig(document.querySelector('.seg div.on'));
 

@@ -1,7 +1,8 @@
 # Security
 
-Fletcher's whole design is a trust boundary you own. This page covers what you
-expose when you run it and how access is gated.
+Fletcher runs environments and apps on a host you control. This page covers what
+you expose when you run it and how access is gated. Self-hosting does not mean
+that no data leaves your network.
 
 ## What you're exposing
 
@@ -33,7 +34,8 @@ takes two things, both handed out at pair time:
 
 That's defense in depth. A leaked WireGuard key alone reaches the API port but
 gets `401` without the token. A fully paired device gets both, and with them can
-submit jobs, manage secrets and settings, and use the model gateway.
+create VMs, deploy apps, manage secrets and settings, submit jobs, and use the
+model gateway.
 
 So **pairing a peer is not "letting a device onto my LAN". It is "granting that
 device control over Fletcher."** Pair only devices you intend to use Fletcher
@@ -54,10 +56,15 @@ access and its token.
 
 ## How the trust boundary holds inside the box
 
-- **Agents run with no credentials.** A job's microVM has no API keys and no
-  network egress, only a vsock channel to the daemon.
-- **The daemon is the gate.** Model calls, SSH, and published ports are all
-  brokered by the daemon. It holds the keys, and the VM never sees them.
+- **VM isolation and outbound access are distinct.** MicroVMs communicate with
+  the daemon over vsock rather than a guest NIC. The daemon can broker outbound
+  requests, so the lack of a NIC does not mean an environment is entirely offline.
+- **Credential isolation depends on configuration.** The optional model gateway
+  keeps its configured provider API keys outside the guest. Credentials supplied
+  to a program or saved by an agent login inside a VM are accessible there.
+- **External services receive requests.** Cloud model calls send prompts to the
+  selected provider. Image pulls and other external access also use the network.
+  Local compute alone is not a guarantee of local-only data processing.
 - **The two networking planes never touch.** Your devices are WireGuard peers to
   the daemon only. VM networking lives entirely inside the box, and clients never
   get a route into VM-land. A preview URL is the daemon reverse-proxying in, not a

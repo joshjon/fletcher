@@ -6,9 +6,9 @@ over the tunnel from anywhere.
 
 ::: warning A paired device has full daemon access
 Pairing is not "letting a device onto my LAN". It is "granting that device
-control over Fletcher", which means submitting jobs, managing secrets and
-settings, and using the model gateway. Pair only devices you intend to use
-Fletcher with. See [Security](/guide/security) for the full picture.
+control over Fletcher", including creating VMs, deploying apps, and managing
+secrets and settings. Pair only devices you intend to use Fletcher with.
+See [Security](/guide/security) for the full picture.
 :::
 
 ## Pair
@@ -113,9 +113,10 @@ fletcher peer pair iphone --byo-vpn
 This prints (and renders as a QR) a `{remote, token}` blob pointed at that VPN
 address. Scan it in the app with your VPN active. There is no pairing endpoint
 and no cert pinning - your VPN already encrypts the path, and the per-peer token
-gates the API. The same blob works from a laptop on the VPN via `fletcher login
-<blob>`. See [Networking - Mode B](/advanced/networking#mode-b-bring-your-own-vpn)
-for the trade-offs.
+gates the API. The same blob works from a laptop on the VPN via
+`fletcher login <blob>`. See
+[Networking - Mode B](/advanced/networking#mode-b-bring-your-own-vpn) for the
+trade-offs.
 
 ## Connect a laptop
 
@@ -149,4 +150,5 @@ regardless of what's stored on it.
 
 ## Next
 
-Your device is paired. Now [run your first agent](/guide/first-agent).
+Your device is paired. Now [create a VM](/guide/sessions) or
+[deploy an app](/guide/deploy).

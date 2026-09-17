@@ -1,56 +1,62 @@
 # Fletcher - Design Doc
 
-*Self-hosted agent compute.*
+*Your Linux host, managed from your iPhone or Mac.*
 
-Private agent compute on hardware you own. A single Go binary you install on one
-Linux box; from a native phone/desktop client you spin up isolated VMs and run
-anything on them - coding agents, day-to-day jobs, recurring monitoring - with
-nothing leaving your network and no cloud account anywhere in the loop.
+Fletcher is personal compute and app hosting on hardware you own. A single Go
+daemon runs on one Linux host. Native iOS and macOS clients make it easy to
+create persistent VMs, deploy container images and manage their lifecycle.
+Agents are one possible use inside a VM, not the organising purpose of the
+product. The core experience must work without an agent or model account.
 
 ---
 
 ## 1. Positioning
 
-- **Wedge:** private agent compute on metal you own. The r/homelab / r/LocalLLaMA
-  crowd who already run Ollama and won't send their code to a hosted agent.
-- **Moat:** a *structural fact*, not a feature. Competitors host the compute as
-  their business, so none of them can offer "runs on hardware you own" without
-  abandoning their model. They can copy any feature in this doc; they cannot copy
-  where it runs.
-- **The climb:** "just a computer" is a bare substrate - too
-  unopinionated to pull people in. The product puts an *opinionated, delightful
-  agent experience* on top of that substrate. Privacy/own-your-metal is the
-  **positioning** (and the moat); the native-app agent experience is the **demo**
-  (what creates desire). We headline one, not both.
-- **Scope of use:** coding tasks and general day-to-day jobs are co-equal
-  priorities for the product itself. "Pick one hero" applies only to the
-  launch/marketing hook, decided later - not to capability or personal use.
-- **Business model:** one-time license. No SaaS, no hosted infrastructure, no
-  metering. The developer hosts nothing.
+- **Purpose:** make a Linux host useful as a personal cloud from native Apple
+  clients. Creating VMs and deploying container images are the primary flows.
+- **Audience:** people who want to run environments and apps on their own Linux
+  host without assembling a large management stack. Agent use is optional.
+- **Product references:** combine the general app-hosting convenience of
+  [Cloud in a Bottle](https://cloudinabottle.org/) with the readily available
+  persistent environments of [exe.dev](https://exe.dev/). These are broad
+  references, not dependencies or commitments to copy their full feature sets.
+- **Experience:** the native client is the product's primary interface, not an
+  approval screen attached to an agent harness. Provision, connect, inspect,
+  stop, restart and update without requiring an agent conversation.
+- **Ownership:** compute and storage run on the user's host. Self-hosting is a
+  deployment choice, not a structural moat or a promise of no outbound traffic.
+  External providers receive the requests the user chooses to send them.
+- **Business model:** one-time license. No hosted compute, mandatory hosted
+  control plane or metering. Optional push delivery is separate from operating
+  VMs and apps, with its deferred relay recorded in `docs/ROADMAP.md`.
 
 ---
 
 ## 2. Goals & Non-Goals
 
 **Goals**
-- Single static binary, `curl | sh` install, runs as a systemd service on one
-  Linux box.
-- Spin up arbitrary VMs from a native client, configured by image or tooling/deps.
-- Run agents / jobs / programs safely in isolated, forkable VMs.
-- Supervise unattended agents from a phone, including approval of destructive
-  actions that survives a host reboot.
-- Bring-your-own agent (Codex, Claude Code, local-model agents) with zero config
-  hassle.
-- Use local models; tokens and code never leave the user's network.
-- Seamless networking out of the box, with zero infrastructure the developer
-  hosts.
+- A single Go daemon, installable as a systemd service on an existing Linux host.
+- Create and manage persistent Linux VMs from native iOS and macOS clients.
+- Deploy container images as apps, with explicit storage and private or public
+  access. Support terminals, logs and lifecycle management in the same clients.
+- Keep environments and app data across client disconnects and host restarts,
+  with clear recovery and rollback boundaries.
+- Make pairing and remote access straightforward, with clear requirements when
+  the home network needs configuration or a user-provided VPN.
+- Support ordinary programs, scheduled tasks and existing agent CLIs without
+  making any agent or model provider a prerequisite.
+- Offer model-gateway and approval features for users who choose them. Keep
+  their credential and network guarantees explicit rather than promising that
+  all code and data stay local regardless of configuration.
 
 **Non-Goals (for now)**
-- **macOS support is deferred** (see §10). Linux only for v-now.
+- **The macOS host runtime is deferred** (see section 10). The native macOS
+  client is in scope.
 - No multi-box mesh. Single box only; multiple *client devices* are fine.
 - No hosted control plane / coordination SaaS.
 - No built-in metering or billing.
-- No skill marketplace (deliberate - see §8).
+- No first-party agent harness or skill marketplace. Running existing agents
+  does not make Fletcher an agent platform.
 - Cross-site VM-to-VM networking is explicitly out of scope.
 
 ---
@@ -59,8 +65,8 @@ nothing leaving your network and no cloud account anywhere in the loop.
 
 ```mermaid
 flowchart TD
-    subgraph clients["Clients (WireGuard spokes): control panel + results inbox"]
-        C1["SwiftUI iOS (hero)"]
+    subgraph clients["Native clients: VM and app management"]
+        C1["SwiftUI iOS"]
         C2["iPad / macOS app"]
         C3["Local web UI (optional)"]
     end
@@ -71,9 +77,11 @@ flowchart TD
         API["API: connect-go - gRPC / HTTP-JSON / gRPC-Web"]
 
         subgraph svc["App services"]
-            JOB["Job engine"]
-            AG["Agents"]
-            GW["Model gateway"]
+            SESSION["Sessions and app deployments"]
+            IMAGE["Images and volumes"]
+            JOB["Background jobs"]
+            AG["Optional agents"]
+            GW["Optional model gateway"]
             APP["Approvals"]
             TFP["Terminals / files / previews / forks"]
         end
@@ -87,7 +95,7 @@ flowchart TD
 
         RI{{"Runtime interface"}}
         FC["Firecracker VMM (default)"]
-        RUNC["runc / container (no-KVM fallback)"]
+        RUNC["runc / container (jobs only)"]
         SI{{"Snapshot interface"}}
         BTRFS["btrfs CoW subvolumes"]
         STORE[("SQLite state + age-encrypted secrets")]
@@ -104,7 +112,7 @@ flowchart TD
         API -.-> NETW
     end
 
-    FC -.->|vsock| GUEST["In-VM agent: native subprocess in its fork"]
+    FC -.->|vsock| GUEST["In-VM programs and optional agents"]
     GW -.->|internal bridge| OLLAMA["Ollama on host or GPU VM (local models)"]
 ```
 
@@ -126,17 +134,18 @@ first-party pipeline feature - never as the substrate. (See §6, §10.)
 
 ---
 
-## 4. The Job Model (the one primitive)
+## 4. The Job Model (background execution)
 
-Every use case - coding, monitoring, automation - is one abstraction wearing
-different hats. Do **not** build long-running / cron / ephemeral as three
-subsystems; they are three values of one field.
+Jobs cover command execution, monitoring and automation. They are not the
+product definition: a persistent session or deployed app does not need an agent
+or an agent-authored task. Keep the existing job trigger variants together
+rather than building separate long-running, cron and ephemeral job engines.
 
 A **job** = **environment** + **payload** + **trigger** + **output sink**.
 
 - **environment:** a VM, or (default for agent runs) a fork of one.
-- **payload:** an agent (Claude Code, Codex, local-model agent) *or* a plain
-  program the agent previously wrote.
+- **payload:** an ordinary program or, optionally, an agent such as Claude Code,
+  Codex or a local-model agent.
 - **trigger:**
   - `ephemeral` - fire once, run to completion, optionally tear down
     ("build me the dog-walking site").
@@ -145,21 +154,18 @@ A **job** = **environment** + **payload** + **trigger** + **output sink**.
 - **output sink:** where the result lands - a preview URL, a results card /
   dashboard in the client inbox, a file, a notification.
 
-**Recurring jobs: two modes.** Most recurring "agent" tasks shouldn't run an agent
-each time. The agent's job is to *write the scraper once*; after that a plain
-cron'd program runs it - free, deterministic, reliable.
-- **agent-authored-then-automated** (default for data fetching) - cheap, no tokens
-  per run, no nondeterminism.
-- **agent-in-the-loop** - only when each run needs *judgment*
-  ("tell me what's interesting today," not just "fetch it").
+**Recurring jobs:** run an ordinary program when the task does not need an
+agent. It can be written by a person or generated once, then scheduled. Running
+an agent on every invocation is an optional choice when each run needs one.
 
 ---
 
 ## 5. Agent Execution & the Trust Boundary
 
-This is the load-bearing correction over the original design. **Agent actions are
-not orchestrated tasks.** The agent runs natively as a subprocess inside its fork
-and does its own bash, edits, and tests with zero daemon mediation.
+This section describes the optional agent execution model, not a prerequisite
+for VM creation or app deployment. **Agent actions are not orchestrated tasks.**
+An agent runs natively as a subprocess inside its fork and does its own bash,
+edits and tests with zero daemon mediation.
 
 ```mermaid
 flowchart LR
@@ -206,10 +212,10 @@ flowchart LR
 
 **Credential modes (homelab reality).** The "no creds in the fork" property
 above holds strictly only in **API-key mode**, where the daemon stamps headers
-on outbound model calls via the gateway (§6). Most of Fletcher's audience runs
-on subscription-based agent CLIs - Claude Max, ChatGPT Plus/Pro, Gemini
-Advanced - which authenticate via OAuth tokens on disk (`~/.claude/`,
-`~/.codex/`, etc.), not via headers the daemon can intercept. For those users
+on outbound model calls via the gateway (§6). Users who choose subscription-based
+agent CLIs - Claude Max, ChatGPT Plus/Pro, Gemini Advanced - authenticate via
+OAuth tokens on disk (`~/.claude/`, `~/.codex/`, etc.), not via headers the daemon
+can intercept. For those users
 Fletcher exposes a **trusted-credential mode** per job: the named credential
 directory is bind-mounted into the fork. In this mode the boundary is
 explicitly weakened - in-fork code can read the OAuth tokens - but the §5 claim
@@ -280,74 +286,64 @@ sequenceDiagram
 
 ---
 
-## 6. The Model Gateway
+## 6. The Optional Model Gateway
 
-The daemon **is** the model gateway - the key call for "any agent, no hassle."
+The daemon can broker model requests for users who choose to run agents.
+Creating VMs and deploying apps do not depend on configuring it.
 
-- Every agent (Codex, Claude Code, local-model agent) points its base-URL at the
-  daemon's local endpoint. The daemon routes to Anthropic / OpenAI / local Ollama
-  and holds all credentials.
-- Configure a provider **once, centrally**; any agent in any VM inherits it.
-- Swap local-vs-cloud **per job** without touching agent config.
+- With gateway mode enabled, compatible agents point their base-URL at the
+  daemon's local endpoint. The daemon holds the configured provider API keys.
+- Configure a provider centrally and share that configuration with environments
+  that opt into the gateway.
+- Local and cloud providers have different privacy properties. Key isolation
+  does not keep prompts local when a request goes to a cloud provider.
 - **Keys never enter the fork** (API-key mode) - this *is* the privacy story for
   credentials the gateway can stamp on the wire, and it's what makes the
   capability boundary in §5 hold. See §5 "Credential modes" for the
   subscription-mode caveat.
-- Every model call flows through one place → free audit log.
+- Gateway calls share a point for policy and future audit recording. A gateway
+  does not by itself establish a retained audit log.
 
 *Verify per agent:* that it actually honors a base-URL override (Claude Code,
 Codex, and OpenAI-compatible tools generally do; a few are stubborn).
 
 ---
 
-## 7. Clients - Control Panel + Results Inbox
+## 7. Clients - Native VM and App Management
 
-The native first-party client is the product to a non-technical user, and it has
-**two surfaces**, both first-class:
+The native iOS and macOS clients are the main way to use Fletcher, not a later
+wrapper around its CLI. The primary experience is:
 
-- **Control panel:** VMs, terminals, live previews, the approval prompts.
-- **Results inbox:** a feed of cards / small dashboards where job outputs land
-  ("today's flight prices," "disk usage report," "build finished - preview").
+- Create an environment or deploy an image.
+- Open its terminal, logs or published app.
+- Manage its storage, access and lifecycle.
+- Return from another paired device without recreating the environment.
 
-The inbox is half of why monitoring use-cases are sticky and is probably what makes
-non-technical people open the app daily - you check a dashboard, you don't check a
-terminal. Design for both from the start.
+The CLI supports the same host for local operation and automation. Reports,
+scheduled-task results and agent approvals are supporting surfaces. They must
+not make conversations, model setup or agent supervision the entry point for
+ordinary VM and app management.
 
 ---
 
-## 8. What Separates Us
+## 8. Product Focus and Alternatives
 
-**The moat is structural:** this runs on metal the user owns. The two relevant
-camps both structurally can't follow:
+The intended advantage is a cohesive native experience for personal compute:
+a compact installation on an existing Linux host, convenient VM creation and
+image deployment, and clear storage, access and lifecycle controls.
 
-*Hosted compute clouds* - they host the compute as their business:
-- **OpenComputer / E2B** - cloud API sandboxes; key-based, metered, you ship code
-  *to* them. We never meter and nothing leaves the LAN. (OpenComputer is the
-  closest primitive match and open source - study it; its hosted model is the
-  difference.)
-- **Pi.dev** - secure terminal coding agent pitching "code never leaves your
-  boundary," with regulated-industry pull. Validates our wedge has commercial
-  weight; it lives in a CLI, not a native client.
+Self-hosting, native management clients and microVM isolation already exist
+elsewhere. None is a structural moat. The combined experience has to earn a
+preference through usability and reliability, not an agent-specific label.
 
-*Self-hosted agent incumbents* - same "runs on your server" turf, huge mindshare,
-but a different shape:
-- **Hermes** (Nous Research, ~175k★) - self-hosted autonomous agent with persistent
-  memory, self-writing skills, scheduled tasks; reached through *other people's*
-  chat apps (Telegram/Discord/etc.). Sandbox is just Docker.
-- **OpenClaw** (MIT, ~365k★) - widest chat surface + Chrome control + a skill
-  marketplace (ClawHub) that suffered waves of malicious skills.
+Use app-hosting platforms such as Cloud in a Bottle, the environment workflow of
+exe.dev, and existing VM/container management tools as benchmarks. Native clients
+for other platforms are valid alternatives too. Agent products are relevant only
+when comparing the optional experience of running an agent inside a VM.
 
-**Our two differentiators against the agent incumbents:**
-1. **A real native first-party client**, not a chat-app bot. They pipe through
-   Telegram/Discord because they have no client of their own; a beautiful iOS/Mac
-   app is the hardest thing for a bot-shaped competitor to copy.
-2. **Real per-task sandboxed microVMs with instant fork/rollback** as the unit of
-   work. Hermes-in-Docker can't fork-and-roll-back an environment the way we can.
-
-**Steal selectively (on-wedge only):** persistent memory + scheduled jobs (Hermes);
-browser control as an accessible "go do this on the web" feature (OpenClaw). **Skip
-the self-writing-skills me-too. Skip the skill marketplace entirely** - it's an
-attack surface that directly contradicts a trust-positioned product.
+A useful product check: can someone create a VM, deploy a container image, access
+the result and manage it later without configuring a model provider or running
+an agent? Prioritise that path over agent memory, skills, chat or orchestration.
 
 ---
 
@@ -357,7 +353,7 @@ attack surface that directly contradicts a trust-positioned product.
 |---------|--------|-------|
 | Language | Go | Single static binary; `CGO_ENABLED=0` (Linux). |
 | API | `connectrpc.com/connect-go` | One handler → gRPC (SwiftUI), HTTP/JSON (CLI), gRPC-Web (web). |
-| Runtime (default) | Firecracker + `firecracker-go-sdk` | KVM microVM; own kernel; right isolation for LLM-authored code. |
+| Runtime (default) | Firecracker + `firecracker-go-sdk` | KVM microVM with its own kernel for isolated environments and apps. |
 | Runtime (fallback) | `runc` / containerd | Labeled degraded-isolation path for no-KVM (Pi, nested-virt-less Proxmox). |
 | Runtime abstraction | Pluggable interface | Keeps Linux-only impl details below the seam; lets Cloud Hypervisor (and later macOS VZ) slot in for one driver's cost. |
 | Image pipeline | self-built: `docker build` → flattened ext4 rootfs image | OCI image → rootfs at import time. Avoids a containerd daemon + devmapper thin-pool; see the §11 decision. |
@@ -386,9 +382,11 @@ attack surface that directly contradicts a trust-positioned product.
 
 ---
 
-## 10. Platform: Linux Now, macOS Deferred
+## 10. Host Runtime: Linux Now, macOS Deferred
 
-**Now: Linux only.** Bare-metal or nested-virt host with `/dev/kvm`; Firecracker
+This section concerns the host running VMs, not the native macOS client.
+
+**Now: Linux host runtime only.** Bare-metal or nested-virt host with `/dev/kvm`; Firecracker
 runtime; runc as the labeled no-KVM fallback; btrfs for forks; one static
 `CGO_ENABLED=0` binary. Clean and uncompromised.
 
@@ -448,9 +446,10 @@ Load-bearing and fast-moving; check the actual repos/tools before betting on the
   for durability correctness (that comes from restarting the agent against its
   on-disk session + a consistent fork snapshot + idempotent egress). Don't
   over-engineer the durability path chasing a RAM-restore guarantee you don't need.
-- **Agent resume ergonomics** - confirm your chosen agent(s) can be restarted
-  against a persisted session and pick up reasoning. *This capability, not any
-  engine, is what in-fork durability actually rests on.*
+- **Optional agent resume ergonomics** - confirm a chosen agent can restart
+  against its persisted history. Agent-level recovery depends on that agent's
+  behaviour, not on a workflow engine. Ordinary VM and app recovery must not
+  depend on an agent CLI.
 - **Base-URL override per agent** - confirms the model-gateway design (§6).
 
 ---
@@ -461,17 +460,21 @@ End-state is described above; scoping is the owner's call. Carried reminders:
 
 - **The hardest remaining work is the runtime/image layer**, not networking.
   Networking is deliberately the boring, solved, hub-and-spoke case.
-- **One primitive, many hats.** The job model (§4) unifies every use case - resist
-  re-splitting it into three subsystems.
+- **Keep the job model focused.** Background execution shares the job model
+  (section 4). Do not force every VM or app workflow into agent-task semantics.
 - **Keep the interface seams clean** (§10) so macOS is "one more driver," not a
   rewrite.
-- **Discipline at launch.** The substrate is general on purpose, but the launch
-  hook is not: pick one magical demo when you make the video. Privacy is the
-  positioning; the native-app agent experience is the wow.
+- **Lead with the core experience.** Demonstrate creating a VM and deploying an
+  app from a native client. An agent can be a useful example inside a VM, but
+  must not become a requirement or the product's identity.
 
 ---
 
-## 13. Build Sequencing (Phases)
+## 13. Initial Build Sequencing (Phases)
+
+These phases record the initial implementation sequence, including substantial
+agent support. They do not set the product's current priorities. Sections 1 and
+2 define the VM-and-app-first goal, and `docs/ROADMAP.md` tracks delivery.
 
 Vertical-slice approach: build the thinnest end-to-end path through the
 system with mock drivers, then iteratively swap in real implementations.
@@ -499,17 +502,13 @@ integration arrives.
 | 9 | Networking | WireGuard peers + UPnP/NAT-PMP/PCP + DDNS. Large standalone chunk. |
 | 10 | v0.1.0 polish | Install script, systemd unit, README quickstart, goreleaser config, first tagged release. |
 | 11 | Base image (`fletcher-base`) | A Fletcher-blessed OCI image built from a Dockerfile in-repo (reference pattern: exe.dev's "exeuntu"). Variants named `fletcher-base:debian-13`, `fletcher-base:ubuntu-24.04`, etc. - descriptive, not portmanteau. Ships with: three agent CLIs pre-installed (`claude` from Anthropic, `codex` from OpenAI, `pi` from Earendil - `pi` is the recommended default for users without a strong agent preference, because its extensions system enables Phase 14's deeper integration, but all three are first-class so users can keep existing workflows); their config directories pre-created at the well-known paths Phase 12's bind-mounts target; a single `AGENTS.md` symlinked into each agent's expected location (one source of truth for shared instructions); a `fletcher` user (UID 1000, NOPASSWD sudo, linger enabled for systemd-user services); dev essentials (git, gh, jq, ripgrep, vim, build-essential, Node, Go, Python, uv); the daemon contract baked into env defaults (gateway base-URL, MCP URL, `/workspace` mount point) so agents don't need per-job env configuration; `wireguard-tools` - **not** Tailscale, which is off-thesis (hosted control plane); no baked SSH host keys (generated at VM creation); `x-systemd.growfs` in `/etc/fstab` for first-boot rootfs expansion. Built via standard `docker build`; flattened by the snapshot driver into a btrfs subvolume (runc) or an ext4 rootfs image (Firecracker) at `<snapshots>/images/<name>`, per the self-built image-pipeline decision in §11. Substrate for phases 12, 13, 14. |
-| 12 | Trusted-credential mode | Per-job opt-in to bind-mount named credential directories (`~/.claude`, `~/.codex`, `~/.pi`, `~/.gemini`) into the fork. Enables subscription-auth agents (Claude Max, ChatGPT Plus, Gemini Advanced) - the primary audience - at the documented §5 "Credential modes" cost. |
+| 12 | Trusted-credential mode | Per-job opt-in to bind-mount named credential directories (`~/.claude`, `~/.codex`, `~/.pi`, `~/.gemini`) into the fork. Enables optional subscription-auth agents (Claude Max, ChatGPT Plus, Gemini Advanced) at the documented section 5 "Credential modes" cost. |
 | 13 | Anthropic-native gateway inbound | Gateway accepts `POST /v1/messages` directly; daemon injects `ANTHROPIC_BASE_URL` alongside `OPENAI_BASE_URL`. Closes the API-key path for Claude Code so users with an Anthropic console key can run it in a fork without §5 boundary breaks. Secondary to phase 12 by audience size but cheaper to ship. |
 | 14 | Model catalog + per-agent integration | Gateway exposes a model-discovery endpoint (`GET /catalog.json` or equivalent) listing available providers and models - Anthropic, OpenAI passthrough, locally-served Ollama, etc. Surfaces through (a) a Fletcher CLI command (`fletcher models list`) for humans, and (b) a Fletcher-authored extension for `pi` (the Earendil agent baked into Phase 11) that pre-fetches the catalog and registers providers on startup - mirroring how exe.dev's `exe-dev` pi-extension does this for their gateway. Agents *without* an extensions system (Claude Code, Codex) continue to work via the env-var injection from Phase 13; no agent-side auto-discovery is possible for them and that is fine - Phase 12's trusted-credential mode is what those users actually need. The gateway becomes a model-discovery surface for humans and extension-capable agents, not a universal magic layer. |
 | 15 | Zero-touch networking | Three in-thesis pieces that collapse the homelab operator's one-time setup to "start the daemon": (a) the daemon embeds `wireguard-go` + netlink so it brings the WireGuard interface up itself (no `wg-quick`, no `/etc/wireguard/fletcher.conf`); (b) UPnP auto-forwards the WireGuard UDP port at boot via the existing `portmap.Map`; (c) the UPnP response's external IP becomes the default `--public-endpoint` when the operator didn't supply one. Together: `sudo fletcher serve` on a normal home connection just works, including phone-from-cellular access. Falls back cleanly when UPnP isn't available (clear log, manual `--public-endpoint` required). Off-thesis users (behind CGNAT, symmetric NAT) point at the user-facing docs that explain bringing their own VPN (Tailscale, Headscale, ZeroTier, plain WG) - which still works because the daemon's listeners are network-agnostic. Requires `CAP_NET_ADMIN` on the daemon process (systemd unit grants it via Ambient). |
 | 16 | `fletcher doctor` (diagnostic + action plan) | When Phase 15's automation doesn't "just work" (router refuses UPnP, host has multi-NIC routing, ISP put the connection behind CGNAT, daemon won't reach upstream providers), the operator should not have to read logs and guess. `fletcher doctor` runs a battery of checks (daemon health, `/dev/net/tun`, default-route count, public IP + CGNAT detection, UPnP probe, upstream provider reachability) and prints a prioritised action plan with concrete copy-pasteable commands. Most fixes are operator-side (router config, ISP, firewall) so the doctor diagnoses + explains rather than auto-fixing. All instructions are generic - no router brand names, no hard-coded IPs; commands print the operator's values at runtime. JSON output (`-o json`) for monitoring / CI; non-zero exit on any failure under `--quiet`. |
 
-Past Phase 16 - don't plan now. Real users reshape priorities. Phases 11-16
-above are concrete continuations derived from observed homelab / Claude Code
-needs and the exeuntu reference, not speculation; anything past them should
-wait for actual usage.
-
-For live delivery status (what is actually built, what was cut and why, and the
-phases proposed once usage surfaced them), see `docs/ROADMAP.md`. This table is
-the plan of record; that file tracks state against it.
+For delivery status, later milestones and known gaps, see `docs/ROADMAP.md`.
+The initial agent-oriented sequence above is not a requirement to keep expanding
+agent features. Further work should serve the native VM and app management
+experience defined in sections 1, 2 and 7.

@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress'
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   title: 'Fletcher',
-  description: 'Private agent compute on hardware you own.',
+  description: 'Create VMs and deploy apps on your Linux host, from your iPhone or Mac.',
   lang: 'en-US',
   cleanUrls: true,
   lastUpdated: true,
@@ -19,7 +19,7 @@ export default defineConfig({
       'meta',
       {
         property: 'og:description',
-        content: 'Private agent compute on hardware you own.',
+        content: 'Create VMs and deploy apps on your Linux host, from your iPhone or Mac.',
       },
     ],
   ],
@@ -78,18 +78,18 @@ function sidebarGuide() {
         { text: 'Installation', link: '/guide/installation' },
         { text: 'Networking & first run', link: '/guide/networking' },
         { text: 'Pair a device', link: '/guide/pairing' },
-        { text: 'Your first agent', link: '/guide/first-agent' },
+        { text: 'Create a VM', link: '/guide/sessions' },
+        { text: 'Deploy an app', link: '/guide/deploy' },
       ],
     },
     {
       text: 'Guides',
       collapsed: false,
       items: [
-        { text: 'Jobs & cron', link: '/guide/jobs' },
-        { text: 'Durable sessions', link: '/guide/sessions' },
         { text: 'Publishing ports', link: '/guide/publishing' },
-        { text: 'Deploying apps', link: '/guide/deploy' },
         { text: 'Remote control', link: '/guide/remote' },
+        { text: 'Jobs & cron', link: '/guide/jobs' },
+        { text: 'Running agents', link: '/guide/first-agent' },
       ],
     },
     {

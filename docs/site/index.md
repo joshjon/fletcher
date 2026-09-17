@@ -5,9 +5,9 @@ hero:
   name: Fletcher
   text: Your own private cloud.
   tagline: >-
-    Fletcher makes it simple to spin up isolated virtual machines on hardware
-    you own. Run agents, apps, and jobs on them, with nothing leaving your
-    network.
+    Create VMs and deploy container images on your own Linux host, managed
+    from native iOS and macOS clients. Your environments, apps and storage
+    in one place.
   actions:
     - theme: brand
       text: Get started
@@ -20,22 +20,20 @@ hero:
       link: https://github.com/joshjon/fletcher
 
 features:
-  - title: Self-hosted and private
+  - title: Native management
     details: >-
-      Everything runs on hardware you own. No cloud account, no metering, and no
-      code or data leaving your network.
-  - title: Isolated virtual machines
+      Create environments, deploy apps and manage their lifecycle from your
+      iPhone or Mac. Use the CLI for local access and automation.
+  - title: Persistent VMs
     details: >-
-      Spin up hardware-isolated VMs in seconds, each a fast copy-on-write fork
-      of a base image. Use one and throw it away, or keep it as a durable
-      workspace you SSH into.
-  - title: Sandboxed by default
+      Create isolated Linux environments from images. Open a terminal, attach
+      an IDE over SSH, or stop a VM while keeping its disk for later.
+  - title: Image to running app
     details: >-
-      A new VM has no route to the internet and reaches models only through the
-      daemon. Open up egress when a workload needs it, and keep it shut when it
-      does not.
-  - title: Agents and apps, first class
+      Deploy a container image without Docker on your client device. Access
+      its port privately, or publish it over HTTPS on your own domain.
+  - title: Your host, your choice
     details: >-
-      Run an agent like Claude Code inside a VM with your keys kept on the host.
-      Or deploy a Docker app and serve it over HTTPS, all from one command.
+      Compute and storage run on the Linux host you control. Agents and model
+      integrations are optional, not prerequisites for using Fletcher.
 ---

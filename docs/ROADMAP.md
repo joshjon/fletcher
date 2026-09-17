@@ -2,9 +2,10 @@
 
 The single source of truth for where Fletcher actually stands: what is built,
 what was deliberately cut and why, the plan from here, and every known gap.
-`DESIGN.md` §13 is the plan of record for *what each phase means*; this file
-tracks *delivery and the path forward*. If a plan, decision, milestone, or gap
-exists, it belongs here - nothing should live only in a conversation.
+`DESIGN.md` sections 1 and 2 define the product goals, while section 13 records
+the initial build phases. This file tracks delivery and the path forward.
+If a plan, decision, milestone, or gap exists, it belongs here - nothing should
+live only in a conversation.
 
 This file is meant to be edited as state changes. Keep it current.
 
@@ -17,7 +18,19 @@ Verdict legend:
 - **MISSING** - specified somewhere but not built.
 - **SHIPPED** / **NEXT** / **PLANNED** - milestone states (see Execution plan).
 
-## Where it stands today
+## Product direction
+
+Fletcher is a personal compute and app-hosting platform, managed from native
+iOS and macOS clients. The primary flows are creating VMs and deploying container
+images on the user's Linux host. Cloud in a Bottle and exe.dev are broad product
+references, not dependencies or feature-parity requirements.
+
+Running agents is an optional use of those environments. Core onboarding and
+management must work without an agent or model-provider account. The agent
+milestones below remain implementation history, not a mandate to make an agent
+harness or to prioritise agent features over VM and app management.
+
+## Initial implementation and hardware verification
 
 What runs end-to-end **on the mock runtime**: the daemon, job model + supervisor
 + resume, secrets (age), the model gateway (real Anthropic proxy with the key
@@ -26,14 +39,14 @@ tunnel, and `fletcher doctor`. The mock runtime executes a job's command as a
 plain host subprocess - no isolation, no image - so it proves the plumbing, not
 the product.
 
-What works (verified on hardware 2026-06-05): **the full private-agent-compute
-loop - Milestone 2 is done.** `fletcher image import` flattens `fletcher-base`
+What worked in the initial agent smoke test (verified on hardware 2026-06-05):
+**Milestone 2 is done.** `fletcher image import` flattens `fletcher-base`
 into a btrfs template; the daemon CoW-snapshots it per job and runs the command
 in a rootless runc fork; the fork reaches the daemon gateway/MCP over a unix
 socket (and nothing else - zero egress); and a `claude -p` job completes a real
 Anthropic model call through that gateway, exit 0. The agent runs isolated and
 unprivileged, the API key never enters the fork, and egress goes only through
-the daemon. That is the thesis working end to end.
+the daemon. This verified the optional agent execution path.
 
 Correction to the earlier record: Milestone 1's "verified on hardware" claim was
 wrong. The daemon was silently on the **mock** runtime the whole time - the
@@ -260,9 +273,9 @@ rootless-runc + user namespaces is in Backlog).
 ### Milestone 2 - Run a real agent in the fork + prove the gateway - DONE (verified 2026-06-05)
 
 **Goal (met).** An actual agent runs inside the fork against the daemon gateway,
-with credentials never entering the fork. This is the product: private agent
-compute. A `claude -p` job completed a real Anthropic call through the gateway
-from an isolated rootless fork with zero egress.
+with the provider API key kept outside the fork. This milestone verified an
+agent use case, not the full product. A `claude -p` job completed a real Anthropic
+call through the gateway from an isolated rootless fork with zero egress.
 
 **Decisions made:**
 
@@ -646,17 +659,17 @@ single-box, daemon-gated, no-route-into-VM-land constraints.
   a busy one keeps running and has its idle clock reset; the count cap refuses
   with a usage report; list shows disk + last-used.
 
-### Milestone 7 - SwiftUI iOS client (the hero) - PLANNED
+### Milestone 7 - SwiftUI iOS client
 
-**Goal.** The native first-party client the product is actually for (DESIGN.md
-§1, §7, §8): from an iPhone, pair to your own box, spin up an isolated VM, drop
-into a terminal running Claude Code inside it, and supervise + approve unattended
-agents - all over the WireGuard tunnel, nothing leaving your network. This
-promotes the former "Native client app" backlog line to a committed milestone:
-durable Claude-Code sessions driven from a phone is *the* wedge (DESIGN.md §8,
-"a beautiful iOS/Mac app is the hardest thing for a bot-shaped competitor to
-copy"), not a someday GUI. A first-cut HTML UI mockup of these screens (approved
-as the visual direction) lives in `design/ios-mockup/`.
+**Goal.** Pair to your Linux host, create an isolated VM, deploy an image and
+manage environments and apps from the native client (DESIGN sections 1 and 7).
+Terminals, logs, storage and access are core. Running or supervising an agent is
+optional, not the entry point for every user.
+
+Native iOS and macOS implementations are tracked in the separate client
+repository. The historical daemon-support audit below records this milestone's
+earlier dependencies. The first-cut HTML mockup in `design/ios-mockup/` remains
+a visual reference, not the full current product definition.
 
 **Daemon-support audit (2026-06-11) - gaps the iOS milestones need.** The iOS
 app (separate repo) has shipped its M1-M5; its M6-M11 are planned. All nine
@@ -895,7 +908,8 @@ no-NIC microVM.
 - *Blast radius is a feature, not a worry.* A public web app that is compromised
   is trapped in a no-NIC microVM with its egress policy (B3) still in force -
   instant rollback, no route to the LAN. This is a *better* story than exposing a
-  port on a normal homelab box, and it leans on the structural moat (DESIGN §8).
+  port directly on the host. It supports the isolation goal, not a structural
+  moat (DESIGN section 8).
 
 **The one real new surface.** Today the only thing the box exposes publicly is the
 WireGuard UDP port, which is silent (drops unauthenticated packets, no response).

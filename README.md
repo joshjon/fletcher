@@ -1,37 +1,35 @@
 # Fletcher
 
-> Private agent compute on hardware you own.
+> Your Linux host, managed from your iPhone or Mac.
 
-Fletcher is a single Go binary you install on one Linux box. From a native
-client (CLI today, mobile/desktop apps later) you spin up isolated jobs and
-run agents inside them - coding assistants, day-to-day tasks, recurring
-monitoring - with nothing leaving your network and no cloud account in the
-loop.
+Fletcher turns a Linux host you control into a personal cloud. Create persistent
+VMs, deploy container images, and manage their terminals, storage, logs and
+published ports through native iOS and macOS clients. A single Go daemon runs on
+the host, with a CLI for local use and automation.
 
-The pitch in one line: the model gateway, the credentials, the audit log,
-the snapshots - everything runs on metal you control.
+Use it for development environments, self-hosted apps or background tasks.
+Coding agents are one possible use inside a VM, not a requirement. Creating an
+environment or deploying an app needs no agent or model-provider account.
+
+Compute and storage stay on your host. External services, including cloud models
+if you choose to use them, receive the requests you send to them. Self-hosting
+is not a promise that no data ever leaves your network.
 
 ## Status
 
-Pre-v0.1.0, but the core loop works end to end on a real Linux box. A job runs
-inside a **Firecracker microVM** (the default on a KVM host) - or a rootless
-**runc** fork as the no-KVM fallback - reaching models *only* through the
-daemon's gateway (the API key never enters the VM, and the VM has no network
-egress at all - only a vsock channel to the daemon). You configure and manage it
-entirely with `fletcher` verbs - `fletcher settings`, `fletcher daemon` - with no
-systemctl, and you can drive the daemon from a paired device over the tunnel with
-a per-peer token. The remaining gap to a one-command experience is a
-shipped/pullable base image (today you build it once with `make image`).
+Pre-v0.1.0. The daemon supports durable Firecracker sessions, image deployment,
+hibernation, SSH access and port publishing. Native iOS and macOS clients are
+developed in a separate repository.
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for exactly what is built, verified,
-and pending.
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for implementation, verification and
+release status. Until a release is published, [build from source](#building-from-source).
 
 ## Quickstart
 
-Requires Linux on amd64 or arm64.
+Requires Linux on amd64 or arm64, with KVM for VMs and app deployments.
 
 ```sh
-# 1. Install (downloads the latest release, sets up systemd):
+# 1. Install from a published release (or build from source below):
 curl -fsSL https://raw.githubusercontent.com/joshjon/fletcher/main/scripts/install.sh | sudo sh
 
 # 2. Enable + start the daemon:
@@ -41,20 +39,31 @@ sudo systemctl enable --now fletcher
 fletcher health
 fletcher doctor          # checks /dev/kvm, the bundled VMM, networking, ...
 
-# 4. Pair your phone (scan the QR with the WireGuard app):
-fletcher peer pair phone
+# 4. Pair your phone (scan the QR in the native Fletcher app):
+fletcher peer pair --mobile phone
 ```
 
-On a KVM host the daemon defaults to the **Firecracker** runtime, so running a
-job needs a base image first. Pull the published one and import it:
-`sudo fletcher image import ghcr.io/joshjon/fletcher-base:debian-13 --format
-ext4 --name <name>`, then `fletcher job create --image <name> --command "..."`.
-The full walkthrough - importing the image,
-running an agent in a microVM, `fletcher settings` / `fletcher daemon`, and
-driving the daemon from a paired device - is in the
-[documentation](docs/site/guide/introduction.md).
-(No KVM? The daemon falls back to the mock runtime, where
-`fletcher job create --command "echo hi"` runs as a plain subprocess.)
+Deploy a container image as an app, accessible from your paired devices:
+
+```sh
+fletcher deploy nginx:alpine --name web --gateway off
+```
+
+Or create a persistent Linux environment and open a terminal:
+
+```sh
+fletcher image pull ghcr.io/joshjon/fletcher-base:debian-13 --name fletcher-base
+fletcher session create --name dev --image fletcher-base --gateway off
+fletcher session shell dev
+```
+
+The daemon pulls registry images, so these commands also work from a remote
+client without local Docker. No model gateway configuration is needed.
+See [durable sessions](docs/site/guide/sessions.md) and
+[deploying apps](docs/site/guide/deploy.md) for the full walkthroughs.
+
+Without KVM, the mock runtime runs jobs as unisolated host processes. It is a
+development aid, not a substitute for VMs.
 
 The daemon brings up its own WireGuard interface and asks your router to
 forward the listening port via UPnP - on most home connections that's
@@ -64,24 +73,20 @@ the whole setup. Troubleshooting and the "bring-your-own-VPN" alternative
 The CLI talks to the daemon over a local Unix socket, or to a remote daemon
 over the tunnel: run `fletcher login <token>` once (the token is printed by
 `fletcher peer pair`) and subsequent commands target it by default, or pass
-`--remote host:port --token …` / `FLETCHER_REMOTE` + `FLETCHER_TOKEN` per
+`--remote host:port --token <token>` / `FLETCHER_REMOTE` + `FLETCHER_TOKEN` per
 command. Subcommand help is the source of truth: `fletcher --help`,
-`fletcher job --help`, etc.
+`fletcher session --help`, `fletcher deploy --help`, etc.
 
-Beyond one-shot jobs, Fletcher hosts **durable sessions** - persistent microVMs
-you shell or SSH into (with hibernate/restore) - and can **deploy a web app** from
-a Docker image: `fletcher deploy <image> --host app.example.com` builds or pulls
-the image, runs it, and serves it publicly over HTTPS on a domain you own, with
-the app sandboxed in a no-egress microVM. The daemon pulls registry images itself,
-so `deploy` works from a laptop over the tunnel with no local Docker. Walkthroughs
-for both are in [durable sessions](docs/site/guide/sessions.md) and
-[deploying apps](docs/site/guide/deploy.md).
+To publish an app publicly, enable public web and deploy with
+`--host app.example.com`. See [public web](docs/site/advanced/public-web.md)
+for DNS and HTTPS requirements. [Jobs](docs/site/guide/jobs.md) and
+[agents](docs/site/guide/first-agent.md) are optional uses of the same host.
 
 ## Documentation
 
-- [User guide](docs/site/guide/introduction.md) - end-user install, first run,
-  running agents, configuration, the remote client, networking modes,
-  security notes, troubleshooting. Start here if you're running Fletcher.
+- [User guide](docs/site/guide/introduction.md) - installation, VM creation,
+  app deployment, remote access, configuration and security. Start here if
+  you're running Fletcher.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) - delivery status: what is built,
   verified, deliberately cut, and planned.
 - [`DESIGN.md`](./DESIGN.md) - positioning, architecture, the thinking
@@ -108,12 +113,12 @@ make build          # local platform binary at ./bin/fletcher
 make build-linux    # cross-compile amd64 + arm64 Linux artefacts
 make check          # lint + tests + generated-file drift check
 
-# Install on a Linux server (mirrors what scripts/install.sh does
+# Install on a Linux host (mirrors what scripts/install.sh does
 # using your local build):
 make install        # create user, install binary + unit, reload + restart-if-running
 ```
 
-Iterate on a deployed server with:
+Iterate on a deployed host with:
 
 ```sh
 git pull
