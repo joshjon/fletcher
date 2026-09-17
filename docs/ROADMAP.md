@@ -215,10 +215,11 @@ and documented in code; one (settings) fell through the cracks.
     locally testable), iOS after. The iOS ROADMAP backlog cross-references this.
 
 - **pi-extension (phases 11/14).** `images/fletcher-base/pi-extension/index.ts`
-  fetches the catalog on startup but `registerProvider()` is a TODO pending a
-  pinned `pi` API version. The `/v1/catalog.json` surface it consumes is done.
-  *Why cut:* the published catalog endpoint is the contract; the extension is a
-  client that depends on an external project's API stabilising.
+  is a loadable no-op skeleton with an unused catalog-fetch helper. It does not
+  fetch the catalog on startup or register providers. The `/v1/catalog.json`
+  endpoint is done; pinning Pi and implementing provider registration remain
+  deferred. Image builds check actual Pi startup so an invalid extension cannot
+  ship unnoticed.
 
 ### Genuine gaps (were untracked until this file)
 
@@ -2343,8 +2344,8 @@ intentionally not in this list.
 operator does not want it yet; the `audit.Noop` seam stays). Gateway breadth
 (streaming in the OpenAI-compatible translation path; a second provider). APNs
 push (polling works). NAT-PMP / PCP and DDNS (UPnP + a manual endpoint cover the
-common case). pi-extension `registerProvider` (gated on the external `pi` API
-stabilising). These stay in the backlog below.
+common case). pi-extension `registerProvider` (Pi version pinning and integration
+still pending). These stay in the backlog below.
 
 ## Backlog (not scheduled - awaiting a usage signal)
 

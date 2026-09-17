@@ -167,10 +167,10 @@ RUN for home in /home/fletcher /root; do \
     done && \
     chown fletcher:fletcher /home/fletcher/.claude.json
 
-# Fletcher pi-extension (Phase 14): fetches the daemon's model catalog on
-# pi startup so users see provider/model lists without per-job env-var
-# fiddling. Pattern mirrors exe.dev's `exe-dev` pi-extension.
+# Fletcher pi-extension skeleton (Phase 14). It must load without errors,
+# but does not yet fetch the catalog or register gateway providers.
 COPY --chown=fletcher:fletcher pi-extension/ /home/fletcher/.pi/agent/extensions/fletcher/
+COPY --chown=fletcher:fletcher test-pi-extension.py /tmp/test-pi-extension.py
 
 # Daemon contract baked into env defaults. The daemon overrides these
 # per-job at runtime with the actual listen addresses; values here are
@@ -192,4 +192,8 @@ LABEL org.opencontainers.image.title="fletcher-base" \
 
 WORKDIR /workspace
 USER fletcher
+# Check the installed Pi binary and bundled extension together. This uses
+# isolated configuration and a local command, not provider credentials.
+RUN python3 /tmp/test-pi-extension.py /home/fletcher/.pi/agent/extensions/fletcher && \
+    rm /tmp/test-pi-extension.py
 CMD ["/bin/bash"]

@@ -207,6 +207,17 @@ runc); on macOS this is just a "did the Dockerfile compile" smoke test. CI
 also publishes it to `ghcr.io/<owner>/fletcher-base`, so on Linux you can
 pull it instead of building.
 
+The image build checks Pi startup with the bundled extension, using isolated
+configuration and a local command without making a model request. To run that
+check locally with `pi` on your PATH:
+
+```sh
+python3 images/fletcher-base/test-pi-extension.py
+```
+
+This checks extension loading only. Fletcher's Pi provider registration is still
+unimplemented.
+
 ### If something looks off
 
 The daemon log includes `request_id`, procedure, and error category on
