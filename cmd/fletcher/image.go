@@ -223,11 +223,15 @@ Pass --btrfs-root or a [name] to override either.`,
 			if err := requireTools("docker"); err != nil {
 				return err
 			}
-			fmt.Printf("pulling %s ...\n", meta.Source)
-			pull := exec.CommandContext(ctx, "docker", "pull", meta.Source) //nolint:gosec // recorded source ref, local admin command
-			pull.Stdout, pull.Stderr = os.Stderr, os.Stderr
-			if err := pull.Run(); err != nil {
-				return fmt.Errorf("docker pull %s: %w", meta.Source, err)
+			if shouldPullBeforeUpdate(meta) {
+				fmt.Printf("pulling %s ...\n", meta.Source)
+				pull := exec.CommandContext(ctx, "docker", "pull", meta.Source) //nolint:gosec // recorded source ref, local admin command
+				pull.Stdout, pull.Stderr = os.Stderr, os.Stderr
+				if err := pull.Run(); err != nil {
+					return fmt.Errorf("docker pull %s: %w", meta.Source, err)
+				}
+			} else {
+				fmt.Printf("%s has no recorded registry digest; re-importing the local docker image without pulling\n", meta.Source)
 			}
 			switch meta.Format {
 			case "ext4":
@@ -523,6 +527,14 @@ func dockerImageDigest(ctx context.Context, ref string) string {
 		}
 	}
 	return ""
+}
+
+// shouldPullBeforeUpdate reports whether an imported template came from a
+// registry-backed image. Local-only images such as fletcher-base:dev have no
+// RepoDigests, so `image update` should re-import the local Docker tag instead
+// of trying to pull a same-named Docker Hub repository.
+func shouldPullBeforeUpdate(meta image.TemplateMeta) bool {
+	return meta.Digest != ""
 }
 
 // exportDockerRootfs pipes `docker export` of a throwaway container created
