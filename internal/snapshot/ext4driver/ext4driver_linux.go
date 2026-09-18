@@ -8,8 +8,8 @@
 // Templates live at <imagesDir>/<image>.ext4 (built by `fletcher image import
 // --format ext4`). Each Create clones one to <rootDir>/<id>.ext4. On a
 // reflink-capable filesystem (btrfs, xfs) the clone is an instant, space-shared
-// CoW copy via the FICLONE ioctl; on any other filesystem it degrades to a full
-// copy - correct, just not space-shared. Per DESIGN.md §10 all snapshot work
+// CoW copy via the FICLONE ioctl; otherwise it uses a sparse copy that leaves
+// zero-filled blocks unallocated. Per DESIGN.md section 10 all snapshot work
 // lives behind the snapshot.Driver interface; this is its ext4 implementation.
 package ext4driver
 
@@ -269,7 +269,7 @@ func (d *Driver) Delete(_ context.Context, id string) error {
 }
 
 // cloneFile copies src to dst, preferring a reflink (instant CoW) and falling
-// back to a byte copy. The write is to dst directly with cleanup on failure so
+// back to a sparse copy. The write is to dst directly with cleanup on failure so
 // a cancelled or failed clone never leaves a truncated rootfs a later boot
 // would fail on opaquely.
 func cloneFile(ctx context.Context, src, dst string) (err error) {
@@ -284,47 +284,49 @@ func cloneFile(ctx context.Context, src, dst string) (err error) {
 		return err
 	}
 	defer func() {
-		cerr := out.Close()
+		err = errors.Join(err, out.Close())
 		if err != nil {
 			_ = os.Remove(dst) // don't leave a half-written rootfs behind
-			return
-		}
-		if cerr != nil {
-			err = cerr
 		}
 	}()
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Fast path: reflink. Instant and space-shared on btrfs/xfs.
 	if unix.IoctlFileClone(int(out.Fd()), int(in.Fd())) == nil {
 		return nil
 	}
-	// Fallback: full copy. Correct on any filesystem, just not space-shared.
-	_, err = copyWithCtx(ctx, out, in)
-	return err
+	// Fallback: independent data blocks, with zero-filled blocks left as holes.
+	return copySparse(ctx, out, in)
 }
 
-// copyWithCtx is io.Copy that honours ctx cancellation between chunks, so a
-// large fallback copy of a cancelled job stops promptly.
-func copyWithCtx(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
+// copySparse copies into a fresh file, skipping zero blocks even in fully allocated sources.
+func copySparse(ctx context.Context, dst *os.File, src io.Reader) error {
+	const blockSize = 4096
 	buf := make([]byte, 1<<20)
+	zero := make([]byte, blockSize)
 	var total int64
 	for {
 		if err := ctx.Err(); err != nil {
-			return total, err
+			return err
 		}
-		n, rerr := src.Read(buf)
-		if n > 0 {
-			w, werr := dst.Write(buf[:n])
-			total += int64(w)
-			if werr != nil {
-				return total, werr
+		n, rerr := io.ReadFull(src, buf)
+		for start := 0; start < n; start += blockSize {
+			block := buf[start:min(start+blockSize, n)]
+			if !bytes.Equal(block, zero[:len(block)]) {
+				if _, err := dst.WriteAt(block, total+int64(start)); err != nil {
+					return err
+				}
 			}
 		}
-		if errors.Is(rerr, io.EOF) {
-			return total, nil
+		total += int64(n)
+		if errors.Is(rerr, io.EOF) || errors.Is(rerr, io.ErrUnexpectedEOF) {
+			// WriteAt does not extend through trailing holes or an all-zero image.
+			return dst.Truncate(total)
 		}
 		if rerr != nil {
-			return total, rerr
+			return rerr
 		}
 	}
 }
