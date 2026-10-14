@@ -1953,7 +1953,7 @@ final ack, and whether to cap transfer size.
 
 ### Saved project environments - IN PROGRESS
 
-**Daemon, CLI and native UI implemented; Apple builds and hardware verification pending.**
+**Daemon and CLI implemented; native workspace refinement awaits Apple verification.**
 A saved project is a durable registration pointing at an existing development VM
 and an absolute guest working directory. It reuses the session lifecycle and
 runtime interfaces, not a new execution engine (DESIGN sections 4, 5 and 10).
@@ -1971,15 +1971,20 @@ Implemented:
   fields.
 - Tests cover restart persistence, VM/fork reuse, deletion semantics, validation,
   API and CLI forwarding, terminal command selection and older-guest rejection.
-- Native-client project registration/navigation, editing/removal, Open and New
-  terminal through the same RPCs. Shared-VM isolation is visible and VM creation
-  stays separate. Native tmux capture, output and input use the discovered pane
-  rather than assuming `%0`.
+- Native project and session views now share an in-place terminal-tab workspace,
+  with project/VM configuration in the Mac inspector. A guest folder picker uses
+  ListDir; browsing a stopped VM offers an explicit start. Saving a bookmark
+  itself remains metadata-only. New tabs query the active pane's actual cwd.
+  Local tab identities survive navigation/relaunch, and closed tabs can reopen.
+  No new daemon RPC is required. Capture, input, output and cwd use the discovered
+  pane rather than assuming `%0`.
 
 Remaining:
-- Run native Swift tests and both Apple target builds with concurrency checking;
-  neither is available on the Linux implementation host. Check reconnect,
-  non-default panes, accessibility and terminal-sheet layout on devices.
+- The original native implementation passed 74 core tests and unsigned iOS/macOS
+  builds on the operator's Mac. Rerun core/UI tests and both builds for the
+  terminal-workspace refinement; Swift/Xcode are unavailable on the Linux
+  implementation host. Verify tab switching, cwd inheritance, the folder picker,
+  inspector stability, keyboard navigation and accessibility on devices.
 - Verify reuse and named-terminal reconnect on real microVMs, including guest
   upgrades and stop/start. Disk durability does not promise cold-boot process
   continuity.
@@ -1989,8 +1994,29 @@ Remaining:
 - Prepared-image reuse: tools and non-secret configuration only, not live
   subscription credentials. Make rootfs versus persistent-volume scope explicit.
 
-Host execution is not included. Separate VMs remain the independent isolation
-boundary; ordinary tasks and terminals can share a VM when the user chooses.
+Host execution is not included in this implementation. Separate VMs remain the
+independent isolation boundary; ordinary tasks and terminals can share a VM when
+the user chooses.
+
+### Optional direct host sessions - PLANNED
+
+Approved product direction (DESIGN section 10.1), not a runtime fallback. Let a
+user explicitly choose an existing host account and its tools/files without
+first building a VM or Docker image. Keep VMs as the default isolated option.
+
+Before implementation:
+- Settle the execution location and platform scope: Linux daemon host,
+  client-local Mac, or both. This is distinct from the deferred macOS VM driver.
+- Design least-privileged account authorization, launch, supervision, revocation
+  and cleanup. The daemon's service account and its state/key access must not
+  become the user-program execution identity by convenience.
+- Define host-specific capabilities through the existing lifecycle/runtime
+  seams. Do not imply VM snapshots, rollback, disposable disks or VM egress
+  guarantees. Never fall back to host execution on VM failure.
+- Use the same session/project/tab interaction with a persistent Host label and
+  visible machine/account. Bookmark removal must not delete host directories.
+- Keep one job model if host background work is added. No separate scheduler,
+  agent harness, hosted control plane, metering or automatic credential copying.
 
 ### Milestone 16 - credential seeding ("log in once") - AGENT SEEDING REMOVED (2026-06-18); git seeding kept
 

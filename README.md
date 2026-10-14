@@ -23,8 +23,8 @@ developed in a separate repository.
 
 The daemon and CLI also support [saved projects](docs/PROJECTS.md): reopen an
 existing development VM and guest directory with named terminals. The native
-project UI is implemented separately; Apple builds and device verification are
-still pending.
+workspace refinement adds a guest folder picker and in-place terminal tabs;
+Apple builds and device verification for those changes are still pending.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for implementation, verification and
 release status. Until a release is published, [build from source](#building-from-source).

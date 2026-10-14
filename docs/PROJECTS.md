@@ -73,11 +73,17 @@ redeploy or replace a development disk merely to update terminal support.
 ## Implementation status
 
 The daemon, persistence schema, Connect API and CLI support saved projects and
-named terminals. The native client also implements registration, navigation,
-editing, removal, Open and New terminal. Its tmux bridge discovers the attached
-pane rather than assuming the server's first pane. Swift tests and Apple builds
-remain unexecuted on the Linux implementation host; real-VM and device
-verification is still required.
+named terminals. The native client uses a shared session/project terminal
+workspace with in-place tabs, a guest folder picker and a trailing Mac inspector.
+New tabs query the active pane's actual current directory, not the bookmark's
+startup directory. Closing a tab detaches it; local tab metadata supports
+reopening. Tabs do not create another VM or fork. Browsing a stopped VM explicitly
+offers to start it; saving the registration alone does not.
+
+The original native implementation passed 74 core tests and unsigned iOS/macOS
+builds on the operator's Mac. The workspace refinement needs fresh Swift tests,
+Apple builds and device verification. Syntax and local tmux checks on the Linux
+implementation host are not equivalent to those checks.
 
 Follow-on work:
 
@@ -90,3 +96,6 @@ Follow-on work:
   have distinct lifetimes; image preparation must make that scope visible.
 
 Host execution and live host-directory mounts are not part of these flows.
+Optional direct host sessions are approved future work in DESIGN section 10.1,
+with execution location, platform scope and account authorization to be settled
+before implementation. They will not inherit the VM sandbox promise.

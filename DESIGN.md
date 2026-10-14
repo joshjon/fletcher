@@ -8,6 +8,11 @@ create persistent VMs, deploy container images and manage their lifecycle.
 Agents are one possible use inside a VM, not the organising purpose of the
 product. The core experience must work without an agent or model account.
 
+Optional direct host sessions are an approved future extension (section 10.1).
+They let a user work with an existing host account and its tools without first
+building an image. VMs remain the default isolated environment; host execution
+is an explicit choice, never a fallback when VM creation fails.
+
 ---
 
 ## 1. Positioning
@@ -45,13 +50,17 @@ product. The core experience must work without an agent or model account.
   the home network needs configuration or a user-provided VPN.
 - Support ordinary programs, scheduled tasks and existing agent CLIs without
   making any agent or model provider a prerequisite.
+- Add optional, explicitly selected host sessions for work that does not need a
+  VM or container image. Keep the machine, account and weaker isolation visible
+  rather than presenting host execution as equivalent to a sandbox.
 - Offer model-gateway and approval features for users who choose them. Keep
   their credential and network guarantees explicit rather than promising that
   all code and data stay local regardless of configuration.
 
 **Non-Goals (for now)**
-- **The macOS host runtime is deferred** (see section 10). The native macOS
-  client is in scope.
+- **The macOS VM-hosting runtime is deferred** (see section 10). The native
+  macOS client is in scope. Direct host sessions are a distinct future feature,
+  with supported execution platforms to be settled before implementation.
 - No multi-box mesh. Single box only; multiple *client devices* are fine.
 - No hosted control plane / coordination SaaS.
 - No built-in metering or billing.
@@ -162,8 +171,10 @@ an agent on every invocation is an optional choice when each run needs one.
 
 ## 5. Agent Execution & the Trust Boundary
 
-This section describes the optional agent execution model, not a prerequisite
-for VM creation or app deployment. **Agent actions are not orchestrated tasks.**
+This section describes the optional agent execution model inside an isolated
+environment, not a prerequisite for VM creation or app deployment. Its sandbox
+and credential-isolation claims do not apply to future direct host sessions
+(section 10.1). **Agent actions are not orchestrated tasks.**
 An agent runs natively as a subprocess inside its fork and does its own bash,
 edits and tests with zero daemon mediation.
 
@@ -319,6 +330,19 @@ wrapper around its CLI. The primary experience is:
 - Manage its storage, access and lifecycle.
 - Return from another paired device without recreating the environment.
 
+**Terminal workspaces.** A session opens directly into a full-size terminal with
+in-place tabs, not a terminal sheet or a new window for each shell. New tabs use
+the active terminal's actual current directory in the same environment. The
+Mac's trailing inspector holds configuration; compact layouts use an info
+sheet. Closing a tab detaches the client without silently killing its shell.
+
+**Projects are bookmarks.** A project remembers the environment and initial
+folder for a piece of work, useful when VMs have different tools or capabilities.
+Opening it uses the same terminal-first workspace as opening a session. A guest
+folder browser avoids memorized paths; browsing a stopped VM explicitly asks to
+start it. Saving the bookmark itself does not start compute. Projects neither
+own the VM nor add another isolation boundary.
+
 The CLI supports the same host for local operation and automation. Reports,
 scheduled-task results and agent approvals are supporting surfaces. They must
 not make conversations, model setup or agent supervision the entry point for
@@ -382,11 +406,12 @@ an agent? Prioritise that path over agent memory, skills, chat or orchestration.
 
 ---
 
-## 10. Host Runtime: Linux Now, macOS Deferred
+## 10. VM Runtime: Linux Now, macOS Deferred
 
-This section concerns the host running VMs, not the native macOS client.
+This section concerns the host running VMs, not the native macOS client or the
+future direct execution mode in section 10.1.
 
-**Now: Linux host runtime only.** Bare-metal or nested-virt host with `/dev/kvm`; Firecracker
+**Now: Linux VM-hosting runtime only.** Bare-metal or nested-virt host with `/dev/kvm`; Firecracker
 runtime; runc as the labeled no-KVM fallback; btrfs for forks; one static
 `CGO_ENABLED=0` binary. Clean and uncompromised.
 
@@ -422,6 +447,45 @@ build (CGO + `com.apple.security.virtualization` entitlement + code-signing +
 notarization - not a static binary). Recommended path then: native VZ driver (works
 on all Apple Silicon + Intel, no nested-virt requirement), not a nested-Firecracker
 appliance (which needs M3+/macOS 15 and adds overhead).
+
+---
+
+## 10.1. Optional Direct Host Sessions - Planned
+
+Host execution is permitted by the product direction, but is not implemented.
+It complements VMs and apps rather than replacing them: select a machine and
+account, open a terminal, and use tools and files already present without
+managing Docker or a VM image. Ordinary development must remain useful without
+an agent or model account.
+
+Requirements before implementation:
+
+- Explicit opt-in at environment creation and a persistent Host label showing
+  the execution machine and account. Never silently substitute host execution
+  for a failed or unsupported VM operation.
+- Commands run with the selected account's real filesystem, credential and
+  network access. No VM sandbox, VM egress-policy, snapshot, rollback or
+  disposable-disk guarantees may be shown unless independently implemented.
+  Removing a bookmark or session registration must not delete host directories.
+- Establish a least-privileged launch and supervision mechanism, independent of
+  the daemon service account's state and key access. Do not spawn user programs
+  as the daemon merely because it can execute processes. Define consent,
+  account authorization, revocation and process cleanup before shipping.
+- Reuse session lifecycle and terminal interfaces where their semantics fit.
+  Keep platform-specific execution behind an explicit backend. Host background
+  work, if added, uses the existing job model, not a second scheduler or agent
+  harness. A project remains a bookmark, not an execution engine.
+- Keep the native interaction consistent: terminal tabs, cwd inheritance, folder
+  selection, and configuration in the inspector. Distinguish the daemon host
+  from the device running the client; neither should be assumed implicitly.
+- Settle the initial platform scope (Linux daemon host, client-local Mac, or
+  both) and remote-access contract before implementation. Direct execution on a
+  Mac is not the deferred macOS VM-hosting driver. No hosted control plane,
+  metering or automatic credential copying is introduced by this direction.
+
+VMs remain the default when isolation is wanted. The host option is for users
+who deliberately prefer their existing account environment and accept its
+broader access. See `docs/ROADMAP.md` for sequencing.
 
 ---
 
