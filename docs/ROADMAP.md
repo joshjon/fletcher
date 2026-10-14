@@ -2094,6 +2094,12 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**Concurrent redeploy/rollback - DONE.** Both operations re-read the session
+under its lifecycle lock before selecting current and retired forks. Overlapping
+redeploys keep the immediately preceding version and reclaim older forks;
+overlapping rollbacks swap the latest pair rather than replaying a stale read.
+Deterministic race tests force both callers to observe the same initial state.
+
 **Session configuration and hibernation - DONE.** Restart now cold-boots both
 interactive and deployed sessions; Stop/Start remains the resume path. Updates
 validate all fields before one atomic write and serialize with lifecycle changes.

@@ -1208,17 +1208,20 @@ func (m *Manager) Redeploy(ctx context.Context, ref, newImage string) (Session, 
 	if err != nil {
 		return Session{}, err
 	}
-	image := row.Image
-	if strings.TrimSpace(newImage) != "" {
-		image = newImage
-	}
-
 	// Hold the per-session start lock across the disk swap and the boot so a
 	// concurrent wake can neither boot the old fork mid-redeploy nor interleave
 	// between the swap and the restart.
 	lock := m.startLock(row.ID)
 	lock.Lock()
 	defer lock.Unlock()
+	row, err = m.lookup(ctx, row.ID)
+	if err != nil {
+		return Session{}, err
+	}
+	image := row.Image
+	if strings.TrimSpace(newImage) != "" {
+		image = newImage
+	}
 	if handle := m.takeHandle(row.ID); handle != nil {
 		// Flush the guest first: this disk becomes the rollback target.
 		m.syncGuest(ctx, handle, row.ID)
@@ -1271,14 +1274,17 @@ func (m *Manager) Rollback(ctx context.Context, ref string) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	lock := m.startLock(row.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	row, err = m.lookup(ctx, row.ID)
+	if err != nil {
+		return Session{}, err
+	}
 	if row.PrevForkID == nil || row.PrevForkPath == nil {
 		return Session{}, errs.Newf(errs.CategoryFailedPrecondition,
 			"session %q has no previous fork to roll back to (rollback undoes a redeploy)", row.Name)
 	}
-
-	lock := m.startLock(row.ID)
-	lock.Lock()
-	defer lock.Unlock()
 	if handle := m.takeHandle(row.ID); handle != nil {
 		// Flush the guest first: this disk becomes the swap-forward target.
 		m.syncGuest(ctx, handle, row.ID)
