@@ -41,12 +41,7 @@ UPDATE sessions
 SET fork_id = ?, fork_path = ?, prev_fork_id = ?, prev_fork_path = ?, image = ?, updated_at = ?
 WHERE id = ?;
 
--- name: UpdateSessionPolicy :exec
+-- name: UpdateSessionConfiguration :exec
 UPDATE sessions
-SET egress_policy = ?, gateway = ?, updated_at = ?
-WHERE id = ?;
-
--- name: UpdateSessionEnv :exec
-UPDATE sessions
-SET env_vars = ?, updated_at = ?
+SET egress_policy = ?, gateway = ?, env_vars = ?, updated_at = ?
 WHERE id = ?;

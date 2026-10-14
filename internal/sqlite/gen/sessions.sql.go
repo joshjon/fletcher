@@ -187,20 +187,28 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) erro
 	return err
 }
 
-const updateSessionEnv = `-- name: UpdateSessionEnv :exec
+const updateSessionConfiguration = `-- name: UpdateSessionConfiguration :exec
 UPDATE sessions
-SET env_vars = ?, updated_at = ?
+SET egress_policy = ?, gateway = ?, env_vars = ?, updated_at = ?
 WHERE id = ?
 `
 
-type UpdateSessionEnvParams struct {
-	EnvVars   string
-	UpdatedAt int64
-	ID        string
+type UpdateSessionConfigurationParams struct {
+	EgressPolicy string
+	Gateway      string
+	EnvVars      string
+	UpdatedAt    int64
+	ID           string
 }
 
-func (q *Queries) UpdateSessionEnv(ctx context.Context, arg UpdateSessionEnvParams) error {
-	_, err := q.db.ExecContext(ctx, updateSessionEnv, arg.EnvVars, arg.UpdatedAt, arg.ID)
+func (q *Queries) UpdateSessionConfiguration(ctx context.Context, arg UpdateSessionConfigurationParams) error {
+	_, err := q.db.ExecContext(ctx, updateSessionConfiguration,
+		arg.EgressPolicy,
+		arg.Gateway,
+		arg.EnvVars,
+		arg.UpdatedAt,
+		arg.ID,
+	)
 	return err
 }
 
@@ -250,29 +258,6 @@ func (q *Queries) UpdateSessionForks(ctx context.Context, arg UpdateSessionForks
 		arg.PrevForkID,
 		arg.PrevForkPath,
 		arg.Image,
-		arg.UpdatedAt,
-		arg.ID,
-	)
-	return err
-}
-
-const updateSessionPolicy = `-- name: UpdateSessionPolicy :exec
-UPDATE sessions
-SET egress_policy = ?, gateway = ?, updated_at = ?
-WHERE id = ?
-`
-
-type UpdateSessionPolicyParams struct {
-	EgressPolicy string
-	Gateway      string
-	UpdatedAt    int64
-	ID           string
-}
-
-func (q *Queries) UpdateSessionPolicy(ctx context.Context, arg UpdateSessionPolicyParams) error {
-	_, err := q.db.ExecContext(ctx, updateSessionPolicy,
-		arg.EgressPolicy,
-		arg.Gateway,
 		arg.UpdatedAt,
 		arg.ID,
 	)

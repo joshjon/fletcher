@@ -57,7 +57,7 @@ type Session struct {
 	LastUsedAt *time.Time
 	DiskBytes  int64
 	// EgressPolicy gates the fork's outbound network: "none" | "allowlist" |
-	// "open". Fixed at create time.
+	// "open". Changes apply on the next boot.
 	EgressPolicy string
 	// Gateway is "on" or "off": whether the model-gateway env is injected.
 	Gateway string
@@ -861,9 +861,7 @@ const appLogPath = "/var/log/fletcher-app.log"
 // caller does not specify a bound.
 const defaultLogTailLines = 200
 
-// Restart stops a running session's VM and starts it again against the same
-// fork. For a run_app (deploy) session this re-runs the image's app, picking up
-// any env or policy change since the last boot.
+// Restart cold-boots a session against its existing fork, applying current configuration without resuming the old process tree.
 func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
@@ -882,16 +880,10 @@ func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
 	if _, err := m.stopLocked(ctx, row.ID); err != nil {
 		return Session{}, err
 	}
-	// Stop hibernates (snapshots memory), so a plain Start would resume the old
-	// process tree - the app would keep running with its previous environment. A
-	// deploy restart must re-run the app, so drop the snapshot and force a cold
-	// boot, which re-runs setup (and so injects the current env vars). Interactive
-	// sessions keep the instant-wake resume, preserving their in-VM work.
-	if row.RunApp != 0 && m.runtime != nil {
-		if derr := m.runtime.DiscardSession(context.WithoutCancel(ctx), row.ID); derr != nil {
-			m.logger.Warn("discard session vm state for restart",
-				slog.String("session_id", row.ID), slog.String("err", derr.Error()))
-		}
+	// Stop/Start preserves live work through hibernation; an explicit Restart
+	// must instead re-run guest setup and processes, for every session type.
+	if err := m.runtime.DiscardSession(context.WithoutCancel(ctx), row.ID); err != nil {
+		return Session{}, fmt.Errorf("discard session vm state for restart: %w", err)
 	}
 	return m.startLocked(ctx, row.ID)
 }
@@ -986,33 +978,21 @@ func (m *Manager) Update(ctx context.Context, ref string, p UpdateParams) (Sessi
 		return Session{}, false, err
 	}
 
+	lock := m.startLock(row.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	row, err = m.lookup(ctx, row.ID)
+	if err != nil {
+		return Session{}, false, err
+	}
+	envJSON := row.EnvVars
 	if p.UpdateEnv {
-		envVars := p.EnvVars
-		if err := validateEnvVars(envVars); err != nil {
+		if err := validateEnvVars(p.EnvVars); err != nil {
 			return Session{}, false, err
 		}
-		envJSON, err := marshalEnvVars(envVars)
+		envJSON, err = marshalEnvVars(p.EnvVars)
 		if err != nil {
 			return Session{}, false, err
-		}
-		if err := m.q.UpdateSessionEnv(ctx, sqliteq.UpdateSessionEnvParams{
-			EnvVars:   envJSON,
-			UpdatedAt: time.Now().Unix(),
-			ID:        row.ID,
-		}); err != nil {
-			return Session{}, false, err
-		}
-		row.EnvVars = envJSON
-		// A stopped session may hold a hibernation snapshot whose live process tree
-		// predates this env change; resuming it would ignore the new vars. Drop it
-		// so the next start cold-boots and re-injects the env. A running session has
-		// no snapshot yet (its restart writes one, which Restart then discards), and
-		// discarding its live vmDir would be unsafe, so skip it there.
-		if State(row.State) != StateRunning && m.runtime != nil {
-			if derr := m.runtime.DiscardSession(context.WithoutCancel(ctx), row.ID); derr != nil {
-				m.logger.Warn("discard session vm state after env change",
-					slog.String("session_id", row.ID), slog.String("err", derr.Error()))
-			}
 		}
 	}
 
@@ -1037,16 +1017,25 @@ func (m *Manager) Update(ctx context.Context, ref string, p UpdateParams) (Sessi
 		}
 	}
 
-	if err := m.q.UpdateSessionPolicy(ctx, sqliteq.UpdateSessionPolicyParams{
+	changed := envJSON != row.EnvVars || newEgress != row.EgressPolicy || newGateway != row.Gateway
+	if !changed {
+		return sessionFromRow(row), false, nil
+	}
+	if State(row.State) != StateRunning && m.runtime != nil {
+		if err := m.runtime.DiscardSession(context.WithoutCancel(ctx), row.ID); err != nil {
+			return Session{}, false, fmt.Errorf("discard stale session snapshot: %w", err)
+		}
+	}
+	if err := m.q.UpdateSessionConfiguration(ctx, sqliteq.UpdateSessionConfigurationParams{
 		EgressPolicy: newEgress,
 		Gateway:      newGateway,
+		EnvVars:      envJSON,
 		UpdatedAt:    time.Now().Unix(),
 		ID:           row.ID,
 	}); err != nil {
-		return Session{}, false, err
+		return Session{}, false, fmt.Errorf("update session configuration: %w", err)
 	}
-	row.EgressPolicy = newEgress
-	row.Gateway = newGateway
+	row.EgressPolicy, row.Gateway, row.EnvVars = newEgress, newGateway, envJSON
 	return sessionFromRow(row), State(row.State) == StateRunning, nil
 }
 

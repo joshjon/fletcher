@@ -73,10 +73,9 @@ type Querier interface {
 	UpdateImageImport(ctx context.Context, arg UpdateImageImportParams) error
 	UpdateJobSchedule(ctx context.Context, arg UpdateJobScheduleParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
-	UpdateSessionEnv(ctx context.Context, arg UpdateSessionEnvParams) error
+	UpdateSessionConfiguration(ctx context.Context, arg UpdateSessionConfigurationParams) error
 	UpdateSessionFork(ctx context.Context, arg UpdateSessionForkParams) error
 	UpdateSessionForks(ctx context.Context, arg UpdateSessionForksParams) error
-	UpdateSessionPolicy(ctx context.Context, arg UpdateSessionPolicyParams) error
 	UpdateSessionState(ctx context.Context, arg UpdateSessionStateParams) error
 	UpsertDeviceToken(ctx context.Context, arg UpsertDeviceTokenParams) error
 	UpsertSecret(ctx context.Context, arg UpsertSecretParams) error

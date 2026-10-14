@@ -4,6 +4,8 @@ package firecrackerdriver
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -30,23 +32,24 @@ func snapshotPaths(vmDir string) (mem, state, meta string) {
 		filepath.Join(vmDir, "snapshot.meta")
 }
 
-// snapshotIdentity fingerprints what a hibernation snapshot is tied to: the
-// VMM binary and guest kernel (Firecracker snapshots are only restorable by
-// the same pair, so a Fletcher upgrade invalidates them), the rootfs path the
-// VM was running on (a redeploy/rollback swaps the session's fork, and restoring
-// a memory image of the old disk would silently undo the swap), and the guest
-// init's fingerprint. The init pairs with the host wire protocol and is
-// refreshed only on a cold boot (refreshGuestInit), so without it a daemon
-// upgrade that ships a new guest would keep restoring the stale init forever -
-// the snapshot stays "valid" and the cold-boot refresh never runs. Including it
-// invalidates the snapshot on a guest change, forcing one cold boot that
-// re-injects the current init.
-func (d *Driver) snapshotIdentity(rootfsPath string) string {
+// snapshotIdentity binds memory to its disks, guest version and boot configuration without storing environment secrets in snapshot metadata.
+func (d *Driver) snapshotIdentity(spec fcruntime.SessionSpec) string {
 	guestFP, err := guestagent.Fingerprint()
 	if err != nil {
-		guestFP = "?" // no bundled guest in this build: nothing to tie to
+		guestFP = "?"
 	}
-	return fileFingerprint(d.firecrackerBinary) + "|" + fileFingerprint(d.kernelPath) + "|" + rootfsPath + "|" + guestFP
+	// Credentials are create-only seed files, not boot configuration. They must
+	// not invalidate the first resume when a later Start omits them.
+	spec.Credentials = nil
+	data, err := json.Marshal(struct {
+		Spec   fcruntime.SessionSpec
+		Memory int64
+		CPUs   int64
+	}{spec, d.memSizeMib, d.vcpuCount})
+	if err != nil {
+		return "" // only strings, integers and slices are encoded
+	}
+	return fmt.Sprintf("%s|%s|%s|%x", fileFingerprint(d.firecrackerBinary), fileFingerprint(d.kernelPath), guestFP, sha256.Sum256(data))
 }
 
 func fileFingerprint(path string) string {
@@ -60,7 +63,7 @@ func fileFingerprint(path string) string {
 // hasValidSnapshot reports whether vmDir holds a hibernation snapshot this
 // daemon can restore for the given rootfs (present, and tied to the current
 // VMM + kernel + that exact disk).
-func (d *Driver) hasValidSnapshot(vmDir, rootfsPath string) bool {
+func (d *Driver) hasValidSnapshot(vmDir string, spec fcruntime.SessionSpec) bool {
 	_, statePath, metaPath := snapshotPaths(vmDir)
 	if _, err := os.Stat(statePath); err != nil {
 		return false
@@ -69,7 +72,7 @@ func (d *Driver) hasValidSnapshot(vmDir, rootfsPath string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(string(meta)) == d.snapshotIdentity(rootfsPath)
+	return strings.TrimSpace(string(meta)) == d.snapshotIdentity(spec)
 }
 
 // restoreSession resumes a hibernated VM from its snapshot, reusing the same
@@ -154,7 +157,7 @@ func (d *Driver) restoreSession(ctx context.Context, spec fcruntime.SessionSpec,
 		vmCancel:   vmCancel,
 		env:        effEnv,
 		forwardLns: forwardLns,
-		snapID:     d.snapshotIdentity(spec.RootfsPath),
+		snapID:     d.snapshotIdentity(spec),
 	}, nil
 }
 

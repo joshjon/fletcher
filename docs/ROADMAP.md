@@ -2094,6 +2094,14 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**Session configuration and hibernation - DONE.** Restart now cold-boots both
+interactive and deployed sessions; Stop/Start remains the resume path. Updates
+validate all fields before one atomic write and serialize with lifecycle changes.
+Stopped configuration changes discard old memory snapshots. Snapshot identity
+also hashes the complete boot configuration, volume path and VM sizing without
+storing environment secrets, so a wake after configuration changes cannot restore
+stale guest state. Regression tests cover both reported failures and validation.
+
 **Volume single-writer safety - DONE.** Session creation reserves a volume in
 the daemon's shared volume manager before boot and holds the reservation through
 session recording or failed-boot cleanup. Deletion uses the same context-aware

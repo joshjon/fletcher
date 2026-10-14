@@ -75,7 +75,10 @@ so a stopped session costs only disk, not RAM. Start restores it in well under a
 second with its processes still running, including shell history and any agent
 that was mid-run. If a snapshot can't be restored (e.g. after a Fletcher upgrade
 changes the VMM), Fletcher cold-boots from the disk instead. You never lose the
-workspace, only the in-memory state.
+workspace, only the in-memory state. Changing boot configuration also invalidates
+an old snapshot. `fletcher session restart dev` deliberately cold-boots against
+the same disk and applies current environment and policy settings; use Stop/Start
+when you want to preserve the process tree.
 
 ## Automatic cleanup: free RAM, never free disk
 
