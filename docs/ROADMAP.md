@@ -2094,6 +2094,16 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**Deployment setup recovery - code complete, Apple verification pending.** The
+native wizard reconciles uncertain creation using persisted attempt fingerprints
+and confirmed session IDs; name-only recovery needs explicit confirmation.
+Publishing reads and reconciles port state rather than deleting a deployment on
+an error. The CLI also uses the returned immutable session ID, accepts a matching
+published result after a lost reply, and keeps the deployment and volume on
+unconfirmed failure. CLI regression tests cover identity, port, hostname and
+access mismatches, plus inspection failure. Native fault-injection tests and both
+Apple builds still need execution on a Mac.
+
 **Session shutdown draining - code complete, hardware verification pending.**
 Daemon shutdown cancels request contexts before HTTP server draining, rejects new
 session lifecycle work and cancels tracked operations plus detached builds.

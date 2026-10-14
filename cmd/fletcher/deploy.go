@@ -40,7 +40,8 @@ Examples:
   fletcher deploy ghcr.io/you/app:v1 --registry-auth user:TOKEN ...   # private registry
   sudo fletcher deploy ./myapp --host app.example.com                 # local Dockerfile (host-only)
 
-The port defaults to the image's EXPOSE; set --port if the image declares none.`,
+The port defaults to the image's EXPOSE; set --port if the image declares none.
+If publishing cannot be confirmed, the deployment is kept for inspection and retry.`,
 		Flags: append([]cli.Flag{
 			socketFlag(),
 			btrfsRootFlag(),
@@ -73,7 +74,7 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 			}
 
 			client := newSessionsClient(cmd)
-			if _, err := client.CreateSession(ctx, connect.NewRequest(&fletcherv1.CreateSessionRequest{
+			created, err := client.CreateSession(ctx, connect.NewRequest(&fletcherv1.CreateSessionRequest{
 				Name:         name,
 				Image:        name,
 				EgressPolicy: cmd.String("egress"),
@@ -81,24 +82,22 @@ The port defaults to the image's EXPOSE; set --port if the image declares none.`
 				RunApp:       true,
 				Volume:       cmd.String("volume"),
 				EnvVars:      envVars,
-			})); err != nil {
-				return fmt.Errorf("create session %q (delete an existing one with `fletcher session delete %s`, or pass --name): %w", name, name, err)
+			}))
+			if err != nil {
+				return fmt.Errorf("create session %q: inspect `fletcher session get %s` before retrying; creation may have completed: %w", name, name, err)
 			}
-
-			// The session now exists because this deploy created it. If publishing
-			// fails (e.g. a host conflict), roll it back so a failed deploy leaves
-			// nothing behind rather than an unreachable orphan.
-			resp, err := client.PublishPort(ctx, connect.NewRequest(&fletcherv1.PublishPortRequest{
-				Ref:       name,
+			id := created.Msg.GetSession().GetId()
+			if id == "" {
+				return fmt.Errorf("create session %q: response has no session id; inspect `fletcher session get %s` before retrying", name, name)
+			}
+			resp, err := publishDeployment(ctx, client, &fletcherv1.PublishPortRequest{
+				Ref:       id,
 				GuestPort: uint32(port),
 				Public:    cmd.String("host") != "",
 				Host:      cmd.String("host"),
-			}))
+			})
 			if err != nil {
-				if _, derr := client.DeleteSession(ctx, connect.NewRequest(&fletcherv1.DeleteSessionRequest{Ref: name})); derr != nil {
-					fmt.Fprintf(os.Stderr, "warning: deploy failed and could not clean up session %q (delete it with `fletcher session delete %s`): %v\n", name, name, derr)
-				}
-				return fmt.Errorf("publish app port %d: %w", port, err)
+				return fmt.Errorf("publish app port %d: deployment %s and its data have been kept; inspect `fletcher session ports %s` before retrying: %w", port, id, id, err)
 			}
 
 			fmt.Printf("\ndeployed %q (app on port %d)\n", name, port)
