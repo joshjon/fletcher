@@ -2094,6 +2094,40 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+### Reliability sprint handoff
+
+The agreed implementation batches are committed. This checklist records what is
+still unverified, not another feature sprint. Do not mark hardware behavior done
+from mock-driver tests. Apple-side checks live in the counterpart repository's
+`fletcher-ios/ROADMAP.md`, under "Reliability sprint handoff".
+
+- [ ] On Firecracker hardware, write identifiable test data to both a session
+  rootfs and an attached volume. Verify it after Stop/Start, cold Restart,
+  repeated `systemctl restart fletcher` and a restart from the native client.
+- [ ] Restart while a detached build, terminal, file transfer and published
+  connection are active. Confirm bounded shutdown, cleanup of all old VMM
+  processes, retained disks and successful reconnect/recovery.
+- [ ] Verify single-writer volume safety, configuration changes across
+  hibernation, and overlapping redeploy/rollback on the real runtime. Check that
+  rollback retains the immediately preceding deployment and its data.
+- [ ] Exercise authenticated MCP egress from real Firecracker guests and runc
+  jobs: spoofed identity rejection, `none` denial, allowlist and redirect checks,
+  LAN/metadata protection, approval recovery and persistent write replay. An
+  ambiguous send must not be sent again automatically. See `MCP-SECURITY.md`.
+- [ ] Complete the native host-administration device checklist in
+  [host management](HOST-MANAGEMENT.md), including both pairing transports,
+  revocation, imports, settings and generation-based restart/reconnect.
+- [ ] Record commands, runtime/toolchain versions and outcomes when each check
+  is performed. Scrub host-specific details. Fix any failures before checking
+  the item off, then rerun the affected tests and `make check`.
+
+Last recorded automated validation: `make check`, generated-code checks and both
+Darwin cross-builds passed. Focused shutdown regressions passed 20 race-enabled
+repetitions. These are not Firecracker or Apple-device verification. The cause
+of the earlier filesystem incidents remains unconfirmed.
+
+### Implemented reliability work
+
 **Deployment setup recovery - code complete, Apple verification pending.** The
 native wizard reconciles uncertain creation using persisted attempt fingerprints
 and confirmed session IDs; name-only recovery needs explicit confirmation.
@@ -2194,11 +2228,11 @@ image whose files are all 0 bytes - every binary empty, so the deploy boots into
 was self-healing ("journaled fs, no fsck needed"), which only covers a clean unclean
 shutdown. It now runs `e2fsck -p` on the cache: a normal unclean shutdown (exit 0/1/2)
 keeps it, real corruption (exit >= 4) resets it (the cache is regenerable). Mirrors the
-cold-boot fork repair. Recovered the operator's wc-26-pundit deploy (rolled back to its
-working fork, cleared the cache; a fresh build then produced correct layers). *Note:*
-both this and the fork corruption were likely caused by the many `make install` daemon
-restarts during a development session - worth confirming the hibernate/stop sync path
-flushes ext4 metadata, since that is the common thread.
+cold-boot fork repair. The affected deployment was recovered by restoring its
+working fork and clearing the cache; a fresh build then produced correct layers.
+The cause remains unconfirmed. Repeated daemon restarts and guest shutdown sync
+need hardware verification; unit tests do not establish why the filesystem
+corruption occurred.
 
 **Build-then-redeploy in one step (2026-06-24, daemon `98c9eb9` + iOS `ec9bafa`).**
 Closed a workflow gap: after fixing code in a dev session, there was no easy way to
