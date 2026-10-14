@@ -201,10 +201,15 @@ type Config struct {
 	// created without an explicit --gateway: "on" injects the gateway env, "off"
 	// omits it. Settings-managed (default_gateway); empty resolves to "on".
 	DefaultGateway string
-	// PublicWeb enables the public HTTPS listener that serves `session publish
-	// --public` ports on the internet (binds 443/80). Settings-managed
-	// (public_web); default false - the new public attack surface is opt-in.
+	// PublicWeb enables app-only public serving in the configured mode.
+	// Settings-managed (public_web); default false so public exposure is opt-in.
 	PublicWeb bool
+	// PublicWebMode selects edge (default) or behind_proxy app serving.
+	PublicWebMode string
+	// PublicWebListen is the loopback HTTP bind used only in behind_proxy mode.
+	PublicWebListen string
+	// PublicWebTrustedProxies lists space-separated source CIDRs trusted for proxy metadata.
+	PublicWebTrustedProxies string
 	// ACMEStaging uses Let's Encrypt's staging CA for public certs (untrusted,
 	// no rate limits - for testing). Settings-managed (acme_staging).
 	ACMEStaging bool
@@ -266,6 +271,9 @@ func validateConfig(cfg *Config, logger *slog.Logger) error {
 			slog.Int("clamped", clamped),
 		)
 		cfg.SessionMaxDiskGB = clamped
+	}
+	if err := validatePublicWebConfig(cfg); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
@@ -506,11 +514,11 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	logger.Info("mcp server ready", slog.String("base_url", mcpURL))
 
 	// Env every agent inherits, split so a fork can opt out of the model gateway
-	// (DESIGN.md §6). baseAgentEnv (MCP + egress proxy) is always injected;
+	// (DESIGN.md section 6). baseAgentEnv (MCP + egress proxy) is always injected;
 	// gatewayAgentEnv (the model-gateway base-URLs + placeholder keys) is added
 	// only when the fork's gateway toggle is on. A gateway-off fork uses its own
 	// auth (e.g. a subscription login) and reaches providers via egress. Shared
-	// by ephemeral jobs and durable sessions (one environment, §4).
+	// by ephemeral jobs and durable sessions (one environment, section 4).
 	proxyURL := "http://" + proxyListenAddr(cfg)
 	baseAgentEnv := []string{
 		"FLETCHER_MCP_URL=" + mcpURL,
@@ -621,11 +629,9 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	// startDeployedActor in the run group, so booting their VMs does not delay
 	// daemon startup and the sweep stops cleanly on shutdown.
 
-	// Public web (Milestone 8 Phase 2): serve `session publish --public` ports on
-	// the internet over HTTPS, certmagic terminating TLS and reverse-proxying into
-	// the VM over vsock. Opt-in (the new public attack surface), and best-effort:
-	// if 443/80 cannot be bound (no CAP_NET_BIND_SERVICE) the daemon still runs,
-	// just without public serving.
+	// Public apps use a dedicated listener, never the administrative mux. Edge
+	// mode owns TLS; behind_proxy delegates it to the operator. Binding remains
+	// best-effort so a failed app listener does not disable host management.
 	publicWeb := buildPublicWeb(ctx, cfg, sessionMgr, portMapper, logger)
 
 	var certStatus api.CertStatusResolver
@@ -873,10 +879,13 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 		g.Add(portBrokerActor(s.portBroker))
 	}
 	if s.publicWeb != nil {
+		defer s.publicWeb.pub.Close()
+		if s.publicWeb.httpsSrv != nil {
+			//nolint:contextcheck // shutdown must outlive the cancelled parent ctx
+			g.Add(tlsServeActor(logger, "public-https", s.publicWeb.httpsSrv, s.publicWeb.httpsLn, "https://"+publicHTTPSAddr))
+		}
 		//nolint:contextcheck // shutdown must outlive the cancelled parent ctx
-		g.Add(tlsServeActor(logger, "public-https", s.publicWeb.httpsSrv, s.publicWeb.httpsLn, "https://"+publicHTTPSAddr))
-		//nolint:contextcheck // same
-		g.Add(httpServeActor(logger, "public-http", s.publicWeb.httpSrv, s.publicWeb.httpLn, "http://"+publicHTTPAddr))
+		g.Add(httpServeActor(logger, "public-http", s.publicWeb.httpSrv, s.publicWeb.httpLn, "http://"+s.publicWeb.httpLn.Addr().String()))
 	}
 	g.Add(signalActor(ctx))
 	return g.Run()
@@ -958,8 +967,8 @@ const (
 	publicHTTPPort  = 80
 )
 
-// publicWebServers holds the public HTTPS (TLS) and HTTP (ACME + redirect)
-// servers and their listeners.
+// publicWebServers holds app listeners: edge HTTPS plus HTTP challenges/redirects,
+// or behind-proxy HTTP only.
 type publicWebServers struct {
 	httpsSrv *http.Server
 	httpSrv  *http.Server
@@ -970,13 +979,18 @@ type publicWebServers struct {
 	pub *session.PublicServer
 }
 
-// buildPublicWeb constructs the public web servers when public_web is enabled.
-// Returns nil when disabled, or when 443/80 cannot be bound (logged, non-fatal:
-// the daemon still serves everything else) - the usual cause is a missing
-// CAP_NET_BIND_SERVICE.
+// buildPublicWeb constructs app-only listeners for the selected public web mode.
+// Bind failures are logged and non-fatal so host management remains available.
 func buildPublicWeb(ctx context.Context, cfg Config, mgr *session.Manager, mapper *portmap.Mapper, logger *slog.Logger) *publicWebServers {
 	if !cfg.PublicWeb {
 		return nil
+	}
+	if err := validatePublicWebConfig(&cfg); err != nil {
+		logger.Error("public web disabled: invalid configuration", slog.String("err", err.Error()))
+		return nil
+	}
+	if cfg.PublicWebMode == "behind_proxy" {
+		return buildBehindProxyWeb(ctx, cfg, mgr, logger)
 	}
 	httpsLn, _, herr := listenTCP(ctx, publicHTTPSAddr, "public-https")
 	if herr != nil {
@@ -1637,39 +1651,42 @@ func (r *settingsReloader) Reload(ctx context.Context) (reloaded, pendingRestart
 // already fully resolved here, so for an unset key it holds exactly that default.
 func settingsDefaults(cfg Config) map[string]string {
 	return map[string]string{
-		settings.KeyRuntime:             cfg.RuntimeKind,
-		settings.KeySnapshot:            cfg.SnapshotKind,
-		settings.KeyBtrfsRoot:           snapshotRootDir(cfg),
-		settings.KeyPublicEndpoint:      cfg.PublicEndpoint,
-		settings.KeyWireGuardPort:       strconv.Itoa(cfg.WireGuardListenPort),
-		settings.KeyPairingPort:         strconv.Itoa(pairingPort(cfg)),
-		settings.KeyLogLevel:            cfg.LogLevel,
-		settings.KeyCredentialsDir:      cfg.CredentialsDir,
-		settings.KeyNoUPnP:              strconv.FormatBool(cfg.DisableUPnP),
-		settings.KeyGatewayListen:       cfg.GatewayListenAddr,
-		settings.KeyMCPListen:           cfg.MCPListenAddr,
-		settings.KeyRemoteAPIListen:     cfg.RemoteAPIListen,
-		settings.KeySessionIdleTimeout:  sessionIdleTimeoutString(cfg.SessionIdleTimeout),
-		settings.KeySessionMaxCount:     strconv.Itoa(cfg.SessionMaxCount),
-		settings.KeySessionMaxDiskGB:    strconv.Itoa(cfg.SessionMaxDiskGB),
-		settings.KeyDefaultImage:        cfg.DefaultImage,
-		settings.KeyDefaultAgent:        defaultDefaultAgent,
-		settings.KeyDefaultEgressPolicy: egressDefaultPolicy(cfg),
-		settings.KeyVMMemoryMB:          strconv.Itoa(cfg.VMMemoryMB),
-		settings.KeyDefaultGateway:      defaultGateway(cfg),
-		settings.KeyPublicWeb:           strconv.FormatBool(cfg.PublicWeb),
-		settings.KeyACMEStaging:         strconv.FormatBool(cfg.ACMEStaging),
-		settings.KeyACMEEmail:           cfg.ACMEEmail,
-		settings.KeyNotifyApprovals:     "true",
-		settings.KeyNotifyReports:       "true",
-		settings.KeyNotifyJobs:          "true",
-		settings.KeyNotifySessionIdle:   "true",
-		settings.KeyNotifyDeployHealth:  "true",
-		settings.KeyAPNSKeyPath:         cfg.APNSKeyPath,
-		settings.KeyAPNSKeyID:           cfg.APNSKeyID,
-		settings.KeyAPNSTeamID:          cfg.APNSTeamID,
-		settings.KeyAPNSTopic:           cfg.APNSTopic,
-		settings.KeyAPNSEnvironment:     apnsEnvironment(cfg.APNSSandbox),
+		settings.KeyRuntime:                 cfg.RuntimeKind,
+		settings.KeySnapshot:                cfg.SnapshotKind,
+		settings.KeyBtrfsRoot:               snapshotRootDir(cfg),
+		settings.KeyPublicEndpoint:          cfg.PublicEndpoint,
+		settings.KeyWireGuardPort:           strconv.Itoa(cfg.WireGuardListenPort),
+		settings.KeyPairingPort:             strconv.Itoa(pairingPort(cfg)),
+		settings.KeyLogLevel:                cfg.LogLevel,
+		settings.KeyCredentialsDir:          cfg.CredentialsDir,
+		settings.KeyNoUPnP:                  strconv.FormatBool(cfg.DisableUPnP),
+		settings.KeyGatewayListen:           cfg.GatewayListenAddr,
+		settings.KeyMCPListen:               cfg.MCPListenAddr,
+		settings.KeyRemoteAPIListen:         cfg.RemoteAPIListen,
+		settings.KeySessionIdleTimeout:      sessionIdleTimeoutString(cfg.SessionIdleTimeout),
+		settings.KeySessionMaxCount:         strconv.Itoa(cfg.SessionMaxCount),
+		settings.KeySessionMaxDiskGB:        strconv.Itoa(cfg.SessionMaxDiskGB),
+		settings.KeyDefaultImage:            cfg.DefaultImage,
+		settings.KeyDefaultAgent:            defaultDefaultAgent,
+		settings.KeyDefaultEgressPolicy:     egressDefaultPolicy(cfg),
+		settings.KeyVMMemoryMB:              strconv.Itoa(cfg.VMMemoryMB),
+		settings.KeyDefaultGateway:          defaultGateway(cfg),
+		settings.KeyPublicWeb:               strconv.FormatBool(cfg.PublicWeb),
+		settings.KeyPublicWebMode:           publicWebMode(cfg),
+		settings.KeyPublicWebListen:         publicWebListen(cfg),
+		settings.KeyPublicWebTrustedProxies: cfg.PublicWebTrustedProxies,
+		settings.KeyACMEStaging:             strconv.FormatBool(cfg.ACMEStaging),
+		settings.KeyACMEEmail:               cfg.ACMEEmail,
+		settings.KeyNotifyApprovals:         "true",
+		settings.KeyNotifyReports:           "true",
+		settings.KeyNotifyJobs:              "true",
+		settings.KeyNotifySessionIdle:       "true",
+		settings.KeyNotifyDeployHealth:      "true",
+		settings.KeyAPNSKeyPath:             cfg.APNSKeyPath,
+		settings.KeyAPNSKeyID:               cfg.APNSKeyID,
+		settings.KeyAPNSTeamID:              cfg.APNSTeamID,
+		settings.KeyAPNSTopic:               cfg.APNSTopic,
+		settings.KeyAPNSEnvironment:         apnsEnvironment(cfg.APNSSandbox),
 	}
 }
 
@@ -1810,6 +1827,12 @@ func applyPublicWebSetting(cfg *Config, k, v string) bool {
 		if b, perr := strconv.ParseBool(v); perr == nil {
 			cfg.PublicWeb = b
 		}
+	case settings.KeyPublicWebMode:
+		cfg.PublicWebMode = v
+	case settings.KeyPublicWebListen:
+		cfg.PublicWebListen = v
+	case settings.KeyPublicWebTrustedProxies:
+		cfg.PublicWebTrustedProxies = v
 	case settings.KeyACMEStaging:
 		if b, perr := strconv.ParseBool(v); perr == nil {
 			cfg.ACMEStaging = b

@@ -36,6 +36,10 @@ func (f fakeSessionsBackend) ListPorts(context.Context, string) ([]session.Publi
 	return f.ports, nil
 }
 
+func (f fakeSessionsBackend) Publish(context.Context, string, session.PublishParams) (session.PublishedPort, error) {
+	return f.ports[0], nil
+}
+
 func (f fakeSessionsBackend) Redeploy(_ context.Context, _, newImage string) (session.Session, error) {
 	if f.redeploys != nil {
 		*f.redeploys = append(*f.redeploys, newImage)
@@ -155,6 +159,19 @@ func TestListPortsAttachesTLSStatus(t *testing.T) {
 		ListPorts(t.Context(), connect.NewRequest(&fletcherv1.ListPortsRequest{Ref: "s"}))
 	require.NoError(t, err)
 	require.Empty(t, resp2.Msg.GetPorts()[0].GetTlsStatus())
+}
+
+func TestPublishedPortsExternalTLS(t *testing.T) {
+	backend := fakeSessionsBackend{ports: []session.PublishedPort{{ID: "p1", Public: true, Host: "app.example.com", GuestPort: 8080}}}
+	svc := api.NewSessionsService(backend, api.SessionsDeps{Certs: fakeCerts{status: session.CertExternal}})
+	published, err := svc.PublishPort(t.Context(), connect.NewRequest(&fletcherv1.PublishPortRequest{Ref: "app", GuestPort: 8080, Public: true, Host: "app.example.com"}))
+	require.NoError(t, err)
+	require.Equal(t, "external", published.Msg.GetPort().GetTlsStatus())
+	require.Zero(t, published.Msg.GetPort().GetTlsExpiresAt())
+	listed, err := svc.ListPorts(t.Context(), connect.NewRequest(&fletcherv1.ListPortsRequest{Ref: "app"}))
+	require.NoError(t, err)
+	require.Equal(t, "external", listed.Msg.GetPorts()[0].GetTlsStatus())
+	require.Zero(t, listed.Msg.GetPorts()[0].GetTlsExpiresAt())
 }
 
 // RedeploySession re-pulls (best-effort) then redeploys, reporting whether the

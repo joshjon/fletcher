@@ -7,7 +7,7 @@ option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;
 // SessionService manages durable, interactive sessions: a session is a
 // persistent microVM whose fork (its disk) survives stop/start, unlike an
 // ephemeral job. It shares the runtime and snapshot machinery with jobs (one
-// execution engine, DESIGN.md §4) but has its own start/stop/exec lifecycle.
+// execution engine, DESIGN.md section 4) but has its own start/stop/exec lifecycle.
 service SessionService {
   // CreateSession provisions a session's persistent fork and boots its VM. The
   // returned session has state RUNNING.
@@ -113,11 +113,11 @@ message Session {
   int64 disk_bytes = 8;
   // egress_policy gates the fork's outbound network via the daemon proxy:
   // "none" (no egress), "allowlist" (curated hosts), or "open" (any public
-  // host; the LAN guard still applies). DESIGN.md §5.
+  // host; the LAN guard still applies). DESIGN.md section 5.
   string egress_policy = 9;
   // gateway is "on" or "off": whether the daemon's model-gateway env
   // (ANTHROPIC_/OPENAI_ base-URL + key) is injected. "off" lets an agent use
-  // its own auth (e.g. a subscription OAuth login) instead. DESIGN.md §6.
+  // its own auth (e.g. a subscription OAuth login) instead. DESIGN.md section 6.
   string gateway = 10;
   // run_app is whether the session runs the image's own app (its captured
   // entrypoint) on boot, rather than coming up as a bare environment. M9.
@@ -556,10 +556,12 @@ message PublishedPort {
   int64 created_at = 8;
   // tls_status is the public cert state for `host`: "valid", "renewing",
   // "expired", or "pending" (no cert yet - certmagic issues on the first HTTPS
-  // request). Empty for a tunnel-only port (no public TLS).
+  // request), or "external" (operator-managed TLS, not verified by Fletcher).
+  // Empty for a tunnel-only port or when the public listener is unavailable.
   string tls_status = 9;
   // tls_expires_at is the public cert's NotAfter as Unix epoch seconds, so a
-  // client can show "valid for N days" / "renews soon". 0 when there is no cert.
+  // client can show "valid for N days" / "renews soon". 0 when there is no
+  // Fletcher-managed cert, including externally managed TLS.
   int64 tls_expires_at = 10;
 }
 

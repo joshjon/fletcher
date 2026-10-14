@@ -614,7 +614,11 @@ func renderPublishedPort(ctx context.Context, w io.Writer, format string, p *fle
 	}
 	fmt.Fprintln(w, "\n"+publishedReach(p, tunnelHost))
 	if p.GetPublic() {
-		writePublicDNSGuidance(ctx, w, p.GetHost(), publicIP)
+		if p.GetTlsStatus() == "external" {
+			fmt.Fprintln(w, "\nTLS is externally managed, not verified by Fletcher. Configure DNS, TLS and access control on your reverse proxy; preserve the original Host.")
+		} else {
+			writePublicDNSGuidance(ctx, w, p.GetHost(), publicIP)
+		}
 	}
 	return nil
 }
@@ -631,10 +635,10 @@ func writePublicDNSGuidance(ctx context.Context, w io.Writer, host, publicIP str
 	fmt.Fprintf(w, "\nTo serve %s publicly, create this DNS record at your provider:\n", bold(host))
 	fmt.Fprintf(w, "    %s.\tA\t%s\n", host, publicIP)
 	if ok {
-		fmt.Fprintf(w, "%s the record already resolves here; https://%s is live (the TLS cert issues on the first request).\n", green("✓"), host)
+		fmt.Fprintf(w, "%s the record resolves here; Fletcher requests a TLS certificate on the first HTTPS request to %s.\n", green("ok"), host)
 		return
 	}
-	fmt.Fprintf(w, "%s %s\n  Re-check after adding it with `fletcher session ports <session>`.\n", yellow("…"), status)
+	fmt.Fprintf(w, "%s %s\n  Re-check after adding it with `fletcher session ports <session>`.\n", yellow("..."), status)
 }
 
 // dnsStatus resolves host and reports whether it points at wantIP. The bool is
@@ -650,7 +654,7 @@ func dnsStatus(ctx context.Context, host, wantIP string) (string, bool) {
 		return "not resolving yet - add the record above", false
 	}
 	if slices.Contains(addrs, wantIP) {
-		return "DNS ✓", true
+		return "DNS ok", true
 	}
 	return fmt.Sprintf("points to %s, not %s", strings.Join(addrs, ", "), wantIP), false
 }
@@ -669,7 +673,7 @@ func publishedReach(p *fletcherv1.PublishedPort, tunnelHost string) string {
 
 func writePublishedPortsTable(ctx context.Context, w io.Writer, ports []*fletcherv1.PublishedPort, tunnelHost, publicIP string) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tGUEST PORT\tTUNNEL ADDRESS\tPUBLIC URL\tDNS")
+	fmt.Fprintln(tw, "NAME\tGUEST PORT\tTUNNEL ADDRESS\tPUBLIC URL\tDNS\tTLS")
 	for _, p := range ports {
 		addr := fmt.Sprintf("%d", p.GetTunnelPort())
 		if p.GetTunnelPort() == 0 {
@@ -677,17 +681,23 @@ func writePublishedPortsTable(ctx context.Context, w io.Writer, ports []*fletche
 		} else if tunnelHost != "" {
 			addr = fmt.Sprintf("%s:%d", tunnelHost, p.GetTunnelPort())
 		}
-		public, dns := "-", "-"
+		public, dns, tlsStatus := "-", "-", "-"
 		if p.GetPublic() {
 			public = "https://" + p.GetHost()
-			msg, ok := dnsStatus(ctx, p.GetHost(), publicIP)
-			if ok {
-				dns = green("ok")
+			tlsStatus = p.GetTlsStatus()
+			if tlsStatus == "external" {
+				dns = "operator-managed"
+				tlsStatus = "external (not verified)"
 			} else {
-				dns = yellow(msg)
+				msg, ok := dnsStatus(ctx, p.GetHost(), publicIP)
+				if ok {
+					dns = green("ok")
+				} else {
+					dns = yellow(msg)
+				}
 			}
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\n", p.GetName(), p.GetGuestPort(), addr, public, dns)
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s\n", p.GetName(), p.GetGuestPort(), addr, public, dns, tlsStatus)
 	}
 	if err := tw.Flush(); err != nil {
 		return err

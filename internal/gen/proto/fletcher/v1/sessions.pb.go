@@ -136,11 +136,11 @@ type Session struct {
 	DiskBytes int64 `protobuf:"varint,8,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
 	// egress_policy gates the fork's outbound network via the daemon proxy:
 	// "none" (no egress), "allowlist" (curated hosts), or "open" (any public
-	// host; the LAN guard still applies). DESIGN.md §5.
+	// host; the LAN guard still applies). DESIGN.md section 5.
 	EgressPolicy string `protobuf:"bytes,9,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
 	// gateway is "on" or "off": whether the daemon's model-gateway env
 	// (ANTHROPIC_/OPENAI_ base-URL + key) is injected. "off" lets an agent use
-	// its own auth (e.g. a subscription OAuth login) instead. DESIGN.md §6.
+	// its own auth (e.g. a subscription OAuth login) instead. DESIGN.md section 6.
 	Gateway string `protobuf:"bytes,10,opt,name=gateway,proto3" json:"gateway,omitempty"`
 	// run_app is whether the session runs the image's own app (its captured
 	// entrypoint) on boot, rather than coming up as a bare environment. M9.
@@ -3193,10 +3193,12 @@ type PublishedPort struct {
 	CreatedAt int64 `protobuf:"varint,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// tls_status is the public cert state for `host`: "valid", "renewing",
 	// "expired", or "pending" (no cert yet - certmagic issues on the first HTTPS
-	// request). Empty for a tunnel-only port (no public TLS).
+	// request), or "external" (operator-managed TLS, not verified by Fletcher).
+	// Empty for a tunnel-only port or when the public listener is unavailable.
 	TlsStatus string `protobuf:"bytes,9,opt,name=tls_status,json=tlsStatus,proto3" json:"tls_status,omitempty"`
 	// tls_expires_at is the public cert's NotAfter as Unix epoch seconds, so a
-	// client can show "valid for N days" / "renews soon". 0 when there is no cert.
+	// client can show "valid for N days" / "renews soon". 0 when there is no
+	// Fletcher-managed cert, including externally managed TLS.
 	TlsExpiresAt  int64 `protobuf:"varint,10,opt,name=tls_expires_at,json=tlsExpiresAt,proto3" json:"tls_expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

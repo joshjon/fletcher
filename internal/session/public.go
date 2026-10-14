@@ -9,15 +9,15 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/caddyserver/certmagic"
 )
 
-// PublicBackend is what the public HTTPS server needs from the session manager:
-// resolve a hostname to the published port serving it, and dial that port inside
-// the VM. Satisfied by *Manager.
+// PublicBackend resolves published hostnames and dials their guest ports.
 type PublicBackend interface {
 	// LookupPublicPort resolves a public hostname to its published port, or
 	// ErrNotFound if no public port claims it.
@@ -26,7 +26,7 @@ type PublicBackend interface {
 	DialPort(ctx context.Context, ref string, port uint16) (net.Conn, error)
 }
 
-// PublicConfig configures the public HTTPS server.
+// PublicConfig configures public-app routing and optional edge TLS.
 type PublicConfig struct {
 	Backend PublicBackend
 	Logger  *slog.Logger
@@ -38,19 +38,15 @@ type PublicConfig struct {
 	Staging bool
 }
 
-// PublicServer serves published public ports on the internet over HTTPS. It
-// terminates TLS (certmagic issues a cert per published hostname, on demand) and
-// reverse-proxies plaintext to the guest port over vsock via the backend, so the
-// VM stays unroutable. It serves ONLY hostnames that map to a published public
-// port; anything else gets a 404 and is refused a certificate. The Phase 2 half
-// of Milestone 8 (DESIGN.md §5: the preview-proxy pattern, widened to the public
-// internet under a domain the operator controls).
+// PublicServer routes published apps into unroutable guests, with optional edge TLS.
 type PublicServer struct {
 	backend PublicBackend
 	logger  *slog.Logger
 	magic   *certmagic.Config
+	cache   *certmagic.Cache
 	acme    *certmagic.ACMEIssuer
 	proxy   *httputil.ReverseProxy
+	trusted []netip.Prefix
 }
 
 // portCtxKey carries the resolved published port from the handler to the
@@ -60,13 +56,14 @@ type portCtxKey struct{}
 // NewPublicServer wires certmagic (on-demand TLS, issuing only for published
 // public hostnames) and the reverse proxy.
 func NewPublicServer(cfg PublicConfig) *PublicServer {
-	s := &PublicServer{backend: cfg.Backend, logger: cfg.Logger}
+	s := newPublicRouter(cfg, nil)
 
 	cache := certmagic.NewCache(certmagic.CacheOptions{
 		GetConfigForCert: func(certmagic.Certificate) (*certmagic.Config, error) {
 			return s.magic, nil
 		},
 	})
+	s.cache = cache
 	magic := certmagic.New(cache, certmagic.Config{
 		Storage: &certmagic.FileStorage{Path: cfg.CertDir},
 		OnDemand: &certmagic.OnDemandConfig{
@@ -93,12 +90,32 @@ func NewPublicServer(cfg PublicConfig) *PublicServer {
 	magic.Issuers = []certmagic.Issuer{acme}
 	s.magic = magic
 	s.acme = acme
+	return s
+}
 
+// NewBehindProxyServer routes published apps without starting ACME or managing TLS.
+func NewBehindProxyServer(cfg PublicConfig, trusted []netip.Prefix) *PublicServer {
+	return newPublicRouter(cfg, trusted)
+}
+
+func newPublicRouter(cfg PublicConfig, trusted []netip.Prefix) *PublicServer {
+	s := &PublicServer{backend: cfg.Backend, logger: cfg.Logger, trusted: append([]netip.Prefix(nil), trusted...)}
 	s.proxy = &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme = "http"
-			pr.Out.URL.Host = pr.In.Host
+			pp := pr.In.Context().Value(portCtxKey{}).(PublishedPort)
+			// Key pooled connections by guest, not hostname: republishing a host
+			// to another guest must not reuse a connection to the previous app.
+			pr.Out.URL.Host = net.JoinHostPort(pp.SessionID, strconv.Itoa(pp.GuestPort))
+			pr.Out.Host = pr.In.Host
+			// Discard all incoming proxy metadata, including non-standard variants.
+			for name := range pr.Out.Header {
+				if strings.HasPrefix(strings.ToLower(name), "x-forwarded-") || strings.EqualFold(name, "X-Real-IP") {
+					pr.Out.Header.Del(name)
+				}
+			}
 			pr.SetXForwarded()
+			s.forwardMetadata(pr)
 		},
 		Transport: &http.Transport{
 			// Ignore addr and dial the guest port the handler resolved; the VM
@@ -121,10 +138,45 @@ func NewPublicServer(cfg PublicConfig) *PublicServer {
 	return s
 }
 
-// HTTPSHandler routes an inbound public request to the guest port serving its
-// hostname, or 404s an unrecognised host. The daemon serves it on :443 with
-// TLSConfig().
+// Close stops certificate maintenance and releases idle guest connections after serving stops.
+func (s *PublicServer) Close() {
+	if s.cache != nil {
+		s.cache.Stop()
+	}
+	s.proxy.Transport.(*http.Transport).CloseIdleConnections()
+}
+
+// forwardMetadata accepts a single client IP and scheme only from configured
+// proxy peers. The upstream must overwrite, not append, these headers. Host is
+// always the request Host, never Forwarded or X-Forwarded-Host.
+func (s *PublicServer) forwardMetadata(pr *httputil.ProxyRequest) {
+	peer, err := netip.ParseAddrPort(pr.In.RemoteAddr)
+	if err != nil {
+		return
+	}
+	for _, prefix := range s.trusted {
+		if !prefix.Contains(peer.Addr().Unmap()) {
+			continue
+		}
+		if values := pr.In.Header.Values("X-Forwarded-Proto"); len(values) == 1 && (values[0] == "https" || values[0] == "http") {
+			pr.Out.Header.Set("X-Forwarded-Proto", values[0])
+		}
+		if values := pr.In.Header.Values("X-Forwarded-For"); len(values) == 1 {
+			if ip, err := netip.ParseAddr(values[0]); err == nil && ip.Zone() == "" {
+				pr.Out.Header.Set("X-Forwarded-For", ip.Unmap().String())
+			}
+		}
+		return
+	}
+}
+
+// HTTPSHandler returns the published-app router used by the edge TLS listener.
 func (s *PublicServer) HTTPSHandler() http.Handler {
+	return s.AppHandler()
+}
+
+// AppHandler routes only published hostnames, without TLS, redirects or administrative handlers.
+func (s *PublicServer) AppHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := hostOnly(r.Host)
 		pp, err := s.backend.LookupPublicPort(r.Context(), host)
@@ -175,14 +227,15 @@ const (
 	CertRenewing = "renewing"
 	// CertExpired: a cert exists but has passed its NotAfter.
 	CertExpired = "expired"
+	// CertExternal means the operator's proxy owns TLS; Fletcher has not verified it.
+	CertExternal = "external"
 )
 
-// CertStatus reports the public TLS certificate state for a published public
-// hostname, plus the cert's expiry (NotAfter, Unix seconds; 0 when there is no
-// cert). It reads certmagic's managed-cert storage without issuing anything, so
-// a host with no cert yet reads as CertPending (issuance happens on the first
-// real HTTPS request).
+// CertStatus reports external TLS or the managed certificate state and Unix expiry without issuing a certificate.
 func (s *PublicServer) CertStatus(ctx context.Context, host string) (status string, expiresAt int64) {
+	if s.magic == nil {
+		return CertExternal, 0
+	}
 	cert, err := s.magic.CacheManagedCertificate(ctx, host)
 	if err != nil || cert.Empty() {
 		return CertPending, 0

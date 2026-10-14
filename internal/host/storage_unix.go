@@ -14,7 +14,7 @@ func capacity(path string) (uint64, uint64, error) {
 	if err := unix.Statfs(path, &st); err != nil {
 		return 0, 0, err
 	}
-	size := uint64(st.Bsize) //nolint:gosec // filesystem block size is positive
+	size := uint64(max(st.Bsize, 0))
 	return st.Blocks * size, st.Bavail * size, nil
 }
 

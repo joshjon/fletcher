@@ -49,9 +49,12 @@ const (
 
 	KeyDefaultGateway = "default_gateway"
 
-	KeyPublicWeb   = "public_web"
-	KeyACMEStaging = "acme_staging"
-	KeyACMEEmail   = "acme_email"
+	KeyPublicWeb               = "public_web"
+	KeyPublicWebMode           = "public_web_mode"
+	KeyPublicWebListen         = "public_web_listen"
+	KeyPublicWebTrustedProxies = "public_web_trusted_proxies"
+	KeyACMEStaging             = "acme_staging"
+	KeyACMEEmail               = "acme_email"
 
 	KeyNotifyApprovals    = "notify_approvals"
 	KeyNotifyReports      = "notify_reports"
@@ -94,7 +97,10 @@ var registry = []definition{
 	{KeyDefaultEgressPolicy, "default fork egress policy when --egress is omitted: none | allowlist | open", oneOf("none", "allowlist", "open")},
 	{KeyVMMemoryMB, "per-VM guest memory in MB for job/session microVMs (default 2048); an interactive agent needs well over 512", nonNegInt},
 	{KeyDefaultGateway, "default model-gateway wiring when --gateway is omitted: on (inject gateway env) | off (agent uses its own auth)", oneOf("on", "off")},
-	{KeyPublicWeb, "expose `session publish --public` ports on the public internet over HTTPS (binds 443/80): true | false", oneOf("true", "false")},
+	{KeyPublicWeb, "enable serving explicitly published public apps: true | false", oneOf("true", "false")},
+	{KeyPublicWebMode, "public app serving: edge (default, owns TLS on 443/80) | behind_proxy (operator owns TLS)", oneOf("edge", "behind_proxy")},
+	{KeyPublicWebListen, "behind-proxy HTTP bind, literal loopback IP:port (default 127.0.0.1:11800)", ValidatePublicWebListen},
+	{KeyPublicWebTrustedProxies, "space-separated source CIDRs trusted for single-IP X-Forwarded-For and X-Forwarded-Proto; empty trusts nobody", validatePublicWebTrustedProxies},
 	{KeyACMEStaging, "use Let's Encrypt's staging CA for public TLS certs (untrusted, but no rate limits - for testing): true | false", oneOf("true", "false")},
 	{KeyACMEEmail, "contact email for the ACME account used to issue public TLS certs (optional)", nil},
 	{KeyNotifyApprovals, "push a notification when an approval is created: true | false", oneOf("true", "false")},

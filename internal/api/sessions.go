@@ -636,7 +636,7 @@ func (s *SessionsService) PublishPort(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&fletcherv1.PublishPortResponse{Port: publishedToProto(pp), PublicIp: s.publicIP}), nil
+	return connect.NewResponse(&fletcherv1.PublishPortResponse{Port: s.publishedPort(ctx, pp), PublicIp: s.publicIP}), nil
 }
 
 // UnpublishPort stops forwarding a session's published port.
@@ -655,15 +655,17 @@ func (s *SessionsService) ListPorts(ctx context.Context, req *connect.Request[fl
 	}
 	out := make([]*fletcherv1.PublishedPort, len(ports))
 	for i, pp := range ports {
-		p := publishedToProto(pp)
-		// TLS status applies only to a public port with a hostname, and only
-		// when public web (the certmagic terminator) is up.
-		if pp.Public && pp.Host != "" && s.certs != nil {
-			p.TlsStatus, p.TlsExpiresAt = s.certs.CertStatus(ctx, pp.Host)
-		}
-		out[i] = p
+		out[i] = s.publishedPort(ctx, pp)
 	}
 	return connect.NewResponse(&fletcherv1.ListPortsResponse{Ports: out, PublicIp: s.publicIP}), nil
+}
+
+func (s *SessionsService) publishedPort(ctx context.Context, pp session.PublishedPort) *fletcherv1.PublishedPort {
+	p := publishedToProto(pp)
+	if pp.Public && pp.Host != "" && s.certs != nil {
+		p.TlsStatus, p.TlsExpiresAt = s.certs.CertStatus(ctx, pp.Host)
+	}
+	return p
 }
 
 func publishedToProto(p session.PublishedPort) *fletcherv1.PublishedPort {
