@@ -132,6 +132,14 @@ type Manager struct {
 	// the idle reaper read them concurrently.
 	opts atomic.Pointer[Options]
 
+	lifecycleMu    sync.Mutex
+	closing        bool
+	lifetime       context.Context
+	cancelLifetime context.CancelFunc
+	operations     sync.WaitGroup
+	shutdownOnce   sync.Once
+	drained        chan struct{}
+
 	mu      sync.Mutex
 	handles map[string]runtime.SessionHandle
 	busy    map[string]int // sessions with an in-flight host op (exec/shell/ssh)
@@ -234,15 +242,19 @@ type AgentEnv struct {
 // NewManager constructs a Manager. rt may be nil if the configured runtime does
 // not support sessions, in which case lifecycle calls fail with a clear error.
 func NewManager(q sqliteq.Querier, snap snapshot.Driver, rt runtime.SessionRuntime, env AgentEnv, logger *slog.Logger, opts Options) *Manager {
+	lifetime, cancel := context.WithCancel(context.Background())
 	m := &Manager{
-		q:          q,
-		snapshot:   snap,
-		runtime:    rt,
-		baseEnv:    env.Base,
-		gatewayEnv: env.Gateway,
-		logger:     logger,
-		handles:    make(map[string]runtime.SessionHandle),
-		busy:       make(map[string]int),
+		lifetime:       lifetime,
+		cancelLifetime: cancel,
+		drained:        make(chan struct{}),
+		q:              q,
+		snapshot:       snap,
+		runtime:        rt,
+		baseEnv:        env.Base,
+		gatewayEnv:     env.Gateway,
+		logger:         logger,
+		handles:        make(map[string]runtime.SessionHandle),
+		busy:           make(map[string]int),
 
 		lastAppRestarts: make(map[string]int64),
 		crashLoopWarned: make(map[string]time.Time),
@@ -387,7 +399,12 @@ type CreateParams struct {
 
 // Create provisions a session's persistent fork, boots its VM, and records it.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (Session, error) {
-	p, err := m.resolveCreateParams(ctx, p)
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	defer finish()
+	p, err = m.resolveCreateParams(ctx, p)
 	if err != nil {
 		return Session{}, err
 	}
@@ -482,10 +499,13 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Session, error) {
 // resume an unrecorded session; leaving it strands disk until the next boot's
 // orphan reclaim), and delete the fork.
 func (m *Manager) discardUnrecorded(ctx context.Context, handle runtime.SessionHandle, sessionID, forkID string) {
-	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	_ = handle.Stop(ctx)
 	_ = m.runtime.DiscardSession(ctx, sessionID)
-	_ = m.snapshot.Delete(ctx, forkID)
+	if forkID != "" {
+		_ = m.snapshot.Delete(ctx, forkID)
+	}
 }
 
 // resolveCredentials turns the requested agent-login names (or the box default
@@ -541,6 +561,11 @@ func (m *Manager) enrich(ctx context.Context, s Session) Session {
 // waking a published port at once): a per-session lock serialises the
 // check-and-boot so at most one VM is started.
 func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	defer finish()
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
@@ -586,9 +611,15 @@ func (m *Manager) startLocked(ctx context.Context, id string) (Session, error) {
 	if err != nil {
 		return Session{}, fmt.Errorf("start session vm: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		m.discardUnrecorded(ctx, handle, row.ID, "")
+		return Session{}, err
+	}
 	m.putHandle(row.ID, handle)
 
 	if err := m.setState(ctx, row.ID, StateRunning); err != nil {
+		m.takeHandle(row.ID)
+		m.discardUnrecorded(ctx, handle, row.ID, "")
 		return Session{}, err
 	}
 	row.State = string(StateRunning)
@@ -626,6 +657,11 @@ func nilIfEmptyStr(s string) *string {
 // concurrent wake (e.g. inbound traffic on a published port) and leave the DB
 // state contradicting the live handle.
 func (m *Manager) Stop(ctx context.Context, ref string) (Session, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	defer finish()
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return Session{}, err
@@ -645,8 +681,9 @@ func (m *Manager) stopLocked(ctx context.Context, id string) (Session, error) {
 	}
 	if handle := m.takeHandle(row.ID); handle != nil {
 		m.syncGuest(ctx, handle, row.ID)
-		if serr := handle.Stop(ctx); serr != nil {
-			m.logger.Warn("stop session vm", slog.String("session_id", row.ID), slog.String("err", serr.Error()))
+		if err := stopHandle(ctx, handle); err != nil {
+			m.putHandle(row.ID, handle)
+			return Session{}, fmt.Errorf("stop session vm: %w", err)
 		}
 	}
 	if err := m.setState(ctx, row.ID, StateStopped); err != nil {
@@ -661,6 +698,11 @@ func (m *Manager) stopLocked(ctx context.Context, id string) (Session, error) {
 // is unlinking (which would leave a running VM with no session row, invisible
 // to Stop, Delete, and the reaper).
 func (m *Manager) Delete(ctx context.Context, ref string) (bool, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer finish()
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -680,8 +722,9 @@ func (m *Manager) Delete(ctx context.Context, ref string) (bool, error) {
 		return false, err
 	}
 	if handle := m.takeHandle(row.ID); handle != nil {
-		if serr := handle.Stop(ctx); serr != nil {
-			m.logger.Warn("stop session vm on delete", slog.String("session_id", row.ID), slog.String("err", serr.Error()))
+		if err := stopHandle(ctx, handle); err != nil {
+			m.putHandle(row.ID, handle)
+			return false, fmt.Errorf("stop session vm before delete: %w", err)
 		}
 	}
 	// Close any published-port forwarders before the rows vanish (the DB rows
@@ -714,6 +757,11 @@ func (m *Manager) Delete(ctx context.Context, ref string) (bool, error) {
 
 // Exec runs command inside a running session and returns its captured output.
 func (m *Manager) Exec(ctx context.Context, ref, command string) (ExecResult, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return ExecResult{}, err
+	}
+	defer finish()
 	if strings.TrimSpace(command) == "" {
 		return ExecResult{}, errs.New(errs.CategoryInvalidArgument, "command is required")
 	}
@@ -746,6 +794,11 @@ func (m *Manager) Exec(ctx context.Context, ref, command string) (ExecResult, er
 // spec.Path, writing it atomically and handing it to the login user. A zero
 // spec.Mode uses 0644. Returns the bytes written and the content hash.
 func (m *Manager) UploadFile(ctx context.Context, ref string, spec runtime.FileWriteSpec, content io.Reader) (runtime.FileWriteResult, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return runtime.FileWriteResult{}, err
+	}
+	defer finish()
 	if strings.TrimSpace(spec.Path) == "" {
 		return runtime.FileWriteResult{}, errs.New(errs.CategoryInvalidArgument, "destination path is required")
 	}
@@ -776,6 +829,11 @@ func (m *Manager) UploadFile(ctx context.Context, ref string, spec runtime.FileW
 // DownloadFile streams a running session's file at path to w. onInfo is called
 // with the file's size and mode before any bytes are written.
 func (m *Manager) DownloadFile(ctx context.Context, ref, path string, onInfo func(runtime.FileReadResult) error, w io.Writer) error {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer finish()
 	if strings.TrimSpace(path) == "" {
 		return errs.New(errs.CategoryInvalidArgument, "source path is required")
 	}
@@ -802,6 +860,11 @@ func (m *Manager) DownloadFile(ctx context.Context, ref, path string, onInfo fun
 // ListDir lists a directory inside a running session's fork. An empty path lists
 // the login user's home.
 func (m *Manager) ListDir(ctx context.Context, ref, path string) (runtime.DirListing, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return runtime.DirListing{}, err
+	}
+	defer finish()
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return runtime.DirListing{}, err
@@ -823,6 +886,11 @@ func (m *Manager) ListDir(ctx context.Context, ref, path string) (runtime.DirLis
 
 // FileOp performs a delete, move, or copy inside a running session's fork.
 func (m *Manager) FileOp(ctx context.Context, ref string, spec runtime.FileOpSpec) error {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer finish()
 	if strings.TrimSpace(spec.Path) == "" {
 		return errs.New(errs.CategoryInvalidArgument, "path is required")
 	}
@@ -863,6 +931,11 @@ const defaultLogTailLines = 200
 
 // Restart cold-boots a session against its existing fork, applying current configuration without resuming the old process tree.
 func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	defer finish()
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
@@ -895,6 +968,11 @@ func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
 // not an error. The app log path is a fixed guest-side constant and tailLines
 // is an int, so the tail command carries no caller-supplied text.
 func (m *Manager) StreamLogs(ctx context.Context, ref string, tailLines int, follow bool, w io.Writer) error {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return err
+	}
+	defer finish()
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return err
@@ -972,6 +1050,11 @@ type UpdateParams struct {
 // takes effect on its next start; restartRequired reports whether the session
 // is currently running.
 func (m *Manager) Update(ctx context.Context, ref string, p UpdateParams) (Session, bool, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return Session{}, false, err
+	}
+	defer finish()
 	egressPolicy, gateway := p.EgressPolicy, p.Gateway
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
@@ -1064,6 +1147,11 @@ type CommitImageParams struct {
 // is flushed (sync) first, so the cloned disk is at worst crash-consistent: the
 // ext4 journal replays on first boot. Returns the committed template name.
 func (m *Manager) CommitImage(ctx context.Context, ref string, p CommitImageParams) (string, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer finish()
 	name := strings.TrimSpace(p.Name)
 	if name == "" {
 		return "", errs.New(errs.CategoryInvalidArgument, "image name is required")
@@ -1159,7 +1247,7 @@ func (m *Manager) writeCommittedMeta(row sqliteq.Session, p CommitImageParams, n
 
 // syncGuest flushes a guest's page cache to its disk before the VM stops.
 // Hibernation keeps memory, but the disk must stay the source of truth
-// (DESIGN §5): a stale or discarded snapshot, a redeploy retiring the fork for
+// (DESIGN section 5): a stale or discarded snapshot, a redeploy retiring the fork for
 // rollback, or a commit must never lose writes that only lived in guest RAM.
 // Best-effort: a guest that cannot sync still stops.
 func (m *Manager) syncGuest(ctx context.Context, handle runtime.SessionHandle, id string) {
@@ -1201,6 +1289,11 @@ func validImageName(name string) bool {
 // fork (reflink-shared, so nearly free) so a bad redeploy can be rolled back;
 // each redeploy replaces the one before it.
 func (m *Manager) Redeploy(ctx context.Context, ref, newImage string) (Session, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	defer finish()
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
@@ -1225,8 +1318,9 @@ func (m *Manager) Redeploy(ctx context.Context, ref, newImage string) (Session, 
 	if handle := m.takeHandle(row.ID); handle != nil {
 		// Flush the guest first: this disk becomes the rollback target.
 		m.syncGuest(ctx, handle, row.ID)
-		if serr := handle.Stop(ctx); serr != nil {
-			m.logger.Warn("stop session vm for redeploy", slog.String("session_id", row.ID), slog.String("err", serr.Error()))
+		if err := stopHandle(ctx, handle); err != nil {
+			m.putHandle(row.ID, handle)
+			return Session{}, fmt.Errorf("stop session vm before redeploy: %w", err)
 		}
 	}
 	if err := m.setState(ctx, row.ID, StateStopped); err != nil {
@@ -1267,6 +1361,11 @@ func (m *Manager) Redeploy(ctx context.Context, ref, newImage string) (Session, 
 // The session's image label is not changed: the fork is the source of truth
 // for what runs; the label tracks the most recent explicit retarget.
 func (m *Manager) Rollback(ctx context.Context, ref string) (Session, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return Session{}, err
+	}
+	defer finish()
 	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
@@ -1288,8 +1387,9 @@ func (m *Manager) Rollback(ctx context.Context, ref string) (Session, error) {
 	if handle := m.takeHandle(row.ID); handle != nil {
 		// Flush the guest first: this disk becomes the swap-forward target.
 		m.syncGuest(ctx, handle, row.ID)
-		if serr := handle.Stop(ctx); serr != nil {
-			m.logger.Warn("stop session vm for rollback", slog.String("session_id", row.ID), slog.String("err", serr.Error()))
+		if err := stopHandle(ctx, handle); err != nil {
+			m.putHandle(row.ID, handle)
+			return Session{}, fmt.Errorf("stop session vm before rollback: %w", err)
 		}
 	}
 	if err := m.setState(ctx, row.ID, StateStopped); err != nil {
@@ -1314,6 +1414,11 @@ func (m *Manager) Rollback(ctx context.Context, ref string) (Session, error) {
 // Shell opens an interactive PTY in a running session, bridging the caller's
 // stdin/stdout and window resizes to the VM, and returns the shell's exit code.
 func (m *Manager) Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer finish()
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return 0, err
@@ -1338,6 +1443,16 @@ func (m *Manager) Shell(ctx context.Context, ref string, spec runtime.ShellSpec,
 // DialSSH opens a raw byte stream to a running session's SSH server for the
 // daemon to proxy a brokered SSH connection through.
 func (m *Manager) DialSSH(ctx context.Context, ref string) (net.Conn, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	retained := false
+	defer func() {
+		if !retained {
+			finish()
+		}
+	}()
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -1354,9 +1469,8 @@ func (m *Manager) DialSSH(ctx context.Context, ref string) (net.Conn, error) {
 	m.touch(ctx, row.ID)
 	// The SSH session is in flight for the life of the connection; keep the
 	// session marked busy (and so safe from idle auto-stop) until it closes.
-	m.markBusy(row.ID)
-	id := row.ID
-	return &busyConn{Conn: conn, release: func() { m.unmarkBusy(id) }}, nil
+	retained = true
+	return m.trackConnection(conn, row.ID, finish), nil
 }
 
 // SetBroker wires the port broker used to open/close published-port
@@ -1389,6 +1503,16 @@ func (m *Manager) publishEvent(action, id, name string) {
 // hibernation), and the session is marked busy for the connection's lifetime so
 // the reaper does not stop it mid-traffic.
 func (m *Manager) DialPort(ctx context.Context, ref string, port uint16) (net.Conn, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	retained := false
+	defer func() {
+		if !retained {
+			finish()
+		}
+	}()
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -1410,9 +1534,8 @@ func (m *Manager) DialPort(ctx context.Context, ref string, port uint16) (net.Co
 	m.touch(ctx, row.ID)
 	// The connection is in flight for its lifetime; keep the session busy (and so
 	// safe from idle auto-stop) until it closes.
-	m.markBusy(row.ID)
-	id := row.ID
-	return &busyConn{Conn: conn, release: func() { m.unmarkBusy(id) }}, nil
+	retained = true
+	return m.trackConnection(conn, row.ID, finish), nil
 }
 
 // PublishParams parameterise Publish.
@@ -1768,6 +1891,11 @@ func (m *Manager) takeHandle(id string) runtime.SessionHandle {
 // running agent or task is never stopped mid-work, even with no user attached.
 // It is a no-op when the idle timeout is disabled.
 func (m *Manager) ReapIdle(ctx context.Context) (int, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer finish()
 	if m.opt().IdleTimeout <= 0 {
 		return 0, nil
 	}
@@ -1837,6 +1965,11 @@ const crashLoopWarnInterval = time.Hour
 // publishes a "crash-looping" event when one is restarting rapidly. Called on
 // the reaper's cadence; rate-limited per session.
 func (m *Manager) SweepDeployHealth(ctx context.Context) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return
+	}
+	defer finish()
 	rows, err := m.q.ListSessions(ctx)
 	if err != nil {
 		return
@@ -1953,15 +2086,36 @@ func forkBytes(path string) int64 {
 }
 
 // busyConn keeps a session marked busy until the SSH connection it wraps closes.
+func (m *Manager) trackConnection(conn net.Conn, id string, finish func()) net.Conn {
+	m.markBusy(id)
+	c := &busyConn{Conn: conn, release: func() { m.unmarkBusy(id); finish() }}
+	// The dial context bounds only setup (brokers cancel it after dialing).
+	// Keep the connection until its caller closes it or the daemon shuts down.
+	c.stopMu.Lock()
+	c.stop = context.AfterFunc(m.lifetime, func() { _ = c.Close() })
+	c.stopMu.Unlock()
+	return c
+}
+
 type busyConn struct {
 	net.Conn
 	release func()
 	once    sync.Once
+	stopMu  sync.Mutex
+	stop    func() bool
 }
 
 func (c *busyConn) Close() error {
-	c.once.Do(c.release)
-	return c.Conn.Close()
+	err := c.Conn.Close()
+	c.once.Do(func() {
+		c.stopMu.Lock()
+		if c.stop != nil {
+			c.stop()
+		}
+		c.stopMu.Unlock()
+		c.release()
+	})
+	return err
 }
 
 func sessionFromRow(r sqliteq.Session) Session {

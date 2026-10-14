@@ -117,7 +117,7 @@ func TestRemoteAPIListenActorServesAndShutsDown(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})}
 
-	execute, interrupt := remoteAPIListenActor(t.Context(), addr, srv, discardLogger())
+	execute, interrupt := remoteAPIListenActor(t.Context(), addr, srv, discardLogger(), nil)
 	done := make(chan error, 1)
 	go func() { done <- execute() }()
 
@@ -167,7 +167,7 @@ func TestRemoteAPIListenActorRetriesUntilCancelled(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		srv := &http.Server{Handler: http.NewServeMux()}
-		execute, _ := remoteAPIListenActor(ctx, "240.0.0.1:11700", srv, logger)
+		execute, _ := remoteAPIListenActor(ctx, "240.0.0.1:11700", srv, logger, nil)
 
 		done := make(chan error, 1)
 		go func() { done <- execute() }()

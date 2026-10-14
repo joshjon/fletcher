@@ -114,6 +114,9 @@ func (d *Driver) restoreSession(ctx context.Context, spec fcruntime.SessionSpec,
 		vmCancel()
 		return nil, fmt.Errorf("firecracker: new restore machine: %w", err)
 	}
+	// The SDK retains Start's context after boot; detach only on success.
+	stopStartup := context.AfterFunc(ctx, vmCancel)
+	defer stopStartup()
 	if err := machine.Start(vmCtx); err != nil {
 		_ = machine.StopVMM()
 		vmCancel()
@@ -122,7 +125,7 @@ func (d *Driver) restoreSession(ctx context.Context, spec fcruntime.SessionSpec,
 
 	// Confirm the resumed guest's control server answers, so the session is
 	// exec-ready when we return.
-	probeCtx, cancel := context.WithTimeout(vmCtx, sessionStartGrace)
+	probeCtx, cancel := context.WithTimeout(ctx, sessionStartGrace)
 	defer cancel()
 	probe, derr := dialGuest(probeCtx, vsockUDS, guestproto.ControlPort)
 	if derr != nil {
@@ -145,7 +148,7 @@ func (d *Driver) restoreSession(ctx context.Context, spec fcruntime.SessionSpec,
 	// No credentials or app env on restore: the guest process is resumed with its
 	// app already supervised (setupOnce fired at cold boot), so the resent setup
 	// is a no-op beyond rebuilding the host-side forward sockets.
-	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv, nil, nil,
+	forwardLns, ferr := d.startSessionForwards(vmCtx, ctx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv, nil, nil,
 		forkauth.Caller{ID: spec.SessionID, Policy: spec.EgressPolicy, Session: true})
 	if ferr != nil {
 		d.logger.Warn("session service forwards not fully re-established after restore; model gateway/MCP may be unreachable in this session",
@@ -182,6 +185,7 @@ func (s *fcSession) hibernate(ctx context.Context) error {
 	_ = s.machine.StopVMM()
 	s.closeForwards()
 	s.vmCancel()
+	_ = s.machine.Wait(ctx)
 	// Keep vmDir: it holds the snapshot the next Start restores from.
 	return nil
 }

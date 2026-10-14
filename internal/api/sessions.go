@@ -585,8 +585,12 @@ func (s *SessionsService) ProxySession(ctx context.Context, stream *connect.Bidi
 		return err
 	}
 	defer func() { _ = conn.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 
-	go proxyClientToConn(stream, conn)
+	background.GoNamed(ctx, "api.SessionsService.proxyReceive", func(context.Context) {
+		proxyClientToConn(stream, conn)
+	})
 
 	// Session -> client drives the handler's lifetime.
 	buf := make([]byte, 32<<10)

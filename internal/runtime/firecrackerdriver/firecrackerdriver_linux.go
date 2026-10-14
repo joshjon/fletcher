@@ -366,19 +366,30 @@ func dialGuest(ctx context.Context, udsPath string, port uint32) (net.Conn, erro
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		conn, err := tryDialGuest(udsPath, port)
+		conn, err := tryDialGuest(ctx, udsPath, port)
 		if err == nil {
 			return conn, nil
 		}
 		lastErr = err
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 	return nil, lastErr
 }
 
-func tryDialGuest(udsPath string, port uint32) (net.Conn, error) {
-	conn, err := net.Dial("unix", udsPath) //nolint:noctx // short-lived control dial; conn lifetime governs it
+func tryDialGuest(ctx context.Context, udsPath string, port uint32) (net.Conn, error) {
+	var dialer net.Dialer
+	raw, err := dialer.DialContext(ctx, "unix", udsPath)
 	if err != nil {
+		return nil, err
+	}
+	conn := &contextConn{Conn: raw}
+	conn.stop = context.AfterFunc(ctx, func() { _ = raw.Close() })
+	if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		_ = conn.Close()
 		return nil, err
 	}
 	if _, err := fmt.Fprintf(conn, "CONNECT %d\n", port); err != nil {
@@ -394,7 +405,21 @@ func tryDialGuest(udsPath string, port uint32) (net.Conn, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("vsock connect rejected: %q", line)
 	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
 	return conn, nil
+}
+
+type contextConn struct {
+	net.Conn
+	stop func() bool
+}
+
+func (c *contextConn) Close() error {
+	c.stop()
+	return c.Conn.Close()
 }
 
 // readLine reads up to a newline without buffering past it (so the rest of the

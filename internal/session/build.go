@@ -130,13 +130,18 @@ func (m *Manager) StartBuildFromSession(ctx context.Context, devRef, subdir, ima
 	}
 	buildID := id.String()
 
+	// Accepted builds outlive the client, but not daemon shutdown.
+	buildCtx, finish, err := m.beginOperation(context.WithoutCancel(ctx))
+	if err != nil {
+		return "", err
+	}
 	rec := &buildRecord{state: buildStateBuilding, updated: time.Now()}
 	m.buildsMu.Lock()
 	m.sweepBuildsLocked()
 	m.builds[buildID] = rec
 	m.buildsMu.Unlock()
-
-	background.GoNamed(context.WithoutCancel(ctx), "session.build", func(gctx context.Context) {
+	background.GoNamed(buildCtx, "session.build", func(gctx context.Context) {
+		defer finish()
 		// Detached: own context (not the request's), with a ceiling so a wedged
 		// build cannot run forever.
 		bctx, cancel := context.WithTimeout(gctx, 30*time.Minute)
@@ -209,6 +214,11 @@ func (m *Manager) sweepBuildsLocked() {
 // and is discarded when the build finishes. Returns the template name and the
 // image's lowest EXPOSE.
 func (m *Manager) BuildImageFromSession(ctx context.Context, devRef, subdir, imageName string, force bool) (string, int, error) {
+	ctx, finish, err := m.beginOperation(ctx)
+	if err != nil {
+		return "", 0, err
+	}
+	defer finish()
 	return m.buildImageFromSession(ctx, devRef, subdir, imageName, force, nil)
 }
 
@@ -348,12 +358,7 @@ func (m *Manager) buildInFork(ctx context.Context, contextGz []byte, logSink io.
 	if err != nil {
 		return nil, appspec.Spec{}, 0, fmt.Errorf("start build fork: %w", err)
 	}
-	defer func() {
-		_ = handle.Stop(context.WithoutCancel(ctx))
-		// Remove the build fork's VM dir (sockets/state) - it is ephemeral and
-		// has no session row, so nothing else cleans it up.
-		_ = m.runtime.DiscardSession(context.WithoutCancel(ctx), buildID)
-	}()
+	defer m.cleanupBuildSession(ctx, handle, buildID)
 
 	// Build the Dockerfile and stage the outputs (the verified recipe: chroot
 	// isolation - the microVM has no clean cgroups for crun). --layers + a
@@ -454,6 +459,14 @@ func parseOCIConfig(jsonStr string) (appspec.Spec, int, error) {
 		}
 	}
 	return spec, best, nil
+}
+
+func (m *Manager) cleanupBuildSession(ctx context.Context, handle runtime.SessionHandle, id string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = handle.Stop(ctx)
+	// A build has no durable session row to own its VM state.
+	_ = m.runtime.DiscardSession(ctx, id)
 }
 
 // buildCachePath is the persistent build cache disk, alongside the images dir.

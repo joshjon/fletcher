@@ -106,6 +106,10 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 		cleanup()
 		return nil, fmt.Errorf("firecracker: new session machine: %w", err)
 	}
+	// The SDK retains Start's context for the VMM lifetime. Link request
+	// cancellation only until startup completes, then let the VM outlive it.
+	stopStartup := context.AfterFunc(ctx, vmCancel)
+	defer stopStartup()
 	if err := machine.Start(vmCtx); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("firecracker: start session microVM: %w%s", err, console.suffix())
@@ -113,7 +117,7 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 
 	// Wait until the guest's control server is listening, so the session is
 	// exec-ready when StartSession returns.
-	probeCtx, cancel := context.WithTimeout(vmCtx, sessionStartGrace)
+	probeCtx, cancel := context.WithTimeout(ctx, sessionStartGrace)
 	defer cancel()
 	probe, derr := dialGuest(probeCtx, vsockUDS, guestproto.ControlPort)
 	if derr != nil {
@@ -129,7 +133,7 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 	// usable for a shell, just not for model/MCP calls. envForPolicy strips the
 	// proxy vars for a "none" session so they match its (absent) egress forward.
 	effEnv := envForPolicy(spec.EgressPolicy, spec.Env)
-	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv, spec.AppEnv, guestCredentials(spec.Credentials),
+	forwardLns, ferr := d.startSessionForwards(vmCtx, ctx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv, spec.AppEnv, guestCredentials(spec.Credentials),
 		forkauth.Caller{ID: spec.SessionID, Policy: spec.EgressPolicy, Session: true})
 	if ferr != nil {
 		d.logger.Warn("session service forwards not fully established; model gateway/MCP may be unreachable in this session",
@@ -212,7 +216,7 @@ type fcSession struct {
 // does the equivalent inline in Run. Best-effort: it returns any listeners it
 // did open alongside an error so the caller can both close them and log, leaving
 // the session usable (just without model/MCP access) rather than failing to boot.
-func (d *Driver) startSessionForwards(ctx context.Context, vsockUDS string, forwards []Forward, env, appEnv []string, creds []guestproto.CredentialFile, caller forkauth.Caller) ([]net.Listener, error) {
+func (d *Driver) startSessionForwards(ctx, startupCtx context.Context, vsockUDS string, forwards []Forward, env, appEnv []string, creds []guestproto.CredentialFile, caller forkauth.Caller) ([]net.Listener, error) {
 	lns := make([]net.Listener, 0, len(forwards))
 	gforwards := make([]guestproto.Forward, 0, len(forwards))
 	for i, f := range forwards {
@@ -232,7 +236,7 @@ func (d *Driver) startSessionForwards(ctx context.Context, vsockUDS string, forw
 	if len(gforwards) == 0 && len(env) == 0 && len(appEnv) == 0 && len(creds) == 0 {
 		return lns, nil
 	}
-	setupCtx, cancel := context.WithTimeout(ctx, sessionStartGrace)
+	setupCtx, cancel := context.WithTimeout(startupCtx, sessionStartGrace)
 	defer cancel()
 	if err := sendSessionSetup(setupCtx, vsockUDS, gforwards, env, appEnv, creds); err != nil {
 		return lns, fmt.Errorf("send setup: %w", err)
@@ -613,6 +617,8 @@ func (s *fcSession) stat(ctx context.Context) (guestproto.Stat, error) {
 		return guestproto.Stat{}, fmt.Errorf("firecracker: connect session: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 
 	if err := guestproto.WriteRequest(conn, guestproto.Request{Kind: guestproto.RequestStat}); err != nil {
 		return guestproto.Stat{}, fmt.Errorf("firecracker: send stat: %w", err)
@@ -629,6 +635,13 @@ func (s *fcSession) stat(ctx context.Context) (guestproto.Stat, error) {
 // process tree intact. If hibernation fails it falls back to a clean shutdown.
 // Either way the fork on disk survives.
 func (s *fcSession) Stop(ctx context.Context) error {
+	// Build forks also call Stop directly. Flush their persistent cache disk,
+	// not just managed session forks, before memory can be discarded.
+	if _, err := s.Exec(ctx, fcruntime.Spec{Command: "sync"}, io.Discard, io.Discard); err != nil {
+		// A broken guest still needs to be stopped; cleanShutdown also syncs.
+		s.cleanShutdown(ctx)
+		return nil //nolint:nilerr // cleanShutdown recovers a failed sync by syncing and stopping the guest, or forcing it down
+	}
 	if err := s.hibernate(ctx); err != nil {
 		s.cleanShutdown(ctx)
 	}
@@ -642,11 +655,12 @@ func (s *fcSession) cleanShutdown(ctx context.Context) {
 		_ = guestproto.WriteRequest(conn, guestproto.Request{Kind: guestproto.RequestShutdown})
 		_ = conn.Close()
 	}
-	waitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
+	waitCtx, cancel := context.WithTimeout(ctx, shutdownGrace)
 	defer cancel()
 	_ = s.machine.Wait(waitCtx)
 	_ = s.machine.StopVMM()
 	s.closeForwards()
 	s.vmCancel()
+	_ = s.machine.Wait(ctx)
 	_ = os.RemoveAll(s.vmDir)
 }

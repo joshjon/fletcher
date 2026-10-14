@@ -844,7 +844,21 @@ type gatewayCatalog struct{ baseURL string }
 func (g gatewayCatalog) Catalog() gateway.Catalog { return gateway.BuildCatalog(g.baseURL) }
 
 func (s *services) run(ctx context.Context, logger *slog.Logger) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	connections := s.trackRequests(ctx)
 	var g run.Group
+	// First interrupt: stop admission and drain guests while DB and services exist.
+	//nolint:contextcheck // guest draining needs a fresh deadline after cancelling request contexts
+	g.Add(func() error { <-ctx.Done(); return nil }, func(error) {
+		cancel()
+		s.closeRequests(connections)
+		shutdownCtx, stop := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer stop()
+		if err := s.sessions.Shutdown(shutdownCtx); err != nil {
+			logger.Error("session shutdown did not complete", slog.String("err", err.Error()))
+		}
+	})
 	// serveActor's interrupt path uses a fresh context for graceful shutdown
 	// because the parent ctx is already cancelled by the time interrupt fires.
 	//nolint:contextcheck // shutdown must outlive the cancelled parent ctx
@@ -867,7 +881,7 @@ func (s *services) run(ctx context.Context, logger *slog.Logger) error {
 		g.Add(httpServeActor(logger, "remote-api", s.remoteSrv, s.remoteLn, "http://"+s.remoteAddr))
 	}
 	if s.vpnAPISrv != nil {
-		g.Add(remoteAPIListenActor(ctx, s.vpnAPIAddr, s.vpnAPISrv, logger))
+		g.Add(remoteAPIListenActor(ctx, s.vpnAPIAddr, s.vpnAPISrv, logger, connections))
 	}
 	if s.pairingSrv != nil {
 		//nolint:contextcheck // same: shutdown must outlive the cancelled parent ctx
@@ -1929,7 +1943,7 @@ var (
 // whole process lifetime. Interrupt cancels a derived context so a group
 // shutdown triggered by another actor's error also breaks the retry loop, not
 // just parent-ctx cancellation; it then drains an in-flight server.
-func remoteAPIListenActor(ctx context.Context, addr string, srv *http.Server, logger *slog.Logger) (func() error, func(error)) {
+func remoteAPIListenActor(ctx context.Context, addr string, srv *http.Server, logger *slog.Logger, connections *requestConnections) (func() error, func(error)) {
 	runCtx, cancel := context.WithCancel(ctx)
 	execute := func() error {
 		var lc net.ListenConfig
@@ -1938,7 +1952,7 @@ func remoteAPIListenActor(ctx context.Context, addr string, srv *http.Server, lo
 			ln, err := lc.Listen(runCtx, "tcp", addr)
 			if err == nil {
 				logger.Info("remote-api (vpn) listening", slog.String("addr", addr))
-				if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				if serveErr := srv.Serve(connections.listener(ln)); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 					return fmt.Errorf("remote-api (vpn) serve: %w", serveErr)
 				}
 				return nil

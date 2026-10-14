@@ -2094,6 +2094,27 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**Session shutdown draining - code complete, hardware verification pending.**
+Daemon shutdown cancels request contexts before HTTP server draining, rejects new
+session lifecycle work and cancels tracked operations plus detached builds.
+Within a 30-second session-drain budget, live VMs are synced and stopped before
+SQLite closes; forks and hibernation state are retained. Firecracker startup,
+vsock handshakes and streams now honor cancellation. Direct runtime stops also
+flush persistent build-cache disks, and cleanup waits for VMM exit. Race tests
+cover interrupted creation, active commands, detached-build shutdown and a stop
+already in progress. Request cancellation retains a bounded cleanup window;
+failed stops never delete or swap a live VM's disks.
+
+Stress coverage now includes unread HTTP/1 and HTTP/2 response bodies, hijacked
+connections, blocked SSH/preview writers, a guest that never replies to stats,
+and shutdown deadline exhaustion with a later cleanup retry. Raw client
+connections close before session draining so backpressure cannot hold a network
+writer open. SSH and preview connections are admitted, cancelled and drained
+with the manager, without treating a broker's dial timeout as their lifetime.
+The reaper and health sweep are tracked too. Verify
+rootfs and volume writes across real systemd restart and confirm no VMM remains;
+forced exits or a driver exceeding the drain deadline still use crash recovery.
+
 **MCP egress policy and HTTP writes - code complete, hardware verification
 pending.** Host-side Firecracker and per-job runc relays authenticate fork identity
 without exposing signing credentials. MCP HTTP requests enforce boot-time policy,
