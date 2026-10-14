@@ -53,6 +53,10 @@ type CredentialFile struct {
 
 // ShellSpec parameterises an interactive PTY in a session VM.
 type ShellSpec struct {
+	// WorkDir is the initial absolute guest directory for a new named terminal.
+	WorkDir string
+	// TerminalName selects a durable terminal; empty retains the legacy main terminal.
+	TerminalName string
 	// Term is the TERM value set inside the PTY (e.g. xterm-256color).
 	Term string
 	// Cols and Rows are the initial window size.

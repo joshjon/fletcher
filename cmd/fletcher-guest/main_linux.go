@@ -36,6 +36,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/joshjon/fletcher/internal/appspec"
+	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestproto"
 )
 
@@ -408,6 +409,15 @@ func serveControl(conn net.Conn) {
 	case guestproto.RequestExec:
 		runExec(conn, req.Spec)
 	case guestproto.RequestShell:
+		runShell(conn, req.Shell)
+	case guestproto.RequestShellTarget:
+		if req.Shell.TerminalName == "" {
+			_ = guestproto.WriteError(conn, "a named terminal request requires a terminal name")
+			return
+		}
+		if err := guestproto.WriteShellReady(conn); err != nil {
+			return
+		}
 		runShell(conn, req.Shell)
 	case guestproto.RequestStat:
 		if err := guestproto.WriteStat(conn, guestproto.Stat{Load1: loadAvg1(), AppRestarts: appRestarts.Load()}); err != nil {
@@ -826,7 +836,13 @@ func loadAvg1() float64 {
 // shellCommand.
 func runShell(conn net.Conn, spec guestproto.ShellSpec) {
 	lu := lookupLoginUser()
-	cmd := shellCommand(spec, lu)
+	cmd, err := shellCommand(spec, lu)
+	if err != nil {
+		fc := &frameConn{w: conn}
+		_ = fc.write(guestproto.KindStderr, []byte(fmt.Sprintf("fletcher-guest: shell target: %v\n", err)))
+		_ = fc.write(guestproto.KindExit, guestproto.EncodeExit(1))
+		return
+	}
 	applyLoginUser(cmd, lu) // before pty.Start, which augments SysProcAttr
 
 	ptmx, err := pty.Start(cmd)
@@ -887,14 +903,14 @@ func runShell(conn net.Conn, spec guestproto.ShellSpec) {
 
 const (
 	// tmuxSocket names the per-VM tmux server's socket (-L); a fixed name means
-	// every attach reaches the same server. tmuxSession is the single durable
-	// session every shell attaches to.
+	// every attach reaches the same server. tmuxSession is the legacy default;
+	// named terminals select independent durable sessions in this server.
 	tmuxSocket  = "fletcher"
 	tmuxSession = "main"
 )
 
 // shellCommand builds the interactive shell process. When tmux is on PATH it
-// attaches to (or creates) one durable session per VM, so the REPL survives a
+// attaches to (or creates) a durable terminal in the VM, so the REPL survives a
 // client detach: the host PTY backs a tmux client, and hanging up the
 // connection detaches that client rather than killing the shell - the server
 // and its windows keep running in the VM until the session is stopped. Without
@@ -902,12 +918,24 @@ const (
 // (the pre-durability behaviour, kept for a minimal rootfs and the mock
 // driver). Either way cmd carries the login user's env and start directory; the
 // caller applies the login-user credential before pty.Start.
-func shellCommand(spec guestproto.ShellSpec, lu loginUser) *exec.Cmd {
-	shell := loginShell()
+func shellCommand(spec guestproto.ShellSpec, lu loginUser) (*exec.Cmd, error) {
+	if err := (runtime.ShellSpec{WorkDir: spec.WorkDir, TerminalName: spec.TerminalName}).Validate(); err != nil {
+		return nil, err
+	}
 	dir := shellDir()
+	if spec.WorkDir != "" {
+		dir = spec.WorkDir
+	}
+	tmux, ok := tmuxPath()
+	if spec.TerminalName != "" && !ok {
+		return nil, errors.New("named terminals require tmux in the guest image")
+	}
+	return buildShellCommand(spec, lu, loginShell(), tmux, dir), nil
+}
 
+func buildShellCommand(spec guestproto.ShellSpec, lu loginUser, shell, tmux, dir string) *exec.Cmd {
 	var cmd *exec.Cmd
-	if tmux, ok := tmuxPath(); ok {
+	if tmux != "" {
 		// new-session -A attaches to tmuxSession when it exists, else creates it
 		// in dir running `shell -l`. The trailing command is ignored on attach,
 		// so a reattach lands in the existing session untouched.
@@ -924,10 +952,14 @@ func shellCommand(spec guestproto.ShellSpec, lu loginUser) *exec.Cmd {
 		if spec.ControlMode {
 			args = append(args, "-CC")
 		}
-		args = append(args, "new-session", "-A", "-s", tmuxSession, "-c", dir, shell, "-l")
-		cmd = exec.CommandContext(context.Background(), tmux, args...) //nolint:gosec // launching the user's shell is the entire purpose
+		name := spec.TerminalName
+		if name == "" {
+			name = tmuxSession
+		}
+		args = append(args, "new-session", "-A", "-s", name, "-c", dir, shell, "-l")
+		cmd = exec.CommandContext(context.Background(), tmux, args...)
 	} else {
-		cmd = exec.CommandContext(context.Background(), shell, "-l") //nolint:gosec // launching a shell is the entire purpose
+		cmd = exec.CommandContext(context.Background(), shell, "-l")
 	}
 	cmd.Dir = dir
 	cmd.Env = shellEnv(spec, lu)

@@ -14,7 +14,9 @@ import (
 	"github.com/urfave/cli/v3"
 	"golang.org/x/term"
 
+	"github.com/joshjon/fletcher/internal/background"
 	fletcherv1 "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1"
+	"github.com/joshjon/fletcher/internal/runtime"
 )
 
 // shellStream is the client side of the interactive-shell bidi RPC.
@@ -23,24 +25,34 @@ type shellStream = connect.BidiStreamForClient[fletcherv1.ShellSessionRequest, f
 func sessionShellCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "shell",
-		Usage:     "open an interactive shell in a running session",
+		Usage:     "open or reattach a terminal in a running session",
 		ArgsUsage: "<ref>",
-		Flags:     []cli.Flag{socketFlag()},
+		Flags: []cli.Flag{
+			socketFlag(),
+			&cli.StringFlag{Name: "terminal", Usage: "durable terminal name (empty reattaches the default terminal)"},
+			&cli.StringFlag{Name: "workdir", Usage: "initial absolute guest directory for a new named terminal; requires --terminal"},
+		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ref := cmd.Args().First()
 			if ref == "" {
 				return errors.New("session ref (id or name) is required")
 			}
-			return runSessionShell(ctx, cmd, ref)
+			return runSessionShellTarget(ctx, cmd, ref, cmd.String("workdir"), cmd.String("terminal"))
 		},
 	}
 }
 
-// runSessionShell wires the local terminal to a PTY in the session VM: it puts
+// runSessionShellTarget wires the local terminal to a PTY in the session VM: it puts
 // stdin in raw mode, streams keystrokes up and terminal output down, and
 // forwards window resizes, restoring the terminal when the shell ends.
-func runSessionShell(ctx context.Context, cmd *cli.Command, ref string) error {
+func runSessionShellTarget(ctx context.Context, cmd *cli.Command, ref, dir, terminalName string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if err := (runtime.ShellSpec{WorkDir: dir, TerminalName: terminalName}).Validate(); err != nil {
+		return err
+	}
 	stream := newSessionsClient(cmd).ShellSession(ctx)
+	defer func() { _ = stream.CloseResponse() }()
 
 	stdinFd := int(os.Stdin.Fd())
 	// connect streams are not safe for concurrent Send; serialise stdin,
@@ -52,7 +64,10 @@ func runSessionShell(ctx context.Context, cmd *cli.Command, ref string) error {
 		return stream.Send(msg)
 	}
 
-	if err := send(shellStartMessage(ref, stdinFd)); err != nil {
+	start := shellStartMessage(ref, stdinFd)
+	start.GetStart().WorkDir = dir
+	start.GetStart().TerminalName = terminalName
+	if err := send(start); err != nil {
 		return err
 	}
 
@@ -65,11 +80,17 @@ func runSessionShell(ctx context.Context, cmd *cli.Command, ref string) error {
 		restore := func() { once.Do(func() { _ = term.Restore(stdinFd, old) }) }
 		defer restore()
 
-		stopResize := forwardResizes(stdinFd, send)
+		stopResize := forwardResizes(ctx, stdinFd, send)
 		defer stopResize()
 	}
 
-	go forwardStdin(stream, send)
+	stdin := os.Stdin
+	closeRequest := func() error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		return stream.CloseRequest()
+	}
+	background.GoNamed(ctx, "shell-input", func(context.Context) { forwardStdin(stdin, send, closeRequest) })
 
 	code, err := copyShellOutput(stream)
 	_ = stream.CloseResponse()
@@ -114,32 +135,41 @@ func termDim(v int) uint32 {
 
 // forwardResizes pushes a resize message on each SIGWINCH and returns a stop
 // function that tears the watcher down.
-func forwardResizes(stdinFd int, send func(*fletcherv1.ShellSessionRequest) error) func() {
+func forwardResizes(ctx context.Context, stdinFd int, send func(*fletcherv1.ShellSessionRequest) error) func() {
 	winch := make(chan os.Signal, 1)
 	signal.Notify(winch, syscall.SIGWINCH)
-	go func() {
-		for range winch {
-			w, h, err := term.GetSize(stdinFd)
-			if err != nil {
-				continue
+	background.GoNamed(ctx, "shell-window-resize", func(ctx context.Context) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-winch:
+				if !ok {
+					return
+				}
+				w, h, err := term.GetSize(stdinFd)
+				if err != nil {
+					continue
+				}
+				if err := send(&fletcherv1.ShellSessionRequest{
+					Msg: &fletcherv1.ShellSessionRequest_Resize{Resize: &fletcherv1.ShellResize{
+						Cols: termDim(w), Rows: termDim(h),
+					}},
+				}); err != nil {
+					return
+				}
 			}
-			_ = send(&fletcherv1.ShellSessionRequest{
-				Msg: &fletcherv1.ShellSessionRequest_Resize{Resize: &fletcherv1.ShellResize{
-					Cols: termDim(w),
-					Rows: termDim(h),
-				}},
-			})
 		}
-	}()
+	})
 	return func() { signal.Stop(winch); close(winch) }
 }
 
 // forwardStdin streams local keystrokes to the server until stdin ends, then
 // half-closes the send side.
-func forwardStdin(stream *shellStream, send func(*fletcherv1.ShellSessionRequest) error) {
+func forwardStdin(input io.Reader, send func(*fletcherv1.ShellSessionRequest) error, closeRequest func() error) {
 	buf := make([]byte, 4<<10)
 	for {
-		n, rerr := os.Stdin.Read(buf)
+		n, rerr := input.Read(buf)
 		if n > 0 {
 			if serr := send(&fletcherv1.ShellSessionRequest{
 				Msg: &fletcherv1.ShellSessionRequest_Stdin{Stdin: bytes.Clone(buf[:n])},
@@ -148,7 +178,7 @@ func forwardStdin(stream *shellStream, send func(*fletcherv1.ShellSessionRequest
 			}
 		}
 		if rerr != nil {
-			_ = stream.CloseRequest()
+			_ = closeRequest()
 			return
 		}
 	}

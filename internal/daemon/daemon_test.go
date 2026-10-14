@@ -74,6 +74,11 @@ func TestDaemonServesHealthAndShutsDownCleanly(t *testing.T) {
 	require.NotZero(t, storage.Msg.GetTotalBytes())
 	require.NotEmpty(t, storage.Msg.GetCategories())
 
+	projectsClient := fletcherv1connect.NewProjectServiceClient(testHTTPClient(cfg.SocketPath), "http://unix")
+	projects, err := projectsClient.ListProjects(ctx, connect.NewRequest(&fletcherv1.ListProjectsRequest{}))
+	require.NoError(t, err)
+	require.Empty(t, projects.Msg.GetProjects())
+
 	// The socket must be group-accessible (0660), not owner-only: under
 	// systemd the daemon runs as fletcher:fletcher and the operator reaches
 	// it via fletcher-group membership. A 0600 socket would deny every group

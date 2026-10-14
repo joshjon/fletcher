@@ -124,10 +124,11 @@ func (r *fakeRuntime) ReclaimOrphans(_ context.Context, _ []string) (int, error)
 
 // fakeHandle echoes the command back on stdout and counts Stop calls.
 type fakeHandle struct {
-	execs    []string
-	stopped  int
-	load     float64
-	restarts int64
+	lastShell runtime.ShellSpec
+	execs     []string
+	stopped   int
+	load      float64
+	restarts  int64
 }
 
 func (h *fakeHandle) Exec(_ context.Context, spec runtime.Spec, stdout, _ io.Writer) (runtime.Result, error) {
@@ -136,7 +137,8 @@ func (h *fakeHandle) Exec(_ context.Context, spec runtime.Spec, stdout, _ io.Wri
 	return runtime.Result{ExitCode: 0}, nil
 }
 
-func (h *fakeHandle) Shell(_ context.Context, _ runtime.ShellSpec, _ io.Reader, stdout io.Writer, _ <-chan runtime.WinSize) (int32, error) {
+func (h *fakeHandle) Shell(_ context.Context, spec runtime.ShellSpec, _ io.Reader, stdout io.Writer, _ <-chan runtime.WinSize) (int32, error) {
+	h.lastShell = spec
 	_, _ = io.WriteString(stdout, "shell")
 	return 0, nil
 }

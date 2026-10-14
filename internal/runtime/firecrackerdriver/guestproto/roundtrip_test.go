@@ -135,6 +135,16 @@ func TestRequestRoundTrip(t *testing.T) {
 			},
 		},
 		{
+			name: "named project terminal",
+			req: guestproto.Request{
+				Kind: guestproto.RequestShellTarget,
+				Shell: guestproto.ShellSpec{
+					Term: "xterm", Cols: 80, Rows: 24,
+					TerminalName: "project_123-build", WorkDir: "/volume/my project", ControlMode: true,
+				},
+			},
+		},
+		{
 			name: "write file",
 			req: guestproto.Request{
 				Kind: guestproto.RequestWriteFile,

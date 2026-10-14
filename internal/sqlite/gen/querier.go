@@ -24,12 +24,14 @@ type Querier interface {
 	CreateImageImport(ctx context.Context, arg CreateImageImportParams) error
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
 	CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, error)
+	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreatePublishedPort(ctx context.Context, arg CreatePublishedPortParams) (PublishedPort, error)
 	CreateReport(ctx context.Context, arg CreateReportParams) (Report, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateVolume(ctx context.Context, arg CreateVolumeParams) (Volume, error)
 	DeleteDeviceToken(ctx context.Context, token string) (int64, error)
 	DeletePeer(ctx context.Context, id string) (int64, error)
+	DeleteProject(ctx context.Context, id string) (int64, error)
 	DeletePublishedPort(ctx context.Context, id string) (int64, error)
 	DeletePublishedPortsBySession(ctx context.Context, sessionID string) error
 	DeleteSecret(ctx context.Context, name string) (int64, error)
@@ -45,6 +47,7 @@ type Querier interface {
 	GetPeer(ctx context.Context, id string) (Peer, error)
 	GetPeerByAPITokenHash(ctx context.Context, apiTokenHash *string) (Peer, error)
 	GetPeerByName(ctx context.Context, name string) (Peer, error)
+	GetProjectByRef(ctx context.Context, ref string) (Project, error)
 	GetPublishedPortBySessionPort(ctx context.Context, arg GetPublishedPortBySessionPortParams) (PublishedPort, error)
 	GetPublishedPublicPortByHost(ctx context.Context, host *string) (PublishedPort, error)
 	GetReport(ctx context.Context, id string) (Report, error)
@@ -61,6 +64,7 @@ type Querier interface {
 	ListJobs(ctx context.Context, arg ListJobsParams) ([]Job, error)
 	ListJobsByStatus(ctx context.Context, arg ListJobsByStatusParams) ([]Job, error)
 	ListPeers(ctx context.Context, arg ListPeersParams) ([]Peer, error)
+	ListProjects(ctx context.Context) ([]Project, error)
 	ListPublishedPorts(ctx context.Context) ([]PublishedPort, error)
 	ListPublishedPortsBySession(ctx context.Context, sessionID string) ([]PublishedPort, error)
 	ListReports(ctx context.Context, arg ListReportsParams) ([]Report, error)
@@ -79,6 +83,7 @@ type Querier interface {
 	UpdateImageImport(ctx context.Context, arg UpdateImageImportParams) error
 	UpdateJobSchedule(ctx context.Context, arg UpdateJobScheduleParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error
+	UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error)
 	UpdateSessionConfiguration(ctx context.Context, arg UpdateSessionConfigurationParams) error
 	UpdateSessionFork(ctx context.Context, arg UpdateSessionForkParams) error
 	UpdateSessionForks(ctx context.Context, arg UpdateSessionForksParams) error

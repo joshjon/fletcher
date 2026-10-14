@@ -74,6 +74,15 @@ type PendingApproval struct {
 	ExpiresAt      int64
 }
 
+type Project struct {
+	ID         string
+	Name       string
+	SessionID  string
+	WorkingDir string
+	CreatedAt  int64
+	UpdatedAt  int64
+}
+
 type PublishedPort struct {
 	ID         string
 	SessionID  string

@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package fletcher.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
+
+// ProjectService saves guest working directories in existing durable VMs without creating a new execution engine.
+service ProjectService {
+  // CreateProject registers a directory in an existing session without booting it or changing files.
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse) {}
+  // GetProject fetches a project by ID or name.
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse) {}
+  // ListProjects returns saved projects, newest first.
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse) {}
+  // UpdateProject renames a registration or changes its guest directory without modifying files or live terminals.
+  rpc UpdateProject(UpdateProjectRequest) returns (UpdateProjectResponse) {}
+  // DeleteProject removes only the registration, leaving the VM, files and running terminals untouched.
+  rpc DeleteProject(DeleteProjectRequest) returns (DeleteProjectResponse) {}
+  // OpenProject wakes the existing VM and checks the guest directory before the client opens a named terminal.
+  rpc OpenProject(OpenProjectRequest) returns (OpenProjectResponse) {}
+}
+
+// Project names a guest directory in one durable session; it is not a separate isolation boundary.
+message Project {
+  string id = 1;
+  string name = 2;
+  string session_id = 3;
+  // working_dir is an absolute path inside the guest, never a host path.
+  string working_dir = 4;
+  // Unix epoch seconds.
+  int64 created_at = 5;
+  int64 updated_at = 6;
+}
+
+message CreateProjectRequest {
+  string name = 1 [(buf.validate.field).string.pattern = "^[a-z0-9_][a-z0-9._-]{0,63}$"];
+  // session_ref selects an existing session by ID or name.
+  string session_ref = 2 [(buf.validate.field).string = {min_len: 1, max_bytes: 128}];
+  // working_dir defaults to /workspace; the directory must exist when opened.
+  string working_dir = 3 [(buf.validate.field).string.max_bytes = 4096];
+}
+
+message CreateProjectResponse {
+  Project project = 1;
+}
+
+message GetProjectRequest {
+  string ref = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 128}];
+}
+
+message GetProjectResponse {
+  Project project = 1;
+}
+
+message ListProjectsRequest {}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+}
+
+message UpdateProjectRequest {
+  string ref = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 128}];
+  // Empty fields leave the corresponding value unchanged.
+  string name = 2 [(buf.validate.field) = {ignore: IGNORE_IF_ZERO_VALUE, string: {pattern: "^[a-z0-9_][a-z0-9._-]{0,63}$"}}];
+  string working_dir = 3 [(buf.validate.field).string.max_bytes = 4096];
+}
+
+message UpdateProjectResponse {
+  Project project = 1;
+}
+
+message DeleteProjectRequest {
+  string ref = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 128}];
+}
+
+message DeleteProjectResponse {}
+
+message OpenProjectRequest {
+  string ref = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 128}];
+}
+
+message OpenProjectResponse {
+  Project project = 1;
+}

@@ -114,6 +114,8 @@ const (
 	// the connection is full-duplex: the host sends KindStdin/KindResize frames
 	// and the guest sends KindStdout frames, then one KindExit.
 	RequestShell RequestKind = "shell"
+	// RequestShellTarget opens a named terminal and requires a guest that supports shell targets.
+	RequestShellTarget RequestKind = "shell_target"
 	// RequestStat asks the guest for a liveness sample (Stat); the host uses it
 	// to tell a working session from an idle one before auto-stopping.
 	RequestStat RequestKind = "stat"
@@ -193,6 +195,22 @@ type ErrorResponse struct {
 
 // WriteError sends a generic ErrorResponse as a length-prefixed JSON message.
 func WriteError(w io.Writer, msg string) error { return writeJSON(w, ErrorResponse{Error: msg}) }
+
+// WriteShellReady acknowledges support for named terminals before shell frames
+// begin. Older guests answer an unknown request with the same JSON error shape.
+func WriteShellReady(w io.Writer) error { return writeJSON(w, ErrorResponse{}) }
+
+// ReadShellReady reads a named-terminal acknowledgement or an older guest's error.
+func ReadShellReady(r io.Reader) error {
+	var response ErrorResponse
+	if err := readJSON(r, &response); err != nil {
+		return err
+	}
+	if response.Error != "" {
+		return errors.New(response.Error)
+	}
+	return nil
+}
 
 // WriteDirListing sends a DirListing as a length-prefixed JSON message.
 func WriteDirListing(w io.Writer, l DirListing) error { return writeJSON(w, l) }
@@ -280,6 +298,10 @@ func ReadDialPort(r io.Reader) (uint16, error) {
 
 // ShellSpec parameterises an interactive PTY session.
 type ShellSpec struct {
+	// WorkDir is the initial absolute guest directory for a named terminal.
+	WorkDir string `json:"work_dir,omitempty"`
+	// TerminalName selects a durable terminal rather than the legacy main terminal.
+	TerminalName string `json:"terminal_name,omitempty"`
 	// Term is the TERM value set inside the PTY (e.g. xterm-256color).
 	Term string `json:"term"`
 	// Cols and Rows are the initial window size.

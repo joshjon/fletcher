@@ -17,6 +17,7 @@ import (
 
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 
+	"github.com/joshjon/fletcher/internal/background"
 	"github.com/joshjon/fletcher/internal/errs"
 	"github.com/joshjon/fletcher/internal/forkauth"
 	fcruntime "github.com/joshjon/fletcher/internal/runtime"
@@ -477,6 +478,9 @@ func (s *fcSession) FileOp(ctx context.Context, spec fcruntime.FileOpSpec) error
 // keystrokes (stdin) and window resizes to the guest as frames, and writes the
 // guest's terminal output to stdout, returning the shell's exit code.
 func (s *fcSession) Shell(ctx context.Context, spec fcruntime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan fcruntime.WinSize) (int32, error) {
+	if err := spec.Validate(); err != nil {
+		return 0, err
+	}
 	conn, err := dialGuest(ctx, s.vsockUDS, guestproto.ControlPort)
 	if err != nil {
 		return 0, fmt.Errorf("firecracker: connect session: %w", err)
@@ -487,12 +491,31 @@ func (s *fcSession) Shell(ctx context.Context, spec fcruntime.ShellSpec, stdin i
 	if len(env) == 0 {
 		env = s.env
 	}
-	req := guestproto.Request{
-		Kind:  guestproto.RequestShell,
-		Shell: guestproto.ShellSpec{Term: spec.Term, Cols: spec.Cols, Rows: spec.Rows, Env: env, ControlMode: spec.ControlMode},
+	kind := guestproto.RequestShell
+	if spec.TerminalName != "" || spec.WorkDir != "" {
+		// Older guests must reject named targets rather than silently attaching
+		// the legacy main terminal in the wrong directory.
+		kind = guestproto.RequestShellTarget
 	}
+	req := guestproto.Request{
+		Kind: kind,
+		Shell: guestproto.ShellSpec{
+			Term: spec.Term, Cols: spec.Cols, Rows: spec.Rows, Env: env,
+			ControlMode: spec.ControlMode, WorkDir: spec.WorkDir, TerminalName: spec.TerminalName,
+		},
+	}
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	if err := guestproto.WriteRequest(conn, req); err != nil {
 		return 0, fmt.Errorf("firecracker: send shell: %w", err)
+	}
+	if req.Kind == guestproto.RequestShellTarget {
+		if err := guestproto.ReadShellReady(conn); err != nil {
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
+			}
+			return 0, errs.Newf(errs.CategoryFailedPrecondition, "named terminals require a current guest; cold-restart the session with an updated daemon guest: %v", err)
+		}
 	}
 
 	// stdin and resize both write frames; serialise them.
@@ -505,13 +528,16 @@ func (s *fcSession) Shell(ctx context.Context, spec fcruntime.ShellSpec, stdin i
 
 	pumpCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	go pumpStdin(pumpCtx, stdin, writeFrame)
-	go pumpResize(pumpCtx, resize, writeFrame)
+	background.GoNamed(pumpCtx, "shell-stdin", func(ctx context.Context) { pumpStdin(ctx, stdin, writeFrame) })
+	background.GoNamed(pumpCtx, "shell-resize", func(ctx context.Context) { pumpResize(ctx, resize, writeFrame) })
 
 	// Guest -> host: terminal output, then a final exit frame.
 	for {
 		kind, payload, rerr := guestproto.ReadFrame(conn)
 		if rerr != nil {
+			if ctx.Err() != nil {
+				return 0, ctx.Err()
+			}
 			if errors.Is(rerr, io.EOF) {
 				return 0, nil
 			}

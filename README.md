@@ -21,6 +21,11 @@ Pre-v0.1.0. The daemon supports durable Firecracker sessions, image deployment,
 hibernation, SSH access and port publishing. Native iOS and macOS clients are
 developed in a separate repository.
 
+The daemon and CLI also support [saved projects](docs/PROJECTS.md): reopen an
+existing development VM and guest directory with named terminals. The native
+project UI is implemented separately; Apple builds and device verification are
+still pending.
+
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for implementation, verification and
 release status. Until a release is published, [build from source](#building-from-source).
 

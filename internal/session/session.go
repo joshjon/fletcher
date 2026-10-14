@@ -1414,6 +1414,9 @@ func (m *Manager) Rollback(ctx context.Context, ref string) (Session, error) {
 // Shell opens an interactive PTY in a running session, bridging the caller's
 // stdin/stdout and window resizes to the VM, and returns the shell's exit code.
 func (m *Manager) Shell(ctx context.Context, ref string, spec runtime.ShellSpec, stdin io.Reader, stdout io.Writer, resize <-chan runtime.WinSize) (int32, error) {
+	if err := spec.Validate(); err != nil {
+		return 0, err
+	}
 	ctx, finish, err := m.beginOperation(ctx)
 	if err != nil {
 		return 0, err

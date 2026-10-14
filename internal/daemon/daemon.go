@@ -43,6 +43,7 @@ import (
 	"github.com/joshjon/fletcher/internal/network/portmap"
 	"github.com/joshjon/fletcher/internal/network/wireguard"
 	"github.com/joshjon/fletcher/internal/peer"
+	"github.com/joshjon/fletcher/internal/project"
 	"github.com/joshjon/fletcher/internal/report"
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver"
@@ -674,6 +675,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		hostManager:      host.NewManager(ctx, hostOpts),
 		jobs:             jobSvc,
 		sessions:         sessionMgr,
+		projects:         project.NewManager(queries, sessionMgr),
 		volumes:          volumeMgr,
 		credentials:      sessionMgr,
 		events:           eventBus,
@@ -776,6 +778,7 @@ type connectDeps struct {
 	hostManager  *host.Manager
 	jobs         api.JobsBackend
 	sessions     api.SessionsBackend
+	projects     api.ProjectsBackend
 	volumes      api.VolumesBackend
 	credentials  api.CredentialsBackend
 	events       *events.Bus
@@ -1163,6 +1166,12 @@ func newHTTPServer(startedAt int64, deps connectDeps, logger *slog.Logger) *http
 		}), interceptors,
 	)
 	mux.Handle(sessionsPath, sessionsHandler)
+
+	if deps.projects != nil {
+		path, handler := fletcherv1connect.NewProjectServiceHandler(api.NewProjectsService(deps.projects), interceptors,
+			connect.WithInterceptors(api.ValidationInterceptor()))
+		mux.Handle(path, handler)
+	}
 
 	secretsPath, secretsHandler := fletcherv1connect.NewSecretServiceHandler(
 		api.NewSecretsService(deps.secrets), interceptors,

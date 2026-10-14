@@ -2035,7 +2035,16 @@ type ShellStart struct {
 	// natively with its own scrollback (native scroll, no copy-mode) while
 	// keeping tmux durability. A plain client leaves this false and gets the
 	// rendered-terminal stream as before.
-	ControlMode   bool `protobuf:"varint,5,opt,name=control_mode,json=controlMode,proto3" json:"control_mode,omitempty"`
+	ControlMode bool `protobuf:"varint,5,opt,name=control_mode,json=controlMode,proto3" json:"control_mode,omitempty"`
+	// work_dir is the initial absolute guest directory for a new named terminal.
+	// Reattaching leaves its current directory and running program untouched.
+	// Requires terminal_name; empty keeps the guest's default directory.
+	WorkDir string `protobuf:"bytes,6,opt,name=work_dir,json=workDir,proto3" json:"work_dir,omitempty"`
+	// terminal_name selects a durable terminal in this VM; empty keeps the
+	// legacy main terminal. Named terminals require tmux and an updated guest.
+	// Allowed characters are letters, digits, '_' and '-', at most 128 bytes.
+	// Terminals in the same VM share its files, credentials and isolation boundary.
+	TerminalName  string `protobuf:"bytes,7,opt,name=terminal_name,json=terminalName,proto3" json:"terminal_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2103,6 +2112,20 @@ func (x *ShellStart) GetControlMode() bool {
 		return x.ControlMode
 	}
 	return false
+}
+
+func (x *ShellStart) GetWorkDir() string {
+	if x != nil {
+		return x.WorkDir
+	}
+	return ""
+}
+
+func (x *ShellStart) GetTerminalName() string {
+	if x != nil {
+		return x.TerminalName
+	}
+	return ""
 }
 
 type ShellResize struct {
@@ -3756,14 +3779,16 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\x05start\x18\x01 \x01(\v2\x17.fletcher.v1.ShellStartH\x00R\x05start\x12\x16\n" +
 	"\x05stdin\x18\x02 \x01(\fH\x00R\x05stdin\x122\n" +
 	"\x06resize\x18\x03 \x01(\v2\x18.fletcher.v1.ShellResizeH\x00R\x06resizeB\x05\n" +
-	"\x03msg\"}\n" +
+	"\x03msg\"\xbd\x01\n" +
 	"\n" +
 	"ShellStart\x12\x10\n" +
 	"\x03ref\x18\x01 \x01(\tR\x03ref\x12\x12\n" +
 	"\x04term\x18\x02 \x01(\tR\x04term\x12\x12\n" +
 	"\x04cols\x18\x03 \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\x04 \x01(\rR\x04rows\x12!\n" +
-	"\fcontrol_mode\x18\x05 \x01(\bR\vcontrolMode\"5\n" +
+	"\fcontrol_mode\x18\x05 \x01(\bR\vcontrolMode\x12\x19\n" +
+	"\bwork_dir\x18\x06 \x01(\tR\aworkDir\x12#\n" +
+	"\rterminal_name\x18\a \x01(\tR\fterminalName\"5\n" +
 	"\vShellResize\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\x02 \x01(\rR\x04rows\"R\n" +

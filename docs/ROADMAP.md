@@ -1951,6 +1951,47 @@ Open points to settle during the build: chunk size + the upload end-of-stream ma
 (known-size header vs a terminator frame), an optional SHA-256 integrity check in the
 final ack, and whether to cap transfer size.
 
+### Saved project environments - IN PROGRESS
+
+**Daemon, CLI and native UI implemented; Apple builds and hardware verification pending.**
+A saved project is a durable registration pointing at an existing development VM
+and an absolute guest working directory. It reuses the session lifecycle and
+runtime interfaces, not a new execution engine (DESIGN sections 4, 5 and 10).
+See [PROJECTS.md](PROJECTS.md) for behavior, CLI examples and security boundaries.
+
+Implemented:
+- Persistent project CRUD and Open through SQLite, Connect RPCs and the CLI.
+  Registration does not create compute or run setup. Open starts the recorded
+  session and verifies its directory without silently substituting another path.
+- Stable, project-ID-prefixed tmux terminal names. New labels open terminals in
+  the same VM; repeating a label reattaches its terminal. Existing clients keep
+  their legacy `main` terminal. Older guests reject named targets without fallback.
+- Registration deletion leaves the VM, files and processes intact. Session
+  deletion cascades registrations. Concurrent partial updates preserve omitted
+  fields.
+- Tests cover restart persistence, VM/fork reuse, deletion semantics, validation,
+  API and CLI forwarding, terminal command selection and older-guest rejection.
+- Native-client project registration/navigation, editing/removal, Open and New
+  terminal through the same RPCs. Shared-VM isolation is visible and VM creation
+  stays separate. Native tmux capture, output and input use the discovered pane
+  rather than assuming `%0`.
+
+Remaining:
+- Run native Swift tests and both Apple target builds with concurrency checking;
+  neither is available on the Linux implementation host. Check reconnect,
+  non-default panes, accessibility and terminal-sheet layout on devices.
+- Verify reuse and named-terminal reconnect on real microVMs, including guest
+  upgrades and stop/start. Disk durability does not promise cold-boot process
+  continuity.
+- Safe host-folder import: copy selected data into the guest, preserve the host
+  source, bound transfers, reject unsafe paths/symlinks, support cancellation,
+  and return changes through explicit review/export. No live mounts.
+- Prepared-image reuse: tools and non-secret configuration only, not live
+  subscription credentials. Make rootfs versus persistent-volume scope explicit.
+
+Host execution is not included. Separate VMs remain the independent isolation
+boundary; ordinary tasks and terminals can share a VM when the user chooses.
+
 ### Milestone 16 - credential seeding ("log in once") - AGENT SEEDING REMOVED (2026-06-18); git seeding kept
 
 **Outcome (2026-06-18): agent login seeding removed.** After the root-cause finding

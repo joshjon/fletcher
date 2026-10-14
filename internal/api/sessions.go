@@ -515,6 +515,10 @@ func (s *SessionsService) ShellSession(ctx context.Context, stream *connect.Bidi
 		return errs.New(errs.CategoryInvalidArgument, "first shell message must carry start with a session ref")
 	}
 
+	if err := (runtime.ShellSpec{WorkDir: start.GetWorkDir(), TerminalName: start.GetTerminalName()}).Validate(); err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	// stdin: client messages feed a pipe the backend reads as the PTY's stdin.
 	pr, pw := io.Pipe()
 	resize := make(chan runtime.WinSize, 8)
@@ -553,10 +557,12 @@ func (s *SessionsService) ShellSession(ctx context.Context, stream *connect.Bidi
 	})
 
 	spec := runtime.ShellSpec{
-		Term:        start.GetTerm(),
-		Cols:        clampUint16(start.GetCols()),
-		Rows:        clampUint16(start.GetRows()),
-		ControlMode: start.GetControlMode(),
+		Term:         start.GetTerm(),
+		Cols:         clampUint16(start.GetCols()),
+		Rows:         clampUint16(start.GetRows()),
+		ControlMode:  start.GetControlMode(),
+		WorkDir:      start.GetWorkDir(),
+		TerminalName: start.GetTerminalName(),
 	}
 	code, err := s.backend.Shell(ctx, start.GetRef(), spec, pr, stdout, resize)
 	_ = pr.Close() // unblock the receive goroutine's pipe writes

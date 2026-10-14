@@ -381,6 +381,15 @@ message ShellStart {
   // keeping tmux durability. A plain client leaves this false and gets the
   // rendered-terminal stream as before.
   bool control_mode = 5;
+  // work_dir is the initial absolute guest directory for a new named terminal.
+  // Reattaching leaves its current directory and running program untouched.
+  // Requires terminal_name; empty keeps the guest's default directory.
+  string work_dir = 6;
+  // terminal_name selects a durable terminal in this VM; empty keeps the
+  // legacy main terminal. Named terminals require tmux and an updated guest.
+  // Allowed characters are letters, digits, '_' and '-', at most 128 bytes.
+  // Terminals in the same VM share its files, credentials and isolation boundary.
+  string terminal_name = 7;
 }
 
 message ShellResize {
