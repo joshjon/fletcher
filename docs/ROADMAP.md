@@ -417,7 +417,7 @@ logs|enable|disable` shelling out to `systemctl` / `journalctl -u fletcher`,
 prompting for sudo only when needed; degrade gracefully on non-systemd hosts;
 reuse `doctor`'s systemctl remediation strings so the two never drift. systemd
 stays the supervisor - this is a thin facade, not a reimplementation of init
-(which CLAUDE.md and DESIGN §5 rule out).
+(which AGENTS.md and DESIGN §5 rule out).
 
 **Acceptance.** Someone who has never typed `systemctl` can install, start,
 inspect, and tail Fletcher entirely through `fletcher` verbs.

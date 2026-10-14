@@ -197,7 +197,7 @@ func wrap(s string, width int) []string {
 
 // statusIcon renders the per-result status as a single coloured glyph.
 // Unicode symbols here are deliberate UI affordances (not punctuation,
-// which the CLAUDE.md writing rule restricts to ASCII).
+// which the AGENTS.md writing rule restricts to ASCII).
 func statusIcon(s doctor.Status) string {
 	switch s {
 	case doctor.StatusOK:
