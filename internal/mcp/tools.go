@@ -16,6 +16,7 @@ import (
 
 	"github.com/joshjon/fletcher/internal/approval"
 	"github.com/joshjon/fletcher/internal/buildinfo"
+	"github.com/joshjon/fletcher/internal/egress"
 	"github.com/joshjon/fletcher/internal/netguard"
 )
 
@@ -52,11 +53,7 @@ func daemonHealthTool(startedAt time.Time) Tool {
 	}
 }
 
-// httpGetTool is the daemon-mediated egress shim. Agents inside a job's
-// fork have no network egress (per DESIGN.md §5); this tool lets them ask
-// the daemon to perform a GET on their behalf. Real egress policy will be
-// layered on as approvals + allowlists land in later phases - for now any
-// http/https URL is allowed.
+// httpGetTool performs reads through the authenticated fork policy and shared LAN guard.
 func httpGetTool(httpClient *http.Client) Tool {
 	return Tool{
 		Spec: mcpgo.NewTool("http_get",
@@ -94,15 +91,13 @@ func httpGetTool(httpClient *http.Client) Tool {
 	}
 }
 
-// httpRequestTool generalises httpGetTool to non-GET methods so agents can call
-// JSON APIs (search backends, REST endpoints) through the daemon, still behind
-// the SSRF guard in NewEgressHTTPClient. Method defaults to GET; body and
-// headers are optional; the response body is size-capped like http_get.
-// Per-host egress policy (the Phase B forward-proxy) layers on top of this.
-func httpRequestTool(httpClient *http.Client) Tool {
+// httpRequestTool applies fork policy to reads and requires approval plus durable idempotency for writes.
+func httpRequestTool(httpClient *http.Client, writes *HTTPWrites) Tool {
 	return Tool{
 		Spec: mcpgo.NewTool("http_request",
-			mcpgo.WithDescription("Perform an HTTP request through the daemon (the fork has no direct network egress). Supports GET/POST/PUT/PATCH/DELETE/HEAD with an optional body and headers. Returns the status and response body as text."),
+			mcpgo.WithDescription("Perform an HTTP request through the daemon under this fork's egress policy. GET/HEAD are reads. POST/PUT/PATCH/DELETE require human approval, a stable idempotency_key, and justification. Reuse the same key for retries of the same request. Unknown outcomes are never automatically repeated."),
+			mcpgo.WithString("idempotency_key", mcpgo.Description("Stable 16-80 character operation key for a write. Reuse on retries.")),
+			mcpgo.WithString("justification", mcpgo.Description("Why this HTTP write is needed, shown on its approval card.")),
 			mcpgo.WithString("url",
 				mcpgo.Required(),
 				mcpgo.Description("Absolute http or https URL."),
@@ -148,17 +143,19 @@ func httpRequestTool(httpClient *http.Client) Tool {
 				}
 			}
 
-			resp, err := httpClient.Do(httpReq)
-			if err != nil {
-				return mcpgo.NewToolResultError(fmt.Sprintf("perform request: %s", err)), nil
+			var result string
+			switch {
+			case method == http.MethodGet || method == http.MethodHead:
+				result, err = performHTTPRequest(httpClient, httpReq)
+			case writes == nil:
+				err = errors.New("http writes are unavailable without persistent approval and idempotency support")
+			default:
+				result, err = writes.Execute(ctx, httpReq, req.GetString("idempotency_key", ""), req.GetString("justification", ""))
 			}
-			defer func() { _ = resp.Body.Close() }()
-
-			body, err := io.ReadAll(io.LimitReader(resp.Body, maxEgressBody))
 			if err != nil {
-				return mcpgo.NewToolResultError(fmt.Sprintf("read body: %s", err)), nil
+				return mcpgo.NewToolResultError(err.Error()), nil
 			}
-			return mcpgo.NewToolResultText(fmt.Sprintf("status=%d\n%s", resp.StatusCode, string(body))), nil
+			return mcpgo.NewToolResultText(result), nil
 		},
 	}
 }
@@ -660,6 +657,10 @@ type BuiltinToolDeps struct {
 	// HTTPClient serves the http_get/http_request tools; nil uses the default
 	// egress client with a 30s timeout.
 	HTTPClient *http.Client
+	// Allowlist is shared with the daemon forward proxy.
+	Allowlist egress.Allowlist
+	// HTTPWrites supplies approval and persistent idempotency for HTTP writes.
+	HTTPWrites *HTTPWrites
 	// Approvals backs request_approval; nil skips it (and the image tools,
 	// which gate on approvals).
 	Approvals ApprovalBackend
@@ -677,9 +678,10 @@ func RegisterBuiltinTools(srv *Server, deps BuiltinToolDeps) {
 	if httpClient == nil {
 		httpClient = NewEgressHTTPClient(30 * time.Second)
 	}
+	httpClient = policyHTTPClient(httpClient, deps.Allowlist)
 	srv.RegisterTool(daemonHealthTool(deps.StartedAt))
 	srv.RegisterTool(httpGetTool(httpClient))
-	srv.RegisterTool(httpRequestTool(httpClient))
+	srv.RegisterTool(httpRequestTool(httpClient, deps.HTTPWrites))
 	if deps.Approvals != nil {
 		srv.RegisterTool(requestApprovalTool(deps.Approvals))
 		if deps.Publisher != nil {

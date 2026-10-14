@@ -2094,6 +2094,15 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**MCP egress policy and HTTP writes - code complete, hardware verification
+pending.** Host-side Firecracker and per-job runc relays authenticate fork identity
+without exposing signing credentials. MCP HTTP requests enforce boot-time policy,
+including redirect targets. runc's forward proxy now also honors per-job policy.
+HTTP writes require approval and persistent per-fork idempotency records; completed
+results replay, pending approvals resume, and ambiguous sends are never repeated
+automatically. Race tests cover attribution, denial, retries and restart recovery.
+See [MCP egress safety](MCP-SECURITY.md) for guarantees and verification limits.
+
 **Concurrent redeploy/rollback - DONE.** Both operations re-read the session
 under its lifecycle lock before selecting current and retired forks. Overlapping
 redeploys keep the immediately preceding version and reclaim older forks;

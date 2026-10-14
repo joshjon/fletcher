@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"runtime"
 
+	"github.com/joshjon/fletcher/internal/forkauth"
 	fcruntime "github.com/joshjon/fletcher/internal/runtime"
 )
 
@@ -23,6 +24,7 @@ type Forward struct {
 	ListenAddr string
 	HostSocket string
 	Egress     bool
+	MCP        bool
 }
 
 // Options matches the Linux build's surface so call sites need no build guards.
@@ -32,6 +34,7 @@ type Options struct {
 	RunDir            string
 	Forwards          []Forward
 	EgressOpenSocket  string
+	ForkAuthority     *forkauth.Authority
 	VcpuCount         int64
 	MemSizeMib        int64
 	Logger            *slog.Logger

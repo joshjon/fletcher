@@ -42,6 +42,16 @@ type Job struct {
 	Gateway      string
 }
 
+type McpEgressOperation struct {
+	CallerID     string
+	OperationKey string
+	RequestHash  string
+	State        string
+	ApprovalID   *string
+	Result       string
+	UpdatedAt    int64
+}
+
 type Peer struct {
 	ID           string
 	Name         string

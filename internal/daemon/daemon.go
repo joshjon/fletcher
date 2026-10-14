@@ -32,6 +32,7 @@ import (
 	"github.com/joshjon/fletcher/internal/buildinfo"
 	"github.com/joshjon/fletcher/internal/egress"
 	"github.com/joshjon/fletcher/internal/events"
+	"github.com/joshjon/fletcher/internal/forkauth"
 	"github.com/joshjon/fletcher/internal/gateway"
 	"github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1/fletcherv1connect"
 	"github.com/joshjon/fletcher/internal/host"
@@ -413,7 +414,8 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	if err != nil {
 		return nil, fmt.Errorf("init snapshot driver: %w", err)
 	}
-	rtDriver, err := buildRuntimeDriver(cfg, logger)
+	forkAuthority := forkauth.New()
+	rtDriver, err := buildRuntimeDriver(cfg, logger, forkAuthority)
 	if err != nil {
 		return nil, fmt.Errorf("init runtime driver: %w", err)
 	}
@@ -601,11 +603,19 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	// Reports: structured results agents post; stored, event-published, and
 	// pushed (the surviving half of the inbox idea).
 	reportSvc := report.NewService(queries, eventBus)
+	httpWrites, err := fletchermcp.NewHTTPWrites(ctx, queries, fletchermcp.HTTPWritesOptions{
+		Approvals: approvalSvc, Allowlist: egress.NewAllowlist(defaultEgressAllowlist),
+	})
+	if err != nil {
+		return nil, err
+	}
 	fletchermcp.RegisterBuiltinTools(mcpServer, fletchermcp.BuiltinToolDeps{
-		StartedAt: startedAt,
-		Approvals: approvalSvc,
-		Publisher: publisher,
-		Reports:   &reportPublisher{reports: reportSvc, sessions: sessionMgr},
+		StartedAt:  startedAt,
+		Approvals:  approvalSvc,
+		Publisher:  publisher,
+		Reports:    &reportPublisher{reports: reportSvc, sessions: sessionMgr},
+		Allowlist:  egress.NewAllowlist(defaultEgressAllowlist),
+		HTTPWrites: httpWrites,
 	})
 
 	// Published-port broker: forwards a session's published port to the service
@@ -730,7 +740,7 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 		publicWeb:       publicWeb,
 		connectSrv:      connectSrv,
 		gatewaySrv:      newGatewayHTTPServer(gw),
-		mcpSrv:          newMCPHTTPServer(mcpServer),
+		mcpSrv:          newMCPHTTPServer(mcpServer, forkAuthority),
 		connectLn:       connectLn,
 		gatewayLn:       gatewayLn,
 		mcpLn:           mcpLn,
@@ -1350,10 +1360,10 @@ func newGatewayHTTPServer(gw *gateway.Gateway) *http.Server {
 	}
 }
 
-func newMCPHTTPServer(mcp *fletchermcp.Server) *http.Server {
+func newMCPHTTPServer(mcp *fletchermcp.Server, authority *forkauth.Authority) *http.Server {
 	streamable := mcpserver.NewStreamableHTTPServer(mcp.Inner())
 	return &http.Server{
-		Handler:           streamable,
+		Handler:           authority.Authenticate(streamable),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 }
@@ -2094,7 +2104,7 @@ var defaultEgressAllowlist = []string{
 }
 
 // buildRuntimeDriver constructs the runtime.Driver chosen by cfg.
-func buildRuntimeDriver(cfg Config, logger *slog.Logger) (runtime.Driver, error) {
+func buildRuntimeDriver(cfg Config, logger *slog.Logger, authority *forkauth.Authority) (runtime.Driver, error) {
 	kind := cfg.RuntimeKind
 	if kind == "" {
 		kind = defaultDriverKind
@@ -2108,12 +2118,14 @@ func buildRuntimeDriver(cfg Config, logger *slog.Logger) (runtime.Driver, error)
 			return nil, fmt.Errorf("resolve daemon binary for fork forwarder: %w", err)
 		}
 		return runcdriver.New(runcdriver.Options{
-			Binary:          cfg.RuncBinary,
-			ForwarderBinary: self,
+			Binary:           cfg.RuncBinary,
+			ForwarderBinary:  self,
+			ForkAuthority:    authority,
+			EgressOpenSocket: proxyOpenSocketPath(cfg),
 			Forwards: []runcdriver.Forward{
 				{Listen: cfg.GatewayListenAddr, HostSocket: gatewaySocketPath(cfg)},
-				{Listen: cfg.MCPListenAddr, HostSocket: mcpSocketPath(cfg)},
-				{Listen: proxyListenAddr(cfg), HostSocket: proxySocketPath(cfg)},
+				{Listen: cfg.MCPListenAddr, HostSocket: mcpSocketPath(cfg), MCP: true},
+				{Listen: proxyListenAddr(cfg), HostSocket: proxySocketPath(cfg), Egress: true},
 			},
 		})
 	case "firecracker":
@@ -2132,10 +2144,11 @@ func buildRuntimeDriver(cfg Config, logger *slog.Logger) (runtime.Driver, error)
 			// bind-mounted socket: the agent reaches only the daemon, no egress.
 			Forwards: []firecrackerdriver.Forward{
 				{ListenAddr: cfg.GatewayListenAddr, HostSocket: gatewaySocketPath(cfg)},
-				{ListenAddr: cfg.MCPListenAddr, HostSocket: mcpSocketPath(cfg)},
+				{ListenAddr: cfg.MCPListenAddr, HostSocket: mcpSocketPath(cfg), MCP: true},
 				{ListenAddr: proxyListenAddr(cfg), HostSocket: proxySocketPath(cfg), Egress: true},
 			},
 			EgressOpenSocket: proxyOpenSocketPath(cfg),
+			ForkAuthority:    authority,
 			MemSizeMib:       int64(cfg.VMMemoryMB),
 			VcpuCount:        2,
 			Logger:           logger,

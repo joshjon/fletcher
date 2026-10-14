@@ -11,6 +11,7 @@ import (
 type Querier interface {
 	ApproveApproval(ctx context.Context, arg ApproveApprovalParams) (int64, error)
 	CancelJob(ctx context.Context, arg CancelJobParams) (int64, error)
+	ClaimEgressOperation(ctx context.Context, arg ClaimEgressOperationParams) (int64, error)
 	CountApprovals(ctx context.Context) (int64, error)
 	CountApprovalsByStatus(ctx context.Context, status string) (int64, error)
 	CountImageReferences(ctx context.Context, name string) (int64, error)
@@ -19,6 +20,7 @@ type Querier interface {
 	CountPeers(ctx context.Context) (int64, error)
 	CountSessions(ctx context.Context) (int64, error)
 	CreateApproval(ctx context.Context, arg CreateApprovalParams) (PendingApproval, error)
+	CreateEgressOperation(ctx context.Context, arg CreateEgressOperationParams) error
 	CreateImageImport(ctx context.Context, arg CreateImageImportParams) error
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
 	CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, error)
@@ -37,6 +39,7 @@ type Querier interface {
 	DenyApproval(ctx context.Context, arg DenyApprovalParams) (int64, error)
 	ExpirePendingApprovals(ctx context.Context, arg ExpirePendingApprovalsParams) (int64, error)
 	GetApproval(ctx context.Context, id string) (PendingApproval, error)
+	GetEgressOperation(ctx context.Context, arg GetEgressOperationParams) (McpEgressOperation, error)
 	GetImageImport(ctx context.Context, id string) (ImageImport, error)
 	GetJob(ctx context.Context, id string) (Job, error)
 	GetPeer(ctx context.Context, id string) (Peer, error)
@@ -48,6 +51,7 @@ type Querier interface {
 	GetSecret(ctx context.Context, name string) ([]byte, error)
 	GetSessionByRef(ctx context.Context, ref string) (Session, error)
 	GetVolumeByRef(ctx context.Context, ref string) (Volume, error)
+	InterruptEgressOperations(ctx context.Context, updatedAt int64) error
 	InterruptImageImports(ctx context.Context, updatedAt int64) error
 	ListApprovals(ctx context.Context, arg ListApprovalsParams) ([]PendingApproval, error)
 	ListApprovalsByStatus(ctx context.Context, arg ListApprovalsByStatusParams) ([]PendingApproval, error)
@@ -70,6 +74,8 @@ type Querier interface {
 	MarkJobSucceeded(ctx context.Context, arg MarkJobSucceededParams) (int64, error)
 	SetJobNextRun(ctx context.Context, arg SetJobNextRunParams) error
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	UpdateEgressApproval(ctx context.Context, arg UpdateEgressApprovalParams) error
+	UpdateEgressResult(ctx context.Context, arg UpdateEgressResultParams) error
 	UpdateImageImport(ctx context.Context, arg UpdateImageImportParams) error
 	UpdateJobSchedule(ctx context.Context, arg UpdateJobScheduleParams) error
 	UpdateJobStatus(ctx context.Context, arg UpdateJobStatusParams) error

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/joshjon/fletcher/internal/audit"
+	"github.com/joshjon/fletcher/internal/forkauth"
 	fletchermcp "github.com/joshjon/fletcher/internal/mcp"
 )
 
@@ -92,7 +93,7 @@ func TestHTTPGetToolPerformsEgressAndRecordsAudit(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 
-	ctx := t.Context()
+	ctx := forkauth.WithCaller(t.Context(), forkauth.Caller{ID: "job_example", Policy: "open"})
 	require.NoError(t, c.Start(ctx))
 	_, err = c.Initialize(ctx, mcpgo.InitializeRequest{})
 	require.NoError(t, err)
@@ -155,7 +156,7 @@ func TestHTTPRequestToolSendsMethodBodyAndHeaders(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 
-	ctx := t.Context()
+	ctx := forkauth.WithCaller(t.Context(), forkauth.Caller{ID: "job_example", Policy: "open"})
 	require.NoError(t, c.Start(ctx))
 	_, err = c.Initialize(ctx, mcpgo.InitializeRequest{})
 	require.NoError(t, err)
@@ -165,7 +166,7 @@ func TestHTTPRequestToolSendsMethodBodyAndHeaders(t *testing.T) {
 			Name: "http_request",
 			Arguments: map[string]any{
 				"url":          upstream.URL,
-				"method":       "post",
+				"method":       "get",
 				"body":         `{"q":"hi"}`,
 				"headers_json": `{"content-type":"application/json"}`,
 			},
@@ -175,7 +176,7 @@ func TestHTTPRequestToolSendsMethodBodyAndHeaders(t *testing.T) {
 	require.False(t, resp.IsError, "tool returned error: %v", resp.Content)
 	require.Contains(t, textOf(resp), "status=200")
 	require.Contains(t, textOf(resp), "created")
-	require.Equal(t, http.MethodPost, gotMethod)
+	require.Equal(t, http.MethodGet, gotMethod)
 	require.Equal(t, `{"q":"hi"}`, gotBody)
 	require.Equal(t, "application/json", gotContentType)
 

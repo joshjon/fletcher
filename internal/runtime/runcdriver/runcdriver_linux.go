@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,17 +29,21 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/joshjon/fletcher/internal/egress"
+	"github.com/joshjon/fletcher/internal/forkauth"
 	"github.com/joshjon/fletcher/internal/runtime"
 )
 
 // Driver is a runtime.Driver that runs jobs as OCI containers via runc.
 type Driver struct {
-	binary       string
-	bundleDir    string
-	stateDir     string
-	forwarderBin string
-	forwards     []Forward
-	counter      atomic.Uint64
+	binary           string
+	bundleDir        string
+	stateDir         string
+	forwarderBin     string
+	forwards         []Forward
+	forkAuthority    *forkauth.Authority
+	egressOpenSocket string
+	counter          atomic.Uint64
 }
 
 // Forward describes one TCP-listen -> unix-socket relay the fork runs so an
@@ -50,6 +55,10 @@ type Forward struct {
 	Listen string
 	// HostSocket is the daemon-side unix socket the relay connects to.
 	HostSocket string
+	// MCP enables a host-authenticated HTTP relay.
+	MCP bool
+	// Egress selects the proxy according to the job's policy.
+	Egress bool
 }
 
 // Options configures a Driver.
@@ -66,6 +75,10 @@ type Options struct {
 	ForwarderBinary string
 	// Forwards are the daemon services the fork should reach.
 	Forwards []Forward
+	// ForkAuthority signs trusted identity on host-side MCP forwards.
+	ForkAuthority *forkauth.Authority
+	// EgressOpenSocket is the open-policy egress proxy socket.
+	EgressOpenSocket string
 }
 
 // New constructs a Driver. Returns an error if the runc binary is not
@@ -96,11 +109,13 @@ func New(opts Options) (*Driver, error) {
 		return nil, fmt.Errorf("ensure runc state dir: %w", err)
 	}
 	return &Driver{
-		binary:       binary,
-		bundleDir:    bundleDir,
-		stateDir:     stateDir,
-		forwarderBin: opts.ForwarderBinary,
-		forwards:     opts.Forwards,
+		binary:           binary,
+		bundleDir:        bundleDir,
+		stateDir:         stateDir,
+		forwarderBin:     opts.ForwarderBinary,
+		forwards:         opts.Forwards,
+		forkAuthority:    opts.ForkAuthority,
+		egressOpenSocket: opts.EgressOpenSocket,
 	}, nil
 }
 
@@ -114,7 +129,13 @@ func (d *Driver) Run(ctx context.Context, spec runtime.Spec, stdout, stderr io.W
 	}
 	defer func() { _ = os.RemoveAll(bundle) }()
 
-	args, mounts := d.jobArgsAndMounts(spec)
+	forwards, cleanup, err := d.prepareForwards(ctx, bundle, spec)
+	if err != nil {
+		return runtime.Result{}, err
+	}
+	defer cleanup()
+	spec.Env = egress.EnvForPolicy(spec.EgressPolicy, spec.Env)
+	args, mounts := d.argsAndMountsForwards(spec, forwards)
 	if err := writeOCIConfig(bundle, spec, args, mounts); err != nil {
 		return runtime.Result{}, fmt.Errorf("write config: %w", err)
 	}
@@ -124,7 +145,7 @@ func (d *Driver) Run(ctx context.Context, spec runtime.Spec, stdout, stderr io.W
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
 		if ctx.Err() != nil {
 			return runtime.Result{}, fmt.Errorf("job cancelled: %w", ctx.Err())
@@ -153,18 +174,22 @@ func fwdSocketPath(i int) string {
 // (bind-mounted in) plus the daemon sockets, so the agent reaches the daemon
 // over loopback with no egress; otherwise the command runs directly.
 func (d *Driver) jobArgsAndMounts(spec runtime.Spec) ([]string, []runtime.Mount) {
+	return d.argsAndMountsForwards(spec, d.forwards)
+}
+
+func (d *Driver) argsAndMountsForwards(spec runtime.Spec, forwards []Forward) ([]string, []runtime.Mount) {
 	command := []string{"/bin/sh", "-c", spec.Command}
 	// Clone before appending: appending to the caller's slice could write into
 	// its backing array when it has spare capacity.
 	mounts := slices.Clone(spec.Mounts)
 
-	if d.forwarderBin == "" || len(d.forwards) == 0 {
+	if d.forwarderBin == "" || len(forwards) == 0 {
 		return command, mounts
 	}
 
 	mounts = append(mounts, runtime.Mount{Source: d.forwarderBin, Destination: forkBinPath, ReadOnly: true})
 	args := []string{forkBinPath, "fork-run"}
-	for i, f := range d.forwards {
+	for i, f := range forwards {
 		sock := fwdSocketPath(i)
 		mounts = append(mounts, runtime.Mount{Source: f.HostSocket, Destination: sock, ReadOnly: false})
 		args = append(args, "--forward", f.Listen+"="+sock)
@@ -172,6 +197,42 @@ func (d *Driver) jobArgsAndMounts(spec runtime.Spec) ([]string, []runtime.Mount)
 	args = append(args, "--")
 	args = append(args, command...)
 	return args, mounts
+}
+
+func (d *Driver) prepareForwards(ctx context.Context, bundle string, spec runtime.Spec) ([]Forward, func(), error) {
+	var listeners []net.Listener
+	cleanup := func() {
+		for _, ln := range listeners {
+			_ = ln.Close()
+		}
+	}
+	forwards := make([]Forward, 0, len(d.forwards))
+	for i, f := range d.forwards {
+		if f.Egress {
+			switch egress.Normalize(spec.EgressPolicy) {
+			case egress.PolicyNone:
+				continue
+			case egress.PolicyOpen:
+				f.HostSocket = d.egressOpenSocket
+			}
+		}
+		if f.MCP {
+			if d.forkAuthority == nil {
+				cleanup()
+				return nil, nil, errors.New("mcp forward requires a host identity authority")
+			}
+			path := filepath.Join(bundle, fmt.Sprintf("mcp-%d.sock", i))
+			ln, err := d.forkAuthority.Forward(ctx, path, f.HostSocket, forkauth.Caller{ID: spec.JobID, Policy: egress.Normalize(spec.EgressPolicy)})
+			if err != nil {
+				cleanup()
+				return nil, nil, fmt.Errorf("start authenticated mcp forward: %w", err)
+			}
+			listeners = append(listeners, ln)
+			f.HostSocket = path
+		}
+		forwards = append(forwards, f)
+	}
+	return forwards, cleanup, nil
 }
 
 // writeOCIConfig produces a minimal-but-valid config.json inside bundle that

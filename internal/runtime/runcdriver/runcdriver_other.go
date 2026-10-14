@@ -11,6 +11,7 @@ import (
 	"io"
 	"runtime"
 
+	"github.com/joshjon/fletcher/internal/forkauth"
 	fruntime "github.com/joshjon/fletcher/internal/runtime"
 )
 
@@ -21,14 +22,18 @@ type Driver struct{}
 type Forward struct {
 	Listen     string
 	HostSocket string
+	MCP        bool
+	Egress     bool
 }
 
 // Options matches the Linux surface so call sites work without build tags.
 type Options struct {
-	Binary          string
-	BundleDir       string
-	ForwarderBinary string
-	Forwards        []Forward
+	Binary           string
+	BundleDir        string
+	ForwarderBinary  string
+	Forwards         []Forward
+	ForkAuthority    *forkauth.Authority
+	EgressOpenSocket string
 }
 
 // New refuses to construct on non-Linux. Daemons configured with

@@ -18,6 +18,7 @@ import (
 	firecracker "github.com/firecracker-microvm/firecracker-go-sdk"
 
 	"github.com/joshjon/fletcher/internal/errs"
+	"github.com/joshjon/fletcher/internal/forkauth"
 	fcruntime "github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestproto"
 )
@@ -128,7 +129,8 @@ func (d *Driver) coldBootSession(ctx context.Context, spec fcruntime.SessionSpec
 	// usable for a shell, just not for model/MCP calls. envForPolicy strips the
 	// proxy vars for a "none" session so they match its (absent) egress forward.
 	effEnv := envForPolicy(spec.EgressPolicy, spec.Env)
-	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv, spec.AppEnv, guestCredentials(spec.Credentials))
+	forwardLns, ferr := d.startSessionForwards(vmCtx, vsockUDS, d.forwardsForPolicy(spec.EgressPolicy), effEnv, spec.AppEnv, guestCredentials(spec.Credentials),
+		forkauth.Caller{ID: spec.SessionID, Policy: spec.EgressPolicy, Session: true})
 	if ferr != nil {
 		d.logger.Warn("session service forwards not fully established; model gateway/MCP may be unreachable in this session",
 			slog.String("session_id", spec.SessionID), slog.String("err", ferr.Error()))
@@ -210,12 +212,12 @@ type fcSession struct {
 // does the equivalent inline in Run. Best-effort: it returns any listeners it
 // did open alongside an error so the caller can both close them and log, leaving
 // the session usable (just without model/MCP access) rather than failing to boot.
-func (d *Driver) startSessionForwards(ctx context.Context, vsockUDS string, forwards []Forward, env, appEnv []string, creds []guestproto.CredentialFile) ([]net.Listener, error) {
+func (d *Driver) startSessionForwards(ctx context.Context, vsockUDS string, forwards []Forward, env, appEnv []string, creds []guestproto.CredentialFile, caller forkauth.Caller) ([]net.Listener, error) {
 	lns := make([]net.Listener, 0, len(forwards))
 	gforwards := make([]guestproto.Forward, 0, len(forwards))
 	for i, f := range forwards {
 		port := uint32(guestproto.ForwardPortBase + i)
-		ln, err := startForwardProxy(ctx, fmt.Sprintf("%s_%d", vsockUDS, port), f.HostSocket)
+		ln, err := d.startServiceForward(ctx, fmt.Sprintf("%s_%d", vsockUDS, port), f, caller)
 		if err != nil {
 			return lns, fmt.Errorf("forward proxy %s: %w", f.ListenAddr, err)
 		}

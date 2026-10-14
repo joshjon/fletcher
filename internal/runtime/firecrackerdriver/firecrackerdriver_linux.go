@@ -34,6 +34,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/joshjon/fletcher/internal/egress"
+	"github.com/joshjon/fletcher/internal/forkauth"
 	fcruntime "github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestagent"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/guestproto"
@@ -58,6 +59,8 @@ type Forward struct {
 	// dropped for "none", repointed to the open-proxy socket for "open", or left
 	// at HostSocket (the allowlist proxy) otherwise.
 	Egress bool
+	// MCP selects the host-authenticated HTTP forward instead of a raw splice.
+	MCP bool
 }
 
 // Driver is the Firecracker-backed runtime.Driver.
@@ -69,6 +72,7 @@ type Driver struct {
 	memSizeMib        int64
 	forwards          []Forward
 	egressOpenSocket  string
+	forkAuthority     *forkauth.Authority
 	log               *logrus.Entry
 	logger            *slog.Logger
 }
@@ -87,6 +91,8 @@ type Options struct {
 	// public host, LAN-guarded). The Egress forward's own HostSocket is the
 	// "allowlist" proxy; a fork with the "open" policy is repointed here.
 	EgressOpenSocket string
+	// ForkAuthority signs trusted identity on host-side MCP forwards.
+	ForkAuthority *forkauth.Authority
 	// VcpuCount defaults to 1, MemSizeMib to 512 when zero.
 	VcpuCount  int64
 	MemSizeMib int64
@@ -138,6 +144,7 @@ func New(opts Options) (*Driver, error) {
 		memSizeMib:        mem,
 		forwards:          opts.Forwards,
 		egressOpenSocket:  opts.EgressOpenSocket,
+		forkAuthority:     opts.ForkAuthority,
 		log:               logrus.NewEntry(logger),
 		logger:            opLogger,
 	}, nil
@@ -237,7 +244,8 @@ func (d *Driver) Run(ctx context.Context, spec fcruntime.Spec, stdout, stderr io
 	gforwards := make([]guestproto.Forward, 0, len(forwards))
 	for i, f := range forwards {
 		port := uint32(guestproto.ForwardPortBase + i)
-		proxyLn, perr := startForwardProxy(ctx, fmt.Sprintf("%s_%d", vsockUDS, port), f.HostSocket)
+		proxyLn, perr := d.startServiceForward(ctx, fmt.Sprintf("%s_%d", vsockUDS, port), f,
+			forkauth.Caller{ID: spec.JobID, Policy: egress.Normalize(spec.EgressPolicy)})
 		if perr != nil {
 			return fcruntime.Result{}, fmt.Errorf("firecracker: forward proxy %s: %w", f.ListenAddr, perr)
 		}
@@ -481,6 +489,16 @@ func acceptCtx(ctx context.Context, ln net.Listener) (net.Conn, error) {
 	case r := <-ch:
 		return r.conn, r.err
 	}
+}
+
+func (d *Driver) startServiceForward(ctx context.Context, path string, f Forward, caller forkauth.Caller) (net.Listener, error) {
+	if f.MCP {
+		if d.forkAuthority == nil {
+			return nil, errors.New("mcp forward requires a host identity authority")
+		}
+		return d.forkAuthority.Forward(ctx, path, f.HostSocket, caller)
+	}
+	return startForwardProxy(ctx, path, f.HostSocket)
 }
 
 // startForwardProxy listens on a vsock UDS port and proxies each connection
