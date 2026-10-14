@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -54,6 +55,7 @@ type Manager struct {
 	q           sqliteq.Querier
 	provisioner snapshot.VolumeProvisioner
 	logger      *slog.Logger
+	locks       sync.Map // volume id -> context-aware reservation semaphore
 }
 
 // NewManager constructs a Manager. provisioner may be nil.
@@ -137,6 +139,15 @@ func (m *Manager) Delete(ctx context.Context, ref string) error {
 	if err != nil {
 		return err
 	}
+	release, err := m.lock(ctx, row.ID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	row, err = m.lookup(ctx, row.ID)
+	if err != nil {
+		return err
+	}
 	attached, err := m.q.ListSessionsByVolume(ctx, &row.ID)
 	if err != nil {
 		return fmt.Errorf("check volume attachment: %w", err)
@@ -157,11 +168,35 @@ func (m *Manager) Delete(ctx context.Context, ref string) error {
 	return nil
 }
 
-// ResolveAttachable resolves ref to an attachable volume, refusing one already
-// attached to another session (single-writer: one ext4 volume is mounted by at
-// most one session).
-func (m *Manager) ResolveAttachable(ctx context.Context, ref string) (id, path string, err error) {
+// ReserveAttachment guards a volume against attachment and deletion until the caller records its session or cleans up its failed boot and releases the reservation.
+func (m *Manager) ReserveAttachment(ctx context.Context, ref string) (id, path string, release func(), err error) {
 	row, err := m.lookup(ctx, ref)
+	if err != nil {
+		return "", "", nil, err
+	}
+	release, err = m.lock(ctx, row.ID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	id, path, err = m.resolveAttachable(ctx, row.ID)
+	if err != nil {
+		release()
+		return "", "", nil, err
+	}
+	return id, path, release, nil
+}
+
+// ResolveAttachable checks a volume without reserving it; VM creators must use ReserveAttachment instead.
+func (m *Manager) ResolveAttachable(ctx context.Context, ref string) (id, path string, err error) {
+	id, path, release, err := m.ReserveAttachment(ctx, ref)
+	if err == nil {
+		release()
+	}
+	return id, path, err
+}
+
+func (m *Manager) resolveAttachable(ctx context.Context, id string) (string, string, error) {
+	row, err := m.lookup(ctx, id)
 	if err != nil {
 		return "", "", err
 	}
@@ -176,12 +211,31 @@ func (m *Manager) ResolveAttachable(ctx context.Context, ref string) (id, path s
 	return row.ID, row.Path, nil
 }
 
+func (m *Manager) lock(ctx context.Context, id string) (func(), error) {
+	v, _ := m.locks.LoadOrStore(id, make(chan struct{}, 1))
+	sem := v.(chan struct{})
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 // PathFor returns the backing path for a volume id (a session boot resolving
 // its attached volume).
 func (m *Manager) PathFor(ctx context.Context, id string) (string, error) {
 	row, err := m.lookup(ctx, id)
 	if err != nil {
 		return "", err
+	}
+	attached, err := m.q.ListSessionsByVolume(ctx, &row.ID)
+	if err != nil {
+		return "", fmt.Errorf("check volume writers: %w", err)
+	}
+	if len(attached) > 1 {
+		return "", errs.New(errs.CategoryFailedPrecondition,
+			"volume is attached to multiple sessions; remove duplicate attachments before starting it")
 	}
 	return row.Path, nil
 }

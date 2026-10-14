@@ -2094,6 +2094,13 @@ that store helper plus the committer identity. The base image reads
 
 ## Toward v1 - hardening (in progress)
 
+**Volume single-writer safety - DONE.** Session creation reserves a volume in
+the daemon's shared volume manager before boot and holds the reservation through
+session recording or failed-boot cleanup. Deletion uses the same context-aware
+guard, closing attach/attach and attach/delete races. Existing duplicate
+attachments refuse boot rather than mounting the disk in multiple VMs. Race tests
+cover competing creates, cancellation and failed-boot reservation release.
+
 **Repo-wide code-quality and tech-debt sweep (2026-07-05, daemon `e7b8f3b`..`4b6dcc9`,
 17 commits).** Six parallel audits (error handling, concurrency, defensive safety,
 style/API design, test quality, modernization) over the whole Go tree, then fixes in

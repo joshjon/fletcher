@@ -868,14 +868,14 @@ type fakeVolumes struct {
 	attachedTo     string
 }
 
-func (f *fakeVolumes) ResolveAttachable(_ context.Context, ref string) (string, string, error) {
+func (f *fakeVolumes) ReserveAttachment(_ context.Context, ref string) (string, string, func(), error) {
 	if ref != f.id && ref != f.name {
-		return "", "", errs.New(errs.CategoryNotFound, "volume not found")
+		return "", "", nil, errs.New(errs.CategoryNotFound, "volume not found")
 	}
 	if f.attachedTo != "" {
-		return "", "", errs.Newf(errs.CategoryConflict, "volume %q is already attached to session %q", f.name, f.attachedTo)
+		return "", "", nil, errs.Newf(errs.CategoryConflict, "volume %q is already attached to session %q", f.name, f.attachedTo)
 	}
-	return f.id, f.path, nil
+	return f.id, f.path, func() {}, nil
 }
 
 func (f *fakeVolumes) PathFor(_ context.Context, id string) (string, error) {

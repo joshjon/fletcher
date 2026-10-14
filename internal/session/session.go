@@ -183,9 +183,9 @@ type Manager struct {
 // (implemented by volume.Manager; kept narrow per "consumers define
 // interfaces").
 type VolumeResolver interface {
-	// ResolveAttachable resolves ref to a volume free to attach, refusing one
-	// already attached to another session.
-	ResolveAttachable(ctx context.Context, ref string) (id, path string, err error)
+	// ReserveAttachment guards a volume until the session is recorded or its
+	// failed VM boot is cleaned up. The caller must release the reservation.
+	ReserveAttachment(ctx context.Context, ref string) (id, path string, release func(), err error)
 	// PathFor returns the backing path for an attached volume id.
 	PathFor(ctx context.Context, id string) (string, error)
 	// NameFor returns the display name for an attached volume id.
@@ -400,11 +400,12 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Session, error) {
 			return Session{}, errs.New(errs.CategoryFailedPrecondition,
 				"this daemon cannot attach volumes (requires the firecracker runtime's ext4 snapshots)")
 		}
-		var err error
-		volumeID, volumePath, err = m.volumes.ResolveAttachable(ctx, p.VolumeRef)
+		var release func()
+		volumeID, volumePath, release, err = m.volumes.ReserveAttachment(ctx, p.VolumeRef)
 		if err != nil {
 			return Session{}, err
 		}
+		defer release()
 	}
 
 	// Resolve seeded credentials before allocating a fork so a bad/absent login
