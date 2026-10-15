@@ -86,7 +86,8 @@ func newApp() *cli.Command {
 			daemonHost(daemonCmd()),
 			daemonHost(doctorCmd()),
 			client(imageCmd()),
-			forkRunCmd(), // hidden internal re-exec
+			hostExecutorCmd(), // hidden account-scoped service entrypoint
+			forkRunCmd(),      // hidden internal re-exec
 		},
 	}
 }

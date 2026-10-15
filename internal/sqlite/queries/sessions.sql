@@ -4,16 +4,40 @@ INSERT INTO sessions (
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING *;
+RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at,
+    last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path,
+    volume_id, env_vars, execution_kind, host_user, host_uid, host_home, working_dir;
 
 -- name: GetSessionByRef :one
-SELECT * FROM sessions
-WHERE id = sqlc.arg(ref) OR name = sqlc.arg(ref)
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at,
+    last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path,
+    volume_id, env_vars, execution_kind, host_user, host_uid, host_home, working_dir
+FROM sessions
+WHERE id = ?1 OR name = ?1
+ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END
 LIMIT 1;
 
 -- name: ListSessions :many
-SELECT * FROM sessions
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at,
+    last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path,
+    volume_id, env_vars, execution_kind, host_user, host_uid, host_home, working_dir
+FROM sessions
 ORDER BY created_at DESC;
+
+-- Legacy policy columns retain valid placeholders; host responses expose no VM policy.
+-- name: CreateHostSession :one
+INSERT INTO sessions (
+    id, name, image, state, fork_id, fork_path, created_at, updated_at,
+    egress_policy, gateway, run_app, env_vars,
+    execution_kind, host_user, host_uid, host_home, working_dir
+) VALUES (
+    sqlc.arg(id), sqlc.arg(name), '', 'running', '', '', sqlc.arg(now), sqlc.arg(now),
+    'none', 'off', 0, '[]',
+    'host', sqlc.arg(host_user), sqlc.arg(host_uid), sqlc.arg(host_home), sqlc.arg(working_dir)
+)
+RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at,
+    last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path,
+    volume_id, env_vars, execution_kind, host_user, host_uid, host_home, working_dir;
 
 -- name: CountSessions :one
 SELECT COUNT(*) FROM sessions;

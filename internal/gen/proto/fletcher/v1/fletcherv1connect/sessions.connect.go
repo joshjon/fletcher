@@ -33,6 +33,9 @@ const (
 // reflection-formatted method names, remove the leading slash and convert the remaining slash to a
 // period.
 const (
+	// SessionServiceGetHostSessionAccountProcedure is the fully-qualified name of the SessionService's
+	// GetHostSessionAccount RPC.
+	SessionServiceGetHostSessionAccountProcedure = "/fletcher.v1.SessionService/GetHostSessionAccount"
 	// SessionServiceCreateSessionProcedure is the fully-qualified name of the SessionService's
 	// CreateSession RPC.
 	SessionServiceCreateSessionProcedure = "/fletcher.v1.SessionService/CreateSession"
@@ -104,18 +107,23 @@ const (
 
 // SessionServiceClient is a client for the fletcher.v1.SessionService service.
 type SessionServiceClient interface {
-	// CreateSession provisions a session's persistent fork and boots its VM. The
-	// returned session has state RUNNING.
+	// GetHostSessionAccount reports the locally authorized executor account.
+	// Disabled, unavailable or mismatched executors fail closed.
+	GetHostSessionAccount(context.Context, *connect.Request[v1.GetHostSessionAccountRequest]) (*connect.Response[v1.GetHostSessionAccountResponse], error)
+	// CreateSession boots a VM by default. Explicit host creation registers an
+	// account-bound terminal environment without a disk. The returned state is RUNNING.
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
 	// GetSession fetches a session by ID or name.
 	GetSession(context.Context, *connect.Request[v1.GetSessionRequest]) (*connect.Response[v1.GetSessionResponse], error)
 	// ListSessions returns all sessions, newest first.
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
-	// StartSession boots a stopped session's VM against its persisted fork.
+	// StartSession starts the recorded VM or authorized host terminal environment.
 	StartSession(context.Context, *connect.Request[v1.StartSessionRequest]) (*connect.Response[v1.StartSessionResponse], error)
-	// StopSession stops a running session's VM, keeping its fork on disk.
+	// StopSession stops the VM or managed host terminals, preserving files.
+	// Independently managed host processes can outlive their terminals.
 	StopSession(context.Context, *connect.Request[v1.StopSessionRequest]) (*connect.Response[v1.StopSessionResponse], error)
-	// DeleteSession stops the VM (if running) and destroys the fork.
+	// DeleteSession stops managed execution and removes the registration.
+	// VM disks are destroyed; host files are never deleted.
 	DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error)
 	// UpdateSession changes a session's egress policy and/or gateway. Both are
 	// applied to the fork at VM boot, so a change to a running session takes
@@ -200,6 +208,12 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 	baseURL = strings.TrimRight(baseURL, "/")
 	sessionServiceMethods := v1.File_fletcher_v1_sessions_proto.Services().ByName("SessionService").Methods()
 	return &sessionServiceClient{
+		getHostSessionAccount: connect.NewClient[v1.GetHostSessionAccountRequest, v1.GetHostSessionAccountResponse](
+			httpClient,
+			baseURL+SessionServiceGetHostSessionAccountProcedure,
+			connect.WithSchema(sessionServiceMethods.ByName("GetHostSessionAccount")),
+			connect.WithClientOptions(opts...),
+		),
 		createSession: connect.NewClient[v1.CreateSessionRequest, v1.CreateSessionResponse](
 			httpClient,
 			baseURL+SessionServiceCreateSessionProcedure,
@@ -343,29 +357,35 @@ func NewSessionServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 
 // sessionServiceClient implements SessionServiceClient.
 type sessionServiceClient struct {
-	createSession      *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
-	getSession         *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
-	listSessions       *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
-	startSession       *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
-	stopSession        *connect.Client[v1.StopSessionRequest, v1.StopSessionResponse]
-	deleteSession      *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
-	updateSession      *connect.Client[v1.UpdateSessionRequest, v1.UpdateSessionResponse]
-	execSession        *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
-	shellSession       *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
-	proxySession       *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
-	publishPort        *connect.Client[v1.PublishPortRequest, v1.PublishPortResponse]
-	unpublishPort      *connect.Client[v1.UnpublishPortRequest, v1.UnpublishPortResponse]
-	listPorts          *connect.Client[v1.ListPortsRequest, v1.ListPortsResponse]
-	restartSession     *connect.Client[v1.RestartSessionRequest, v1.RestartSessionResponse]
-	redeploySession    *connect.Client[v1.RedeploySessionRequest, v1.RedeploySessionResponse]
-	getSessionLogs     *connect.Client[v1.GetSessionLogsRequest, v1.GetSessionLogsResponse]
-	streamSessionLogs  *connect.Client[v1.StreamSessionLogsRequest, v1.StreamSessionLogsResponse]
-	commitSessionImage *connect.Client[v1.CommitSessionImageRequest, v1.CommitSessionImageResponse]
-	rollbackSession    *connect.Client[v1.RollbackSessionRequest, v1.RollbackSessionResponse]
-	uploadFile         *connect.Client[v1.UploadFileRequest, v1.UploadFileResponse]
-	downloadFile       *connect.Client[v1.DownloadFileRequest, v1.DownloadFileResponse]
-	listDir            *connect.Client[v1.ListDirRequest, v1.ListDirResponse]
-	fileOp             *connect.Client[v1.FileOpRequest, v1.FileOpResponse]
+	getHostSessionAccount *connect.Client[v1.GetHostSessionAccountRequest, v1.GetHostSessionAccountResponse]
+	createSession         *connect.Client[v1.CreateSessionRequest, v1.CreateSessionResponse]
+	getSession            *connect.Client[v1.GetSessionRequest, v1.GetSessionResponse]
+	listSessions          *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
+	startSession          *connect.Client[v1.StartSessionRequest, v1.StartSessionResponse]
+	stopSession           *connect.Client[v1.StopSessionRequest, v1.StopSessionResponse]
+	deleteSession         *connect.Client[v1.DeleteSessionRequest, v1.DeleteSessionResponse]
+	updateSession         *connect.Client[v1.UpdateSessionRequest, v1.UpdateSessionResponse]
+	execSession           *connect.Client[v1.ExecSessionRequest, v1.ExecSessionResponse]
+	shellSession          *connect.Client[v1.ShellSessionRequest, v1.ShellSessionResponse]
+	proxySession          *connect.Client[v1.ProxySessionRequest, v1.ProxySessionResponse]
+	publishPort           *connect.Client[v1.PublishPortRequest, v1.PublishPortResponse]
+	unpublishPort         *connect.Client[v1.UnpublishPortRequest, v1.UnpublishPortResponse]
+	listPorts             *connect.Client[v1.ListPortsRequest, v1.ListPortsResponse]
+	restartSession        *connect.Client[v1.RestartSessionRequest, v1.RestartSessionResponse]
+	redeploySession       *connect.Client[v1.RedeploySessionRequest, v1.RedeploySessionResponse]
+	getSessionLogs        *connect.Client[v1.GetSessionLogsRequest, v1.GetSessionLogsResponse]
+	streamSessionLogs     *connect.Client[v1.StreamSessionLogsRequest, v1.StreamSessionLogsResponse]
+	commitSessionImage    *connect.Client[v1.CommitSessionImageRequest, v1.CommitSessionImageResponse]
+	rollbackSession       *connect.Client[v1.RollbackSessionRequest, v1.RollbackSessionResponse]
+	uploadFile            *connect.Client[v1.UploadFileRequest, v1.UploadFileResponse]
+	downloadFile          *connect.Client[v1.DownloadFileRequest, v1.DownloadFileResponse]
+	listDir               *connect.Client[v1.ListDirRequest, v1.ListDirResponse]
+	fileOp                *connect.Client[v1.FileOpRequest, v1.FileOpResponse]
+}
+
+// GetHostSessionAccount calls fletcher.v1.SessionService.GetHostSessionAccount.
+func (c *sessionServiceClient) GetHostSessionAccount(ctx context.Context, req *connect.Request[v1.GetHostSessionAccountRequest]) (*connect.Response[v1.GetHostSessionAccountResponse], error) {
+	return c.getHostSessionAccount.CallUnary(ctx, req)
 }
 
 // CreateSession calls fletcher.v1.SessionService.CreateSession.
@@ -485,18 +505,23 @@ func (c *sessionServiceClient) FileOp(ctx context.Context, req *connect.Request[
 
 // SessionServiceHandler is an implementation of the fletcher.v1.SessionService service.
 type SessionServiceHandler interface {
-	// CreateSession provisions a session's persistent fork and boots its VM. The
-	// returned session has state RUNNING.
+	// GetHostSessionAccount reports the locally authorized executor account.
+	// Disabled, unavailable or mismatched executors fail closed.
+	GetHostSessionAccount(context.Context, *connect.Request[v1.GetHostSessionAccountRequest]) (*connect.Response[v1.GetHostSessionAccountResponse], error)
+	// CreateSession boots a VM by default. Explicit host creation registers an
+	// account-bound terminal environment without a disk. The returned state is RUNNING.
 	CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error)
 	// GetSession fetches a session by ID or name.
 	GetSession(context.Context, *connect.Request[v1.GetSessionRequest]) (*connect.Response[v1.GetSessionResponse], error)
 	// ListSessions returns all sessions, newest first.
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
-	// StartSession boots a stopped session's VM against its persisted fork.
+	// StartSession starts the recorded VM or authorized host terminal environment.
 	StartSession(context.Context, *connect.Request[v1.StartSessionRequest]) (*connect.Response[v1.StartSessionResponse], error)
-	// StopSession stops a running session's VM, keeping its fork on disk.
+	// StopSession stops the VM or managed host terminals, preserving files.
+	// Independently managed host processes can outlive their terminals.
 	StopSession(context.Context, *connect.Request[v1.StopSessionRequest]) (*connect.Response[v1.StopSessionResponse], error)
-	// DeleteSession stops the VM (if running) and destroys the fork.
+	// DeleteSession stops managed execution and removes the registration.
+	// VM disks are destroyed; host files are never deleted.
 	DeleteSession(context.Context, *connect.Request[v1.DeleteSessionRequest]) (*connect.Response[v1.DeleteSessionResponse], error)
 	// UpdateSession changes a session's egress policy and/or gateway. Both are
 	// applied to the fork at VM boot, so a change to a running session takes
@@ -577,6 +602,12 @@ type SessionServiceHandler interface {
 // and JSON codecs. They also support gzip compression.
 func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.HandlerOption) (string, http.Handler) {
 	sessionServiceMethods := v1.File_fletcher_v1_sessions_proto.Services().ByName("SessionService").Methods()
+	sessionServiceGetHostSessionAccountHandler := connect.NewUnaryHandler(
+		SessionServiceGetHostSessionAccountProcedure,
+		svc.GetHostSessionAccount,
+		connect.WithSchema(sessionServiceMethods.ByName("GetHostSessionAccount")),
+		connect.WithHandlerOptions(opts...),
+	)
 	sessionServiceCreateSessionHandler := connect.NewUnaryHandler(
 		SessionServiceCreateSessionProcedure,
 		svc.CreateSession,
@@ -717,6 +748,8 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 	)
 	return "/fletcher.v1.SessionService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case SessionServiceGetHostSessionAccountProcedure:
+			sessionServiceGetHostSessionAccountHandler.ServeHTTP(w, r)
 		case SessionServiceCreateSessionProcedure:
 			sessionServiceCreateSessionHandler.ServeHTTP(w, r)
 		case SessionServiceGetSessionProcedure:
@@ -771,6 +804,10 @@ func NewSessionServiceHandler(svc SessionServiceHandler, opts ...connect.Handler
 
 // UnimplementedSessionServiceHandler returns CodeUnimplemented from all methods.
 type UnimplementedSessionServiceHandler struct{}
+
+func (UnimplementedSessionServiceHandler) GetHostSessionAccount(context.Context, *connect.Request[v1.GetHostSessionAccountRequest]) (*connect.Response[v1.GetHostSessionAccountResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.GetHostSessionAccount is not implemented"))
+}
 
 func (UnimplementedSessionServiceHandler) CreateSession(context.Context, *connect.Request[v1.CreateSessionRequest]) (*connect.Response[v1.CreateSessionResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fletcher.v1.SessionService.CreateSession is not implemented"))

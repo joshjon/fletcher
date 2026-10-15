@@ -120,6 +120,11 @@ func (m *Manager) StartBuildFromSession(ctx context.Context, devRef, subdir, ima
 	if err := m.requireRuntime(); err != nil {
 		return "", err
 	}
+	if row, err := m.lookup(ctx, devRef); err == nil {
+		if err := requireVM(row); err != nil {
+			return "", err
+		}
+	}
 	if !validImageName(strings.TrimSpace(imageName)) {
 		return "", errs.Newf(errs.CategoryInvalidArgument,
 			"invalid image name %q (lowercase letters, digits, '.', '_', '-')", imageName)
@@ -226,6 +231,13 @@ func (m *Manager) BuildImageFromSession(ctx context.Context, devRef, subdir, ima
 // live build output so the detached path can stream it to a polling client.
 func (m *Manager) buildImageFromSession(ctx context.Context, devRef, subdir, imageName string, force bool, logSink io.Writer) (string, int, error) {
 	if err := m.requireRuntime(); err != nil {
+		return "", 0, err
+	}
+	row, err := m.lookup(ctx, devRef)
+	if err != nil {
+		return "", 0, err
+	}
+	if err := requireVM(row); err != nil {
 		return "", 0, err
 	}
 	imageName = strings.TrimSpace(imageName)

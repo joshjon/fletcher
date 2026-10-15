@@ -51,9 +51,9 @@ type CredentialFile struct {
 	Data []byte
 }
 
-// ShellSpec parameterises an interactive PTY in a session VM.
+// ShellSpec parameterises an interactive PTY in a session environment.
 type ShellSpec struct {
-	// WorkDir is the initial absolute guest directory for a new named terminal.
+	// WorkDir is the initial absolute environment directory for a new named terminal.
 	WorkDir string
 	// TerminalName selects a durable terminal; empty retains the legacy main terminal.
 	TerminalName string
@@ -76,10 +76,9 @@ type WinSize struct {
 	Rows uint16
 }
 
-// SessionHandle is a running session VM. It stays up until Stop; Exec runs
-// commands inside it without tearing it down.
+// SessionHandle is a running session environment; unsupported capabilities return explicit errors.
 type SessionHandle interface {
-	// Exec runs spec.Command in the running VM, streaming output to
+	// Exec runs spec.Command in the environment, streaming output to
 	// stdout/stderr, and returns the exit code.
 	Exec(ctx context.Context, spec Spec, stdout, stderr io.Writer) (Result, error)
 	// Shell opens an interactive login shell on a PTY. It writes terminal
@@ -110,12 +109,12 @@ type SessionHandle interface {
 	// file's size and mode before any bytes are written (so the caller can send a
 	// header first); if it returns an error the transfer aborts.
 	ReadFile(ctx context.Context, path string, onInfo func(FileReadResult) error, w io.Writer) error
-	// ListDir lists a directory in the guest fork (pure Go in the guest, so it
-	// works without a shell).
+	// ListDir lists a directory in the environment without invoking a shell.
 	ListDir(ctx context.Context, path string) (DirListing, error)
 	// FileOp performs a delete, move, or copy in the guest fork.
 	FileOp(ctx context.Context, spec FileOpSpec) error
-	// Stop shuts the VM down cleanly. The fork on disk is untouched.
+	// Stop stops the environment's managed execution without deleting user files.
+	// Host sessions do not promise termination of independently managed programs.
 	Stop(ctx context.Context) error
 }
 

@@ -1988,33 +1988,49 @@ Remaining:
 - Verify reuse and named-terminal reconnect on real microVMs, including guest
   upgrades and stop/start. Disk durability does not promise cold-boot process
   continuity.
-- Safe host-folder import: copy selected data into the guest, preserve the host
+- Safe host-folder import (paused behind host execution): copy selected data into the guest, preserve the host
   source, bound transfers, reject unsafe paths/symlinks, support cancellation,
   and return changes through explicit review/export. No live mounts.
-- Prepared-image reuse: tools and non-secret configuration only, not live
+- Prepared-image reuse (paused behind host execution): tools and non-secret configuration only, not live
   subscription credentials. Make rootfs versus persistent-volume scope explicit.
 
 Host execution is not included in this implementation. Separate VMs remain the
 independent isolation boundary; ordinary tasks and terminals can share a VM when
 the user chooses.
 
-### Optional direct host sessions - PLANNED
+### Optional direct host sessions - IN PROGRESS
 
-Approved product direction (DESIGN section 10.1), not a runtime fallback. Let a
-user explicitly choose an existing host account and its tools/files without
-first building a VM or Docker image. Keep VMs as the default isolated option.
+The first target is the Linux daemon host, not client-local Mac execution.
+This is the current priority, ahead of folder import and prepared-image reuse.
+Keep VMs as the default isolated option, never a host-execution fallback (DESIGN
+section 10.1). See [HOST_SESSIONS.md](HOST_SESSIONS.md) for the implementation and
+verification contract.
 
-Before implementation:
-- Settle the execution location and platform scope: Linux daemon host,
-  client-local Mac, or both. This is distinct from the deferred macOS VM driver.
-- Design least-privileged account authorization, launch, supervision, revocation
-  and cleanup. The daemon's service account and its state/key access must not
-  become the user-program execution identity by convenience.
-- Define host-specific capabilities through the existing lifecycle/runtime
-  seams. Do not imply VM snapshots, rollback, disposable disks or VM egress
-  guarantees. Never fall back to host execution on VM failure.
-- Use the same session/project/tab interaction with a persistent Host label and
-  visible machine/account. Bookmark removal must not delete host directories.
+Implemented backend, disabled by default:
+- Optional account-scoped executor using the same binary, a systemd-owned Unix
+  socket and peer-UID authorization. Root and daemon-account execution are refused;
+  the main daemon's service hardening is unchanged.
+- Runtime adapter for named terminals, tmux control mode, resize, cwd queries and
+  bounded read-only directory browsing. No VM image or snapshot involvement.
+- Tests for account/peer validation, packet bounds, cancellation, terminal I/O,
+  detach persistence, per-session server cleanup and preservation of host files.
+- Optional unit templates, not installed or enabled automatically. Local operator
+  account authorization and actual cross-account systemd verification are pending.
+
+- Persistent execution kind and account/directory identity, preserving VM defaults.
+  Host lifecycle never allocates, commits or deletes VM disks. VM-only operations
+  are rejected, and host sessions do not use the VM idle reaper.
+- Local `--host-user` authorization, `GetHostSessionAccount`, explicit API creation
+  with confirmed username/UID, and CLI `session create --host`. Project bookmarks
+  reuse host sessions without owning or deleting their files.
+
+Remaining before enabling host sessions:
+- Verify the implemented native Host creation and session/project/tab/split flow:
+  explicit account confirmation, browsable paths, persistent Host/account/daemon
+  labels, hidden VM-only controls, and host-file-preserving deletion messaging.
+  Swift package tests and both Apple builds remain pending.
+- Test lifecycle failure paths, restart/reconciliation, service supervision and
+  revocation under systemd, then run both Apple builds and native runtime checks.
 - Keep one job model if host background work is added. No separate scheduler,
   agent harness, hosted control plane, metering or automatic credential copying.
 

@@ -43,7 +43,7 @@ func stopHandle(ctx context.Context, handle runtime.SessionHandle) error {
 	return handle.Stop(ctx)
 }
 
-// Shutdown rejects new work, cancels active operations and builds, then syncs and stops all live VMs before the caller closes SQLite.
+// Shutdown rejects new work, drains operations and builds, syncs VM disks and stops managed environments before SQLite closes.
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.lifecycleMu.Lock()
 	m.closing = true

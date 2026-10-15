@@ -40,14 +40,14 @@ type Store interface {
 	DeleteProject(context.Context, string) (int64, error)
 }
 
-// Sessions is the existing VM lifecycle and guest directory access used by projects.
+// Sessions is the existing environment lifecycle and directory access used by projects.
 type Sessions interface {
 	Get(context.Context, string) (session.Session, error)
 	Start(context.Context, string) (session.Session, error)
 	ListDir(context.Context, string, string) (runtime.DirListing, error)
 }
 
-// Manager owns project registrations but never creates, clones or destroys a VM.
+// Manager owns project registrations but never creates or destroys their environments.
 type Manager struct {
 	q        Store
 	sessions Sessions
@@ -58,14 +58,14 @@ func NewManager(q Store, sessions Sessions) *Manager {
 	return &Manager{q: q, sessions: sessions}
 }
 
-// CreateParams selects an existing VM and initial guest directory.
+// CreateParams selects an existing session and initial environment directory.
 type CreateParams struct {
 	Name       string
 	SessionRef string
 	WorkingDir string
 }
 
-// Create saves a project without booting its VM or modifying guest files.
+// Create saves a project without starting its environment or modifying files.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (Project, error) {
 	name := strings.TrimSpace(p.Name)
 	if err := validateName(name); err != nil {
@@ -75,15 +75,18 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Project, error) {
 		return Project{}, errs.New(errs.CategoryInvalidArgument, "an existing session is required")
 	}
 	dir := p.WorkingDir
-	if dir == "" {
-		dir = "/workspace"
-	}
-	if err := validateDir(dir); err != nil {
-		return Project{}, err
-	}
 	s, err := m.sessions.Get(ctx, p.SessionRef)
 	if err != nil {
 		return Project{}, fmt.Errorf("resolve project session: %w", err)
+	}
+	if dir == "" {
+		dir = "/workspace"
+		if s.ExecutionKind == session.ExecutionHost {
+			dir = s.WorkingDir
+		}
+	}
+	if err := validateDir(dir); err != nil {
+		return Project{}, err
 	}
 	if s.RunApp {
 		return Project{}, errs.New(errs.CategoryFailedPrecondition, "projects require a development session, not an app deployment")
@@ -109,7 +112,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (Project, error) {
 	return fromRow(row), nil
 }
 
-// Get returns a registration by ID or name without waking its VM.
+// Get returns a registration by ID or name without starting its environment.
 func (m *Manager) Get(ctx context.Context, ref string) (Project, error) {
 	row, err := m.q.GetProjectByRef(ctx, ref)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -121,7 +124,7 @@ func (m *Manager) Get(ctx context.Context, ref string) (Project, error) {
 	return fromRow(row), nil
 }
 
-// List returns registrations, newest first, without inspecting guest files.
+// List returns registrations, newest first, without inspecting environment files.
 func (m *Manager) List(ctx context.Context) ([]Project, error) {
 	rows, err := m.q.ListProjects(ctx)
 	if err != nil {
@@ -140,7 +143,7 @@ type UpdateParams struct {
 	WorkingDir string
 }
 
-// Update changes a registration, preserving its VM and immutable project identity.
+// Update changes a registration, preserving its environment and immutable project identity.
 func (m *Manager) Update(ctx context.Context, ref string, p UpdateParams) (Project, error) {
 	current, err := m.Get(ctx, ref)
 	if err != nil {
@@ -175,7 +178,7 @@ func (m *Manager) Update(ctx context.Context, ref string, p UpdateParams) (Proje
 	return fromRow(row), nil
 }
 
-// Delete removes only the registration and leaves all VM files and processes untouched.
+// Delete removes only the registration and leaves environment files and processes untouched.
 func (m *Manager) Delete(ctx context.Context, ref string) error {
 	p, err := m.Get(ctx, ref)
 	if errors.Is(err, ErrNotFound) {
@@ -210,7 +213,7 @@ func (m *Manager) Open(ctx context.Context, ref string) (Project, error) {
 			return Project{}, ctx.Err()
 		}
 		return Project{}, errs.Newf(errs.CategoryFailedPrecondition,
-			"project directory %q is unavailable in the guest; open the session terminal to repair it or update the project path", p.WorkingDir)
+			"project directory %q is unavailable in the session environment; open the session terminal to repair it or update the project path", p.WorkingDir)
 	}
 	return p, nil
 }

@@ -81,7 +81,7 @@ func (q *Queries) GetVolumeByRef(ctx context.Context, ref string) (Volume, error
 }
 
 const listSessionsByVolume = `-- name: ListSessionsByVolume :many
-SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id, env_vars FROM sessions
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id, env_vars, execution_kind, host_user, host_uid, host_home, working_dir FROM sessions
 WHERE volume_id = ?
 `
 
@@ -111,6 +111,11 @@ func (q *Queries) ListSessionsByVolume(ctx context.Context, volumeID *string) ([
 			&i.PrevForkPath,
 			&i.VolumeID,
 			&i.EnvVars,
+			&i.ExecutionKind,
+			&i.HostUser,
+			&i.HostUid,
+			&i.HostHome,
+			&i.WorkingDir,
 		); err != nil {
 			return nil, err
 		}

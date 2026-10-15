@@ -1,0 +1,30 @@
+# Optional direct host execution as an explicitly selected non-root account.
+[Unit]
+Description=Fletcher host executor for %i
+Requires=fletcher-host@%i.socket
+BindsTo=fletcher.service
+After=fletcher.service
+
+[Service]
+Type=simple
+User=%i
+ExecStart=/usr/local/bin/fletcher host-executor
+RuntimeDirectory=fletcher-host-agent-%i
+RuntimeDirectoryMode=0700
+WorkingDirectory=~
+UMask=0077
+KillMode=control-group
+TimeoutStopSec=10s
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+RestrictSUIDSGID=true
+InaccessiblePaths=-/var/lib/fletcher -/etc/fletcher -/run/fletcher -/run/fletcher-host
+
+# This is not a sandbox. Account files and ordinary host networking remain
+# available. Do not grant this account access to daemon keys or state. Add any
+# custom daemon state/config/socket paths to InaccessiblePaths in an override.

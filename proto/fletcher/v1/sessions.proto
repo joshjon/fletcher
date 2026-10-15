@@ -4,23 +4,27 @@ package fletcher.v1;
 
 option go_package = "github.com/joshjon/fletcher/internal/gen/proto/fletcher/v1;fletcherv1";
 
-// SessionService manages durable, interactive sessions: a session is a
-// persistent microVM whose fork (its disk) survives stop/start, unlike an
-// ephemeral job. It shares the runtime and snapshot machinery with jobs (one
-// execution engine, DESIGN.md section 4) but has its own start/stop/exec lifecycle.
+// SessionService manages persistent VM environments and explicit host terminals.
+// VM disks survive stop/start. Host sessions use a locally authorized account
+// without VM isolation, snapshots or VM egress controls (DESIGN section 10.1).
 service SessionService {
-  // CreateSession provisions a session's persistent fork and boots its VM. The
-  // returned session has state RUNNING.
+  // GetHostSessionAccount reports the locally authorized executor account.
+  // Disabled, unavailable or mismatched executors fail closed.
+  rpc GetHostSessionAccount(GetHostSessionAccountRequest) returns (GetHostSessionAccountResponse) {}
+  // CreateSession boots a VM by default. Explicit host creation registers an
+  // account-bound terminal environment without a disk. The returned state is RUNNING.
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse) {}
   // GetSession fetches a session by ID or name.
   rpc GetSession(GetSessionRequest) returns (GetSessionResponse) {}
   // ListSessions returns all sessions, newest first.
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse) {}
-  // StartSession boots a stopped session's VM against its persisted fork.
+  // StartSession starts the recorded VM or authorized host terminal environment.
   rpc StartSession(StartSessionRequest) returns (StartSessionResponse) {}
-  // StopSession stops a running session's VM, keeping its fork on disk.
+  // StopSession stops the VM or managed host terminals, preserving files.
+  // Independently managed host processes can outlive their terminals.
   rpc StopSession(StopSessionRequest) returns (StopSessionResponse) {}
-  // DeleteSession stops the VM (if running) and destroys the fork.
+  // DeleteSession stops managed execution and removes the registration.
+  // VM disks are destroyed; host files are never deleted.
   rpc DeleteSession(DeleteSessionRequest) returns (DeleteSessionResponse) {}
   // UpdateSession changes a session's egress policy and/or gateway. Both are
   // applied to the fork at VM boot, so a change to a running session takes
@@ -111,11 +115,11 @@ message Session {
   optional int64 last_used_at = 7;
   // disk_bytes is the session fork's on-disk size.
   int64 disk_bytes = 8;
-  // egress_policy gates the fork's outbound network via the daemon proxy:
+  // egress_policy is VM-only and empty for host sessions. It gates the fork's outbound network via the daemon proxy:
   // "none" (no egress), "allowlist" (curated hosts), or "open" (any public
   // host; the LAN guard still applies). DESIGN.md section 5.
   string egress_policy = 9;
-  // gateway is "on" or "off": whether the daemon's model-gateway env
+  // gateway is VM-only and empty for host sessions. "on" or "off" controls whether the daemon's model-gateway env
   // (ANTHROPIC_/OPENAI_ base-URL + key) is injected. "off" lets an agent use
   // its own auth (e.g. a subscription OAuth login) instead. DESIGN.md section 6.
   string gateway = 10;
@@ -136,6 +140,26 @@ message Session {
   // app/process at boot. Populated by GetSession. A secret var carries only its
   // name and secret_name (never the secret's value).
   repeated EnvVar env_vars = 15;
+  // execution_kind is "vm" or "host". An omitted value on older daemons means VM.
+  string execution_kind = 16;
+  // host_account is present only for explicit host sessions, which have no VM isolation.
+  HostSessionAccount host_account = 17;
+  // working_dir is the initial host directory, not a sandbox or a live pane cwd.
+  string working_dir = 18;
+}
+
+message HostSessionAccount {
+  string user = 1;
+  int64 uid = 2;
+  string home = 3;
+}
+
+message GetHostSessionAccountRequest {}
+
+message GetHostSessionAccountResponse {
+  HostSessionAccount account = 1;
+  // machine is the Linux daemon host, never the client device.
+  string machine = 2;
 }
 
 // EnvVar is one user-set environment variable injected into a session's
@@ -185,6 +209,14 @@ message CreateSessionRequest {
   // env_vars are user-set environment variables injected into the session's
   // app/process at boot (plain values, or references to stored secrets).
   repeated EnvVar env_vars = 8;
+  // execution_kind must be explicit for host execution; omitted means VM.
+  // Host requests must leave all VM-specific options unset.
+  string execution_kind = 9;
+  // Host creation must confirm the account returned by GetHostSessionAccount.
+  string host_user = 10;
+  int64 host_uid = 11;
+  // working_dir defaults to the authorized account's home for host sessions.
+  string working_dir = 12;
 }
 
 message CreateSessionResponse {

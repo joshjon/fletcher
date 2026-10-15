@@ -48,6 +48,7 @@ import (
 	"github.com/joshjon/fletcher/internal/runtime"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver"
 	"github.com/joshjon/fletcher/internal/runtime/firecrackerdriver/vmm"
+	"github.com/joshjon/fletcher/internal/runtime/hostdriver"
 	runtimemock "github.com/joshjon/fletcher/internal/runtime/mockdriver"
 	"github.com/joshjon/fletcher/internal/runtime/runcdriver"
 
@@ -142,6 +143,8 @@ type Config struct {
 	// RuntimeKind selects the runtime.Driver: "mock" (default), "runc",
 	// or "firecracker". Non-mock drivers are Linux-only.
 	RuntimeKind string
+	// HostUser authorizes one explicitly selected local account; empty disables host sessions.
+	HostUser string
 	// SnapshotKind selects the snapshot.Driver: "mock" (default) or
 	// "btrfs". Non-mock drivers are Linux-only.
 	SnapshotKind string
@@ -561,11 +564,20 @@ func buildServices(ctx context.Context, cfg, flagCfg Config, queries *sqliteq.Qu
 	// Durable sessions reuse the runtime + snapshot drivers. The session-capable
 	// runtime (firecracker) implements runtime.SessionRuntime; other runtimes
 	// leave it nil and session lifecycle calls return a clear error.
+	var hostRuntime runtime.HostSessionRuntime
+	if cfg.HostUser != "" {
+		driver, err := hostdriver.New(cfg.HostUser)
+		if err != nil {
+			return nil, fmt.Errorf("configure host account executor: %w", err)
+		}
+		hostRuntime = driver
+	}
 	sessionRuntime, _ := rtDriver.(runtime.SessionRuntime)
 	sessionMgr := session.NewManager(queries, snapDriver, sessionRuntime, session.AgentEnv{
 		Base:    baseAgentEnv,
 		Gateway: gatewayAgentEnv,
 	}, logger, session.Options{
+		HostRuntime:         hostRuntime,
 		IdleTimeout:         cfg.SessionIdleTimeout,
 		MaxCount:            cfg.SessionMaxCount,
 		MaxDiskBytes:        int64(cfg.SessionMaxDiskGB) << 30,

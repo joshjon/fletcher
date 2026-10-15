@@ -22,7 +22,7 @@ import (
 func sessionCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "session",
-		Usage: "create, inspect, and manage durable sessions (persistent microVMs)",
+		Usage: "manage VM sessions and explicitly authorized host terminals",
 		Commands: []*cli.Command{
 			sessionCreateCmd(),
 			sessionGetCmd(),
@@ -143,7 +143,7 @@ func sessionLogsCmd() *cli.Command {
 func sessionRestartCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "restart",
-		Usage:     "stop a session's VM and start it again (re-runs the app for a deploy)",
+		Usage:     "restart a VM or the session's managed host terminals",
 		ArgsUsage: "<ref>",
 		Flags:     []cli.Flag{socketFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -313,11 +313,13 @@ func clampUint32(v int) uint32 {
 func sessionCreateCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "create",
-		Usage: "create a session and boot its VM",
+		Usage: "create a VM session, or explicitly select the authorized host account",
 		Flags: append([]cli.Flag{
 			socketFlag(),
 			outputFlag(),
 			&cli.StringFlag{Name: "name", Usage: "unique session name", Required: true},
+			&cli.BoolFlag{Name: "host", Usage: "run on the Linux daemon host as its locally authorized account, without VM isolation"},
+			&cli.StringFlag{Name: "workdir", Usage: "initial host directory (requires --host; defaults to the account home)"},
 			&cli.StringFlag{Name: "image", Usage: "image / environment spec (default: the daemon's default_image setting)"},
 			&cli.StringFlag{Name: "egress", Usage: "fork network egress: none | allowlist | open (default: the daemon's default_egress_policy setting)"},
 			&cli.StringFlag{Name: "gateway", Usage: "model gateway: on (inject ANTHROPIC_/OPENAI_ env) | off (use the agent's own auth, e.g. a subscription login) (default: the daemon's default_gateway setting)"},
@@ -331,7 +333,7 @@ func sessionCreateCmd() *cli.Command {
 				return err
 			}
 			client := newSessionsClient(cmd)
-			resp, err := client.CreateSession(ctx, connect.NewRequest(&fletcherv1.CreateSessionRequest{
+			req := &fletcherv1.CreateSessionRequest{
 				Name:         cmd.String("name"),
 				Image:        cmd.String("image"),
 				EgressPolicy: cmd.String("egress"),
@@ -340,7 +342,22 @@ func sessionCreateCmd() *cli.Command {
 				Volume:       cmd.String("volume"),
 				Credentials:  cmd.StringSlice("credential"),
 				EnvVars:      envVars,
-			}))
+				WorkingDir:   cmd.String("workdir"),
+			}
+			if cmd.Bool("host") {
+				account, err := client.GetHostSessionAccount(ctx, connect.NewRequest(&fletcherv1.GetHostSessionAccountRequest{}))
+				if err != nil {
+					return err
+				}
+				req.ExecutionKind = "host"
+				req.HostUser = account.Msg.GetAccount().GetUser()
+				req.HostUid = account.Msg.GetAccount().GetUid()
+				if req.HostUser == "" || req.HostUid <= 0 {
+					return errors.New("daemon did not confirm a non-root host account")
+				}
+				fmt.Fprintf(os.Stderr, "host execution: %s as %s (uid %d); no VM isolation or VM egress controls\n", account.Msg.GetMachine(), req.HostUser, req.HostUid)
+			}
+			resp, err := client.CreateSession(ctx, connect.NewRequest(req))
 			if err != nil {
 				return err
 			}
@@ -389,7 +406,7 @@ func sessionListCmd() *cli.Command {
 func sessionStartCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "start",
-		Usage:     "boot a stopped session's VM against its persisted disk",
+		Usage:     "start a session in its recorded environment",
 		ArgsUsage: "<ref>",
 		Flags:     []cli.Flag{socketFlag(), outputFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -410,7 +427,7 @@ func sessionStartCmd() *cli.Command {
 func sessionStopCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "stop",
-		Usage:     "stop a running session's VM, keeping its disk",
+		Usage:     "stop a VM or managed host terminals, preserving files",
 		ArgsUsage: "<ref>",
 		Flags:     []cli.Flag{socketFlag(), outputFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -431,7 +448,7 @@ func sessionStopCmd() *cli.Command {
 func sessionDeleteCmd() *cli.Command {
 	return &cli.Command{
 		Name:      "delete",
-		Usage:     "stop a session and destroy its disk",
+		Usage:     "delete a session (destroys VM disks; preserves host files)",
 		ArgsUsage: "<ref>",
 		Flags:     []cli.Flag{socketFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -727,13 +744,22 @@ func writeSessionDetails(w io.Writer, s *fletcherv1.Session) error {
 	fmt.Fprintf(tw, "id:\t%s\n", s.GetId())
 	fmt.Fprintf(tw, "name:\t%s\n", s.GetName())
 	fmt.Fprintf(tw, "state:\t%s\n", coloredSessionState(s.GetState()))
-	fmt.Fprintf(tw, "image:\t%s\n", s.GetImage())
-	fmt.Fprintf(tw, "egress:\t%s\n", s.GetEgressPolicy())
-	fmt.Fprintf(tw, "gateway:\t%s\n", s.GetGateway())
+	if s.GetExecutionKind() == "host" {
+		fmt.Fprintln(tw, "environment:\thost (Linux daemon host, no VM isolation)")
+		fmt.Fprintf(tw, "account:\t%s (uid %d)\n", s.GetHostAccount().GetUser(), s.GetHostAccount().GetUid())
+		fmt.Fprintf(tw, "directory:\t%s\n", s.GetWorkingDir())
+		fmt.Fprintln(tw, "access:\taccount files, credentials and host network; no VM egress controls")
+	} else {
+		fmt.Fprintf(tw, "image:\t%s\n", s.GetImage())
+		fmt.Fprintf(tw, "egress:\t%s\n", s.GetEgressPolicy())
+		fmt.Fprintf(tw, "gateway:\t%s\n", s.GetGateway())
+	}
 	if s.GetRunApp() {
 		fmt.Fprintf(tw, "app:\t%s\n", green("runs the image's entrypoint on boot"))
 	}
-	fmt.Fprintf(tw, "disk:\t%s\n", humanBytes(s.GetDiskBytes()))
+	if s.GetExecutionKind() != "host" {
+		fmt.Fprintf(tw, "disk:\t%s\n", humanBytes(s.GetDiskBytes()))
+	}
 	fmt.Fprintf(tw, "created_at:\t%s\n", formatUnix(s.GetCreatedAt()))
 	fmt.Fprintf(tw, "updated_at:\t%s\n", formatUnix(s.GetUpdatedAt()))
 	if s.LastUsedAt != nil {
@@ -758,18 +784,23 @@ func humanBytes(n int64) string {
 
 func writeSessionsTable(w io.Writer, sessions []*fletcherv1.Session) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tSTATE\tIMAGE\tDISK\tLAST USED")
+	fmt.Fprintln(tw, "ID\tNAME\tSTATE\tENVIRONMENT\tDISK\tLAST USED")
 	for _, s := range sessions {
 		lastUsed := "-"
 		if s.LastUsedAt != nil {
 			lastUsed = formatUnix(s.GetLastUsedAt())
 		}
+		image, disk := s.GetImage(), humanBytes(s.GetDiskBytes())
+		if s.GetExecutionKind() == "host" {
+			image = "host:" + s.GetHostAccount().GetUser()
+			disk = "not managed"
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 			s.GetId(),
 			s.GetName(),
 			coloredSessionState(s.GetState()),
-			s.GetImage(),
-			humanBytes(s.GetDiskBytes()),
+			image,
+			disk,
 			lastUsed,
 		)
 	}

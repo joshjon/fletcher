@@ -1,7 +1,4 @@
-// Package session manages durable sessions: persistent microVMs you create,
-// exec into, stop, start, and delete. Sessions share the runtime and snapshot
-// machinery with jobs (one execution engine, DESIGN.md §4) but have their own
-// lifecycle - the fork persists across stop/start instead of being torn down.
+// Package session manages persistent VM environments and explicit account-bound host terminals through shared lifecycle and runtime interfaces.
 package session
 
 import (
@@ -40,22 +37,25 @@ const idPrefix = "session"
 type State string
 
 const (
-	// StateRunning means the session's VM is booted and exec-ready.
+	// StateRunning means the session environment is started and can accept work.
 	StateRunning State = "running"
-	// StateStopped means the VM is down but its fork persists on disk.
+	// StateStopped means managed execution is stopped; VM disks and host files remain.
 	StateStopped State = "stopped"
 )
 
 // Session is the domain view of a session (the fork id/path stay internal).
 type Session struct {
-	ID         string
-	Name       string
-	Image      string
-	State      State
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	LastUsedAt *time.Time
-	DiskBytes  int64
+	ExecutionKind string
+	HostAccount   runtime.HostAccount
+	WorkingDir    string
+	ID            string
+	Name          string
+	Image         string
+	State         State
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	LastUsedAt    *time.Time
+	DiskBytes     int64
 	// EgressPolicy gates the fork's outbound network: "none" | "allowlist" |
 	// "open". Changes apply on the next boot.
 	EgressPolicy string
@@ -80,6 +80,8 @@ var ErrNotFound = errs.New(errs.CategoryNotFound, "session not found")
 
 // Options tune session limits and the work-based idle auto-stop.
 type Options struct {
+	// HostRuntime is a locally authorized account executor, never a VM fallback.
+	HostRuntime runtime.HostSessionRuntime
 	// IdleTimeout auto-stops a session idle (no work in flight) this long; 0
 	// disables the reaper.
 	IdleTimeout time.Duration
@@ -350,6 +352,12 @@ func (m *Manager) requireRuntime() error {
 // defaults (image, egress policy, gateway), so Create itself starts from
 // resolved values. Also enforces runtime presence and session caps.
 func (m *Manager) resolveCreateParams(ctx context.Context, p CreateParams) (CreateParams, error) {
+	if p.ExecutionKind != "" && p.ExecutionKind != ExecutionVM {
+		return CreateParams{}, errs.New(errs.CategoryInvalidArgument, "execution kind must be vm or host")
+	}
+	if p.HostUser != "" || p.HostUID != 0 || p.WorkingDir != "" {
+		return CreateParams{}, errs.New(errs.CategoryInvalidArgument, "host account and directory require explicit host execution")
+	}
 	if err := m.requireRuntime(); err != nil {
 		return CreateParams{}, err
 	}
@@ -377,6 +385,10 @@ func (m *Manager) resolveCreateParams(ctx context.Context, p CreateParams) (Crea
 // default" where one exists (Image, EgressPolicy, Gateway) and "off/none"
 // otherwise (RunApp, VolumeRef, Credentials, EnvVars).
 type CreateParams struct {
+	ExecutionKind string
+	HostUser      string
+	HostUID       int64
+	WorkingDir    string
 	// Name is the session's unique display name. Required.
 	Name string
 	// Image is the template to fork; empty uses the configured default image.
@@ -397,13 +409,16 @@ type CreateParams struct {
 	EnvVars []EnvVar
 }
 
-// Create provisions a session's persistent fork, boots its VM, and records it.
+// Create records and starts an explicit host environment or provisions a VM by default.
 func (m *Manager) Create(ctx context.Context, p CreateParams) (Session, error) {
 	ctx, finish, err := m.beginOperation(ctx)
 	if err != nil {
 		return Session{}, err
 	}
 	defer finish()
+	if p.ExecutionKind == ExecutionHost {
+		return m.createHost(ctx, p)
+	}
 	p, err = m.resolveCreateParams(ctx, p)
 	if err != nil {
 		return Session{}, err
@@ -566,9 +581,6 @@ func (m *Manager) Start(ctx context.Context, ref string) (Session, error) {
 		return Session{}, err
 	}
 	defer finish()
-	if err := m.requireRuntime(); err != nil {
-		return Session{}, err
-	}
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return Session{}, err
@@ -585,6 +597,12 @@ func (m *Manager) startLocked(ctx context.Context, id string) (Session, error) {
 	// Re-read under the lock: a concurrent caller may have started it already.
 	row, err := m.lookup(ctx, id)
 	if err != nil {
+		return Session{}, err
+	}
+	if row.ExecutionKind == ExecutionHost {
+		return m.startHost(ctx, row)
+	}
+	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
 	if State(row.State) == StateRunning {
@@ -679,12 +697,8 @@ func (m *Manager) stopLocked(ctx context.Context, id string) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	if handle := m.takeHandle(row.ID); handle != nil {
-		m.syncGuest(ctx, handle, row.ID)
-		if err := stopHandle(ctx, handle); err != nil {
-			m.putHandle(row.ID, handle)
-			return Session{}, fmt.Errorf("stop session vm: %w", err)
-		}
+	if err := m.stopEnvironment(ctx, row, true); err != nil {
+		return Session{}, err
 	}
 	if err := m.setState(ctx, row.ID, StateStopped); err != nil {
 		return Session{}, err
@@ -721,27 +735,26 @@ func (m *Manager) Delete(ctx context.Context, ref string) (bool, error) {
 		}
 		return false, err
 	}
-	if handle := m.takeHandle(row.ID); handle != nil {
-		if err := stopHandle(ctx, handle); err != nil {
-			m.putHandle(row.ID, handle)
-			return false, fmt.Errorf("stop session vm before delete: %w", err)
-		}
+	if err := m.stopEnvironment(ctx, row, false); err != nil {
+		return false, err
 	}
 	// Close any published-port forwarders before the rows vanish (the DB rows
 	// cascade-delete with the session; the in-memory listeners do not).
 	m.closeSessionPorts(ctx, row.ID)
-	if derr := m.snapshot.Delete(context.WithoutCancel(ctx), row.ForkID); derr != nil {
-		m.logger.Warn("delete session fork", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
-	}
-	if row.PrevForkID != nil {
-		if derr := m.snapshot.Delete(context.WithoutCancel(ctx), *row.PrevForkID); derr != nil {
-			m.logger.Warn("delete session previous fork", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+	if row.ExecutionKind != ExecutionHost {
+		if derr := m.snapshot.Delete(context.WithoutCancel(ctx), row.ForkID); derr != nil {
+			m.logger.Warn("delete session fork", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
 		}
-	}
-	// Drop any on-disk VM state (e.g. a hibernation snapshot) for the session.
-	if m.runtime != nil {
-		if derr := m.runtime.DiscardSession(context.WithoutCancel(ctx), row.ID); derr != nil {
-			m.logger.Warn("discard session vm state", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+		if row.PrevForkID != nil {
+			if derr := m.snapshot.Delete(context.WithoutCancel(ctx), *row.PrevForkID); derr != nil {
+				m.logger.Warn("delete session previous fork", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+			}
+		}
+		// Drop any on-disk VM state (e.g. a hibernation snapshot) for the session.
+		if m.runtime != nil {
+			if derr := m.runtime.DiscardSession(context.WithoutCancel(ctx), row.ID); derr != nil {
+				m.logger.Warn("discard session vm state", slog.String("session_id", row.ID), slog.String("err", derr.Error()))
+			}
 		}
 	}
 	if _, derr := m.q.DeleteSession(ctx, row.ID); derr != nil {
@@ -936,9 +949,6 @@ func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
 		return Session{}, err
 	}
 	defer finish()
-	if err := m.requireRuntime(); err != nil {
-		return Session{}, err
-	}
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
 		return Session{}, err
@@ -951,6 +961,12 @@ func (m *Manager) Restart(ctx context.Context, ref string) (Session, error) {
 	lock.Lock()
 	defer lock.Unlock()
 	if _, err := m.stopLocked(ctx, row.ID); err != nil {
+		return Session{}, err
+	}
+	if row.ExecutionKind == ExecutionHost {
+		return m.startLocked(ctx, row.ID)
+	}
+	if err := m.requireRuntime(); err != nil {
 		return Session{}, err
 	}
 	// Stop/Start preserves live work through hibernation; an explicit Restart
@@ -1068,6 +1084,9 @@ func (m *Manager) Update(ctx context.Context, ref string, p UpdateParams) (Sessi
 	if err != nil {
 		return Session{}, false, err
 	}
+	if err := requireVM(row); err != nil {
+		return Session{}, false, err
+	}
 	envJSON := row.EnvVars
 	if p.UpdateEnv {
 		if err := validateEnvVars(p.EnvVars); err != nil {
@@ -1170,6 +1189,9 @@ func (m *Manager) CommitImage(ctx context.Context, ref string, p CommitImagePara
 		return "", err
 	}
 
+	if err := requireVM(row); err != nil {
+		return "", err
+	}
 	// Keep the session safe from the idle reaper for the duration.
 	m.markBusy(row.ID)
 	defer m.unmarkBusy(row.ID)
@@ -1311,6 +1333,9 @@ func (m *Manager) Redeploy(ctx context.Context, ref, newImage string) (Session, 
 	if err != nil {
 		return Session{}, err
 	}
+	if err := requireVM(row); err != nil {
+		return Session{}, err
+	}
 	image := row.Image
 	if strings.TrimSpace(newImage) != "" {
 		image = newImage
@@ -1378,6 +1403,9 @@ func (m *Manager) Rollback(ctx context.Context, ref string) (Session, error) {
 	defer lock.Unlock()
 	row, err = m.lookup(ctx, row.ID)
 	if err != nil {
+		return Session{}, err
+	}
+	if err := requireVM(row); err != nil {
 		return Session{}, err
 	}
 	if row.PrevForkID == nil || row.PrevForkPath == nil {
@@ -1574,6 +1602,9 @@ func (m *Manager) Publish(ctx context.Context, ref string, p PublishParams) (Pub
 	}
 	row, err := m.lookup(ctx, ref)
 	if err != nil {
+		return PublishedPort{}, err
+	}
+	if err := requireVM(row); err != nil {
 		return PublishedPort{}, err
 	}
 	if _, gerr := m.q.GetPublishedPortBySessionPort(ctx, sqliteq.GetPublishedPortBySessionPortParams{
@@ -1775,9 +1806,7 @@ func (m *Manager) startLock(id string) *sync.Mutex {
 	return v.(*sync.Mutex)
 }
 
-// ReconcileOnBoot marks every "running" session as "stopped" at daemon start:
-// their VMs died with the previous daemon process. The forks persist, so the
-// operator can start them again. Mirrors the job supervisor's boot reconcile.
+// ReconcileOnBoot resets running metadata after daemon restart; the VM driver and systemd-bound host executor own process teardown.
 func (m *Manager) ReconcileOnBoot(ctx context.Context) error {
 	rows, err := m.q.ListSessions(ctx)
 	if err != nil {
@@ -1785,7 +1814,9 @@ func (m *Manager) ReconcileOnBoot(ctx context.Context) error {
 	}
 	keep := make([]string, 0, len(rows))
 	for _, r := range rows {
-		keep = append(keep, r.ID)
+		if r.ExecutionKind != ExecutionHost {
+			keep = append(keep, r.ID)
+		}
 		if State(r.State) != StateRunning {
 			continue
 		}
@@ -1908,7 +1939,7 @@ func (m *Manager) ReapIdle(ctx context.Context) (int, error) {
 	}
 	stopped := 0
 	for _, r := range rows {
-		if State(r.State) != StateRunning || m.busyCount(r.ID) > 0 {
+		if r.ExecutionKind == ExecutionHost || State(r.State) != StateRunning || m.busyCount(r.ID) > 0 {
 			continue
 		}
 		handle := m.getHandle(r.ID)
@@ -2123,22 +2154,30 @@ func (c *busyConn) Close() error {
 
 func sessionFromRow(r sqliteq.Session) Session {
 	s := Session{
-		ID:           r.ID,
-		Name:         r.Name,
-		Image:        r.Image,
-		State:        State(r.State),
-		CreatedAt:    time.Unix(r.CreatedAt, 0),
-		UpdatedAt:    time.Unix(r.UpdatedAt, 0),
-		LastUsedAt:   timePtrFromUnix(r.LastUsedAt),
-		DiskBytes:    forkBytes(r.ForkPath),
-		EgressPolicy: r.EgressPolicy,
-		RunApp:       r.RunApp != 0,
-		Gateway:      r.Gateway,
-		HasRollback:  r.PrevForkID != nil,
-		EnvVars:      parseEnvVars(r.EnvVars),
+		ExecutionKind: r.ExecutionKind,
+		HostAccount:   runtime.HostAccount{User: r.HostUser, UID: r.HostUid, Home: r.HostHome},
+		WorkingDir:    r.WorkingDir,
+		ID:            r.ID,
+		Name:          r.Name,
+		Image:         r.Image,
+		State:         State(r.State),
+		CreatedAt:     time.Unix(r.CreatedAt, 0),
+		UpdatedAt:     time.Unix(r.UpdatedAt, 0),
+		LastUsedAt:    timePtrFromUnix(r.LastUsedAt),
+		DiskBytes:     forkBytes(r.ForkPath),
+		EgressPolicy:  r.EgressPolicy,
+		RunApp:        r.RunApp != 0,
+		Gateway:       r.Gateway,
+		HasRollback:   r.PrevForkID != nil,
+		EnvVars:       parseEnvVars(r.EnvVars),
 	}
 	if r.VolumeID != nil {
 		s.VolumeID = *r.VolumeID
+	}
+	if r.ExecutionKind == ExecutionHost {
+		s.DiskBytes = 0
+		s.EgressPolicy = ""
+		s.Gateway = ""
 	}
 	return s
 }

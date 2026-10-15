@@ -14,6 +14,7 @@ func serveCmd() *cli.Command {
 		Usage: "run the fletcher daemon",
 		Flags: []cli.Flag{
 			socketFlag(),
+			&cli.StringFlag{Name: "host-user", Usage: "locally authorized Linux login account for explicit host sessions (disabled when empty)", Sources: cli.EnvVars("FLETCHER_HOST_USER")},
 			&cli.StringFlag{
 				Name:    "database",
 				Usage:   "SQLite database path",
@@ -117,6 +118,7 @@ func serveCmd() *cli.Command {
 				ProxyListenAddr:     cmd.String("proxy-listen"),
 				AgeIdentityPath:     cmd.String("age-key"),
 				RuntimeKind:         cmd.String("runtime"),
+				HostUser:            cmd.String("host-user"),
 				SnapshotKind:        cmd.String("snapshot"),
 				BtrfsRoot:           cmd.String("btrfs-root"),
 				RuncBinary:          cmd.String("runc-binary"),

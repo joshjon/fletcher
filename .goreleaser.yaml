@@ -49,6 +49,8 @@ archives:
       - DESIGN.md
       - STANDARDS.md
       - init/fletcher.service
+      - init/fletcher-host@.service
+      - init/fletcher-host@.socket
       - scripts/install.sh
 
 checksum:

@@ -9,14 +9,14 @@ Personal compute and app hosting on hardware the user owns. A single Go daemon o
 - **VMs and apps first.** The native client is the primary management interface, not an agent companion. VM creation and image deployment must be useful without an agent or model account. Do not turn the roadmap into an agent-harness feature race. (DESIGN sections 1, 2 and 7)
 - **Self-hosted compute, not a structural moat.** The user controls compute and storage. No hosted compute, mandatory hosted control plane or metering. Network access and external providers determine what leaves the host. Self-hosting and native clients are shared capabilities, not uniqueness claims. (DESIGN sections 1 and 8)
 - **One job model for background execution.** A job = environment + payload + trigger + sink. Keep trigger variants together. This does not make every interactive VM or app an agent task. (DESIGN section 4)
-- **The fork is the sandbox, the daemon mediates access.** Programs run natively inside isolated environments. Credential and egress guarantees depend on the configured mode. Do not promise that subscription credentials stay outside a guest where the user logs in. Future direct host sessions are explicitly outside the VM sandbox promise. (DESIGN sections 5 and 10.1)
-- **Direct host sessions are approved future work, not a fallback.** Keep VMs as the isolated default. Host execution must be explicit, show its machine/account and permissions, and use a reviewed launch backend rather than spawning user programs as the daemon service account. No host execution is implemented by the project-bookmark UI. (DESIGN section 10.1)
+- **The fork is the sandbox, the daemon mediates access.** Programs run natively inside isolated environments. Credential and egress guarantees depend on the configured mode. Do not promise that subscription credentials stay outside a guest where the user logs in. Direct host sessions are explicitly outside the VM sandbox promise. (DESIGN sections 5 and 10.1)
+- **Direct host sessions target the Linux daemon host, not the client Mac.** Keep VMs as the isolated default. Host execution must be explicit, show its machine/account and permissions, and use an independently authorized account executor rather than spawning user programs as the daemon service account. Persistent session and API/CLI integration exist, disabled by default. Native and cross-account systemd verification are tracked in `docs/HOST_SESSIONS.md`. (DESIGN section 10.1)
 - **No workflow engine in core.** Temporal remains excluded. Lifecycle management uses the existing supervisor, persistent state and runtime interfaces. (DESIGN sections 3 and 5)
 - **The model gateway is optional.** When enabled, it holds provider API keys and mediates model calls. It is not required for VM or app management, and subscription login is a separate credential mode. (DESIGN section 6)
 
 ## Platform & build constraints
 
-- **Linux VM-hosting runtime only for now.** The macOS VM-hosting runtime is deferred (DESIGN section 10), not the native macOS client or the separately planned direct host sessions (section 10.1). Do **not** scatter `exec("btrfs ...")` or `/dev/kvm` checks through job/agent/gateway code - all KVM/Firecracker calls live behind the runtime interface, all btrfs calls behind the snapshot interface. The interface seams exist so macOS becomes one more driver, not a rewrite.
+- **Linux VM-hosting runtime only for now.** The macOS VM-hosting runtime is deferred (DESIGN section 10), not the native macOS client or the separate direct host sessions (section 10.1). Do **not** scatter `exec("btrfs ...")` or `/dev/kvm` checks through job/agent/gateway code - all KVM/Firecracker calls live behind the runtime interface, all btrfs calls behind the snapshot interface. The interface seams exist so macOS becomes one more driver, not a rewrite.
 - **Single static binary, `CGO_ENABLED=0`.** Pure-Go SQLite (`modernc.org/sqlite`). Anything that pulls in CGO needs a strong justification.
 - **VMM bundled via `embed.FS`**, extracted on first run. One VMM process per VM at runtime.
 
@@ -46,7 +46,7 @@ Personal compute and app hosting on hardware the user owns. A single Go daemon o
 
 ## Out of scope (do not propose)
 
-- macOS VM-hosting runtime (deferred, DESIGN section 10). The macOS client is in scope. Direct host sessions are a separate planned capability (section 10.1); their initial platform scope is still open.
+- macOS VM-hosting runtime (deferred, DESIGN section 10). The macOS client is in scope. Direct host sessions are a separate capability (section 10.1), initially limited to the Linux daemon host.
 - Multi-box mesh / hosted control plane / coordination SaaS
 - Built-in metering or billing
 - A skill marketplace or a first-party agent harness (DESIGN sections 2 and 8)

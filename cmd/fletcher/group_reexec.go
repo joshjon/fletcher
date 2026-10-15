@@ -47,8 +47,8 @@ func maybeReexecUnderDaemonGroup() {
 	if os.Getenv(reexecSentinelEnv) != "" {
 		return
 	}
-	// `fletcher serve` creates the socket; never re-exec the daemon itself.
-	if hasServeCommand(os.Args[1:]) {
+	// Service entrypoints keep their configured identity and inherited sockets.
+	if hasServeCommand(os.Args[1:]) || slices.Contains(os.Args[1:], "host-executor") {
 		return
 	}
 	gid, ok := socketOwningGID()

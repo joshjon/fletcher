@@ -134,11 +134,11 @@ type Session struct {
 	LastUsedAt *int64 `protobuf:"varint,7,opt,name=last_used_at,json=lastUsedAt,proto3,oneof" json:"last_used_at,omitempty"`
 	// disk_bytes is the session fork's on-disk size.
 	DiskBytes int64 `protobuf:"varint,8,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"`
-	// egress_policy gates the fork's outbound network via the daemon proxy:
+	// egress_policy is VM-only and empty for host sessions. It gates the fork's outbound network via the daemon proxy:
 	// "none" (no egress), "allowlist" (curated hosts), or "open" (any public
 	// host; the LAN guard still applies). DESIGN.md section 5.
 	EgressPolicy string `protobuf:"bytes,9,opt,name=egress_policy,json=egressPolicy,proto3" json:"egress_policy,omitempty"`
-	// gateway is "on" or "off": whether the daemon's model-gateway env
+	// gateway is VM-only and empty for host sessions. "on" or "off" controls whether the daemon's model-gateway env
 	// (ANTHROPIC_/OPENAI_ base-URL + key) is injected. "off" lets an agent use
 	// its own auth (e.g. a subscription OAuth login) instead. DESIGN.md section 6.
 	Gateway string `protobuf:"bytes,10,opt,name=gateway,proto3" json:"gateway,omitempty"`
@@ -158,7 +158,13 @@ type Session struct {
 	// env_vars are the user-set environment variables injected into the session's
 	// app/process at boot. Populated by GetSession. A secret var carries only its
 	// name and secret_name (never the secret's value).
-	EnvVars       []*EnvVar `protobuf:"bytes,15,rep,name=env_vars,json=envVars,proto3" json:"env_vars,omitempty"`
+	EnvVars []*EnvVar `protobuf:"bytes,15,rep,name=env_vars,json=envVars,proto3" json:"env_vars,omitempty"`
+	// execution_kind is "vm" or "host". An omitted value on older daemons means VM.
+	ExecutionKind string `protobuf:"bytes,16,opt,name=execution_kind,json=executionKind,proto3" json:"execution_kind,omitempty"`
+	// host_account is present only for explicit host sessions, which have no VM isolation.
+	HostAccount *HostSessionAccount `protobuf:"bytes,17,opt,name=host_account,json=hostAccount,proto3" json:"host_account,omitempty"`
+	// working_dir is the initial host directory, not a sandbox or a live pane cwd.
+	WorkingDir    string `protobuf:"bytes,18,opt,name=working_dir,json=workingDir,proto3" json:"working_dir,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -298,6 +304,176 @@ func (x *Session) GetEnvVars() []*EnvVar {
 	return nil
 }
 
+func (x *Session) GetExecutionKind() string {
+	if x != nil {
+		return x.ExecutionKind
+	}
+	return ""
+}
+
+func (x *Session) GetHostAccount() *HostSessionAccount {
+	if x != nil {
+		return x.HostAccount
+	}
+	return nil
+}
+
+func (x *Session) GetWorkingDir() string {
+	if x != nil {
+		return x.WorkingDir
+	}
+	return ""
+}
+
+type HostSessionAccount struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          string                 `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	Uid           int64                  `protobuf:"varint,2,opt,name=uid,proto3" json:"uid,omitempty"`
+	Home          string                 `protobuf:"bytes,3,opt,name=home,proto3" json:"home,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostSessionAccount) Reset() {
+	*x = HostSessionAccount{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostSessionAccount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostSessionAccount) ProtoMessage() {}
+
+func (x *HostSessionAccount) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostSessionAccount.ProtoReflect.Descriptor instead.
+func (*HostSessionAccount) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *HostSessionAccount) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
+func (x *HostSessionAccount) GetUid() int64 {
+	if x != nil {
+		return x.Uid
+	}
+	return 0
+}
+
+func (x *HostSessionAccount) GetHome() string {
+	if x != nil {
+		return x.Home
+	}
+	return ""
+}
+
+type GetHostSessionAccountRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetHostSessionAccountRequest) Reset() {
+	*x = GetHostSessionAccountRequest{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetHostSessionAccountRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHostSessionAccountRequest) ProtoMessage() {}
+
+func (x *GetHostSessionAccountRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHostSessionAccountRequest.ProtoReflect.Descriptor instead.
+func (*GetHostSessionAccountRequest) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{2}
+}
+
+type GetHostSessionAccountResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Account *HostSessionAccount    `protobuf:"bytes,1,opt,name=account,proto3" json:"account,omitempty"`
+	// machine is the Linux daemon host, never the client device.
+	Machine       string `protobuf:"bytes,2,opt,name=machine,proto3" json:"machine,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetHostSessionAccountResponse) Reset() {
+	*x = GetHostSessionAccountResponse{}
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetHostSessionAccountResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetHostSessionAccountResponse) ProtoMessage() {}
+
+func (x *GetHostSessionAccountResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetHostSessionAccountResponse.ProtoReflect.Descriptor instead.
+func (*GetHostSessionAccountResponse) Descriptor() ([]byte, []int) {
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *GetHostSessionAccountResponse) GetAccount() *HostSessionAccount {
+	if x != nil {
+		return x.Account
+	}
+	return nil
+}
+
+func (x *GetHostSessionAccountResponse) GetMachine() string {
+	if x != nil {
+		return x.Machine
+	}
+	return ""
+}
+
 // EnvVar is one user-set environment variable injected into a session's
 // app/process. Exactly one source is set: value for a plain literal, or
 // secret_name to reference a stored secret (SecretService) resolved at boot.
@@ -319,7 +495,7 @@ type EnvVar struct {
 
 func (x *EnvVar) Reset() {
 	*x = EnvVar{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[1]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -331,7 +507,7 @@ func (x *EnvVar) String() string {
 func (*EnvVar) ProtoMessage() {}
 
 func (x *EnvVar) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[1]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -344,7 +520,7 @@ func (x *EnvVar) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnvVar.ProtoReflect.Descriptor instead.
 func (*EnvVar) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{1}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *EnvVar) GetName() string {
@@ -384,7 +560,7 @@ type DeployInfo struct {
 
 func (x *DeployInfo) Reset() {
 	*x = DeployInfo{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[2]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -396,7 +572,7 @@ func (x *DeployInfo) String() string {
 func (*DeployInfo) ProtoMessage() {}
 
 func (x *DeployInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[2]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -409,7 +585,7 @@ func (x *DeployInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployInfo.ProtoReflect.Descriptor instead.
 func (*DeployInfo) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{2}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DeployInfo) GetEntrypoint() []string {
@@ -453,14 +629,22 @@ type CreateSessionRequest struct {
 	Credentials []string `protobuf:"bytes,7,rep,name=credentials,proto3" json:"credentials,omitempty"`
 	// env_vars are user-set environment variables injected into the session's
 	// app/process at boot (plain values, or references to stored secrets).
-	EnvVars       []*EnvVar `protobuf:"bytes,8,rep,name=env_vars,json=envVars,proto3" json:"env_vars,omitempty"`
+	EnvVars []*EnvVar `protobuf:"bytes,8,rep,name=env_vars,json=envVars,proto3" json:"env_vars,omitempty"`
+	// execution_kind must be explicit for host execution; omitted means VM.
+	// Host requests must leave all VM-specific options unset.
+	ExecutionKind string `protobuf:"bytes,9,opt,name=execution_kind,json=executionKind,proto3" json:"execution_kind,omitempty"`
+	// Host creation must confirm the account returned by GetHostSessionAccount.
+	HostUser string `protobuf:"bytes,10,opt,name=host_user,json=hostUser,proto3" json:"host_user,omitempty"`
+	HostUid  int64  `protobuf:"varint,11,opt,name=host_uid,json=hostUid,proto3" json:"host_uid,omitempty"`
+	// working_dir defaults to the authorized account's home for host sessions.
+	WorkingDir    string `protobuf:"bytes,12,opt,name=working_dir,json=workingDir,proto3" json:"working_dir,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateSessionRequest) Reset() {
 	*x = CreateSessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[3]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -472,7 +656,7 @@ func (x *CreateSessionRequest) String() string {
 func (*CreateSessionRequest) ProtoMessage() {}
 
 func (x *CreateSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[3]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -485,7 +669,7 @@ func (x *CreateSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateSessionRequest.ProtoReflect.Descriptor instead.
 func (*CreateSessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{3}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CreateSessionRequest) GetName() string {
@@ -544,6 +728,34 @@ func (x *CreateSessionRequest) GetEnvVars() []*EnvVar {
 	return nil
 }
 
+func (x *CreateSessionRequest) GetExecutionKind() string {
+	if x != nil {
+		return x.ExecutionKind
+	}
+	return ""
+}
+
+func (x *CreateSessionRequest) GetHostUser() string {
+	if x != nil {
+		return x.HostUser
+	}
+	return ""
+}
+
+func (x *CreateSessionRequest) GetHostUid() int64 {
+	if x != nil {
+		return x.HostUid
+	}
+	return 0
+}
+
+func (x *CreateSessionRequest) GetWorkingDir() string {
+	if x != nil {
+		return x.WorkingDir
+	}
+	return ""
+}
+
 type CreateSessionResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Session       *Session               `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
@@ -553,7 +765,7 @@ type CreateSessionResponse struct {
 
 func (x *CreateSessionResponse) Reset() {
 	*x = CreateSessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[4]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -565,7 +777,7 @@ func (x *CreateSessionResponse) String() string {
 func (*CreateSessionResponse) ProtoMessage() {}
 
 func (x *CreateSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[4]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -578,7 +790,7 @@ func (x *CreateSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateSessionResponse.ProtoReflect.Descriptor instead.
 func (*CreateSessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{4}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CreateSessionResponse) GetSession() *Session {
@@ -598,7 +810,7 @@ type GetSessionRequest struct {
 
 func (x *GetSessionRequest) Reset() {
 	*x = GetSessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[5]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -610,7 +822,7 @@ func (x *GetSessionRequest) String() string {
 func (*GetSessionRequest) ProtoMessage() {}
 
 func (x *GetSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[5]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -623,7 +835,7 @@ func (x *GetSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionRequest.ProtoReflect.Descriptor instead.
 func (*GetSessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{5}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *GetSessionRequest) GetRef() string {
@@ -642,7 +854,7 @@ type GetSessionResponse struct {
 
 func (x *GetSessionResponse) Reset() {
 	*x = GetSessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[6]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -654,7 +866,7 @@ func (x *GetSessionResponse) String() string {
 func (*GetSessionResponse) ProtoMessage() {}
 
 func (x *GetSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[6]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -667,7 +879,7 @@ func (x *GetSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionResponse.ProtoReflect.Descriptor instead.
 func (*GetSessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{6}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *GetSessionResponse) GetSession() *Session {
@@ -685,7 +897,7 @@ type ListSessionsRequest struct {
 
 func (x *ListSessionsRequest) Reset() {
 	*x = ListSessionsRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[7]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -697,7 +909,7 @@ func (x *ListSessionsRequest) String() string {
 func (*ListSessionsRequest) ProtoMessage() {}
 
 func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[7]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -710,7 +922,7 @@ func (x *ListSessionsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsRequest.ProtoReflect.Descriptor instead.
 func (*ListSessionsRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{7}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{10}
 }
 
 type ListSessionsResponse struct {
@@ -722,7 +934,7 @@ type ListSessionsResponse struct {
 
 func (x *ListSessionsResponse) Reset() {
 	*x = ListSessionsResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[8]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -734,7 +946,7 @@ func (x *ListSessionsResponse) String() string {
 func (*ListSessionsResponse) ProtoMessage() {}
 
 func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[8]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -747,7 +959,7 @@ func (x *ListSessionsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSessionsResponse.ProtoReflect.Descriptor instead.
 func (*ListSessionsResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{8}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListSessionsResponse) GetSessions() []*Session {
@@ -766,7 +978,7 @@ type StartSessionRequest struct {
 
 func (x *StartSessionRequest) Reset() {
 	*x = StartSessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[9]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -778,7 +990,7 @@ func (x *StartSessionRequest) String() string {
 func (*StartSessionRequest) ProtoMessage() {}
 
 func (x *StartSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[9]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -791,7 +1003,7 @@ func (x *StartSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionRequest.ProtoReflect.Descriptor instead.
 func (*StartSessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{9}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *StartSessionRequest) GetRef() string {
@@ -810,7 +1022,7 @@ type StartSessionResponse struct {
 
 func (x *StartSessionResponse) Reset() {
 	*x = StartSessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[10]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -822,7 +1034,7 @@ func (x *StartSessionResponse) String() string {
 func (*StartSessionResponse) ProtoMessage() {}
 
 func (x *StartSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[10]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -835,7 +1047,7 @@ func (x *StartSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartSessionResponse.ProtoReflect.Descriptor instead.
 func (*StartSessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{10}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *StartSessionResponse) GetSession() *Session {
@@ -854,7 +1066,7 @@ type StopSessionRequest struct {
 
 func (x *StopSessionRequest) Reset() {
 	*x = StopSessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[11]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -866,7 +1078,7 @@ func (x *StopSessionRequest) String() string {
 func (*StopSessionRequest) ProtoMessage() {}
 
 func (x *StopSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[11]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -879,7 +1091,7 @@ func (x *StopSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopSessionRequest.ProtoReflect.Descriptor instead.
 func (*StopSessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{11}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *StopSessionRequest) GetRef() string {
@@ -898,7 +1110,7 @@ type StopSessionResponse struct {
 
 func (x *StopSessionResponse) Reset() {
 	*x = StopSessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[12]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -910,7 +1122,7 @@ func (x *StopSessionResponse) String() string {
 func (*StopSessionResponse) ProtoMessage() {}
 
 func (x *StopSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[12]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -923,7 +1135,7 @@ func (x *StopSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopSessionResponse.ProtoReflect.Descriptor instead.
 func (*StopSessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{12}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *StopSessionResponse) GetSession() *Session {
@@ -942,7 +1154,7 @@ type DeleteSessionRequest struct {
 
 func (x *DeleteSessionRequest) Reset() {
 	*x = DeleteSessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[13]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -954,7 +1166,7 @@ func (x *DeleteSessionRequest) String() string {
 func (*DeleteSessionRequest) ProtoMessage() {}
 
 func (x *DeleteSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[13]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -967,7 +1179,7 @@ func (x *DeleteSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSessionRequest.ProtoReflect.Descriptor instead.
 func (*DeleteSessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{13}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DeleteSessionRequest) GetRef() string {
@@ -986,7 +1198,7 @@ type DeleteSessionResponse struct {
 
 func (x *DeleteSessionResponse) Reset() {
 	*x = DeleteSessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[14]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -998,7 +1210,7 @@ func (x *DeleteSessionResponse) String() string {
 func (*DeleteSessionResponse) ProtoMessage() {}
 
 func (x *DeleteSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[14]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1011,7 +1223,7 @@ func (x *DeleteSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSessionResponse.ProtoReflect.Descriptor instead.
 func (*DeleteSessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{14}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *DeleteSessionResponse) GetDeleted() bool {
@@ -1043,7 +1255,7 @@ type UpdateSessionRequest struct {
 
 func (x *UpdateSessionRequest) Reset() {
 	*x = UpdateSessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[15]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1055,7 +1267,7 @@ func (x *UpdateSessionRequest) String() string {
 func (*UpdateSessionRequest) ProtoMessage() {}
 
 func (x *UpdateSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[15]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1068,7 +1280,7 @@ func (x *UpdateSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateSessionRequest.ProtoReflect.Descriptor instead.
 func (*UpdateSessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{15}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *UpdateSessionRequest) GetRef() string {
@@ -1118,7 +1330,7 @@ type UpdateSessionResponse struct {
 
 func (x *UpdateSessionResponse) Reset() {
 	*x = UpdateSessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[16]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1130,7 +1342,7 @@ func (x *UpdateSessionResponse) String() string {
 func (*UpdateSessionResponse) ProtoMessage() {}
 
 func (x *UpdateSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[16]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1143,7 +1355,7 @@ func (x *UpdateSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateSessionResponse.ProtoReflect.Descriptor instead.
 func (*UpdateSessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{16}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *UpdateSessionResponse) GetSession() *Session {
@@ -1170,7 +1382,7 @@ type ExecSessionRequest struct {
 
 func (x *ExecSessionRequest) Reset() {
 	*x = ExecSessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[17]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1182,7 +1394,7 @@ func (x *ExecSessionRequest) String() string {
 func (*ExecSessionRequest) ProtoMessage() {}
 
 func (x *ExecSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[17]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1195,7 +1407,7 @@ func (x *ExecSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecSessionRequest.ProtoReflect.Descriptor instead.
 func (*ExecSessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{17}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ExecSessionRequest) GetRef() string {
@@ -1223,7 +1435,7 @@ type ExecSessionResponse struct {
 
 func (x *ExecSessionResponse) Reset() {
 	*x = ExecSessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[18]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1235,7 +1447,7 @@ func (x *ExecSessionResponse) String() string {
 func (*ExecSessionResponse) ProtoMessage() {}
 
 func (x *ExecSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[18]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1248,7 +1460,7 @@ func (x *ExecSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecSessionResponse.ProtoReflect.Descriptor instead.
 func (*ExecSessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{18}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ExecSessionResponse) GetStdout() string {
@@ -1282,7 +1494,7 @@ type RestartSessionRequest struct {
 
 func (x *RestartSessionRequest) Reset() {
 	*x = RestartSessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[19]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1294,7 +1506,7 @@ func (x *RestartSessionRequest) String() string {
 func (*RestartSessionRequest) ProtoMessage() {}
 
 func (x *RestartSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[19]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1307,7 +1519,7 @@ func (x *RestartSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartSessionRequest.ProtoReflect.Descriptor instead.
 func (*RestartSessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{19}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *RestartSessionRequest) GetRef() string {
@@ -1326,7 +1538,7 @@ type RestartSessionResponse struct {
 
 func (x *RestartSessionResponse) Reset() {
 	*x = RestartSessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[20]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1338,7 +1550,7 @@ func (x *RestartSessionResponse) String() string {
 func (*RestartSessionResponse) ProtoMessage() {}
 
 func (x *RestartSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[20]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1351,7 +1563,7 @@ func (x *RestartSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartSessionResponse.ProtoReflect.Descriptor instead.
 func (*RestartSessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{20}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *RestartSessionResponse) GetSession() *Session {
@@ -1376,7 +1588,7 @@ type RedeploySessionRequest struct {
 
 func (x *RedeploySessionRequest) Reset() {
 	*x = RedeploySessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[21]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1388,7 +1600,7 @@ func (x *RedeploySessionRequest) String() string {
 func (*RedeploySessionRequest) ProtoMessage() {}
 
 func (x *RedeploySessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[21]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1401,7 +1613,7 @@ func (x *RedeploySessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedeploySessionRequest.ProtoReflect.Descriptor instead.
 func (*RedeploySessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{21}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *RedeploySessionRequest) GetRef() string {
@@ -1431,7 +1643,7 @@ type RedeploySessionResponse struct {
 
 func (x *RedeploySessionResponse) Reset() {
 	*x = RedeploySessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[22]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1443,7 +1655,7 @@ func (x *RedeploySessionResponse) String() string {
 func (*RedeploySessionResponse) ProtoMessage() {}
 
 func (x *RedeploySessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[22]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1456,7 +1668,7 @@ func (x *RedeploySessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedeploySessionResponse.ProtoReflect.Descriptor instead.
 func (*RedeploySessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{22}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *RedeploySessionResponse) GetSession() *Session {
@@ -1499,7 +1711,7 @@ type CommitSessionImageRequest struct {
 
 func (x *CommitSessionImageRequest) Reset() {
 	*x = CommitSessionImageRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[23]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1511,7 +1723,7 @@ func (x *CommitSessionImageRequest) String() string {
 func (*CommitSessionImageRequest) ProtoMessage() {}
 
 func (x *CommitSessionImageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[23]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1524,7 +1736,7 @@ func (x *CommitSessionImageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitSessionImageRequest.ProtoReflect.Descriptor instead.
 func (*CommitSessionImageRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{23}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CommitSessionImageRequest) GetRef() string {
@@ -1586,7 +1798,7 @@ type CommitSessionImageResponse struct {
 
 func (x *CommitSessionImageResponse) Reset() {
 	*x = CommitSessionImageResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[24]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1598,7 +1810,7 @@ func (x *CommitSessionImageResponse) String() string {
 func (*CommitSessionImageResponse) ProtoMessage() {}
 
 func (x *CommitSessionImageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[24]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1611,7 +1823,7 @@ func (x *CommitSessionImageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitSessionImageResponse.ProtoReflect.Descriptor instead.
 func (*CommitSessionImageResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{24}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CommitSessionImageResponse) GetImage() string {
@@ -1631,7 +1843,7 @@ type RollbackSessionRequest struct {
 
 func (x *RollbackSessionRequest) Reset() {
 	*x = RollbackSessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[25]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1643,7 +1855,7 @@ func (x *RollbackSessionRequest) String() string {
 func (*RollbackSessionRequest) ProtoMessage() {}
 
 func (x *RollbackSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[25]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1656,7 +1868,7 @@ func (x *RollbackSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackSessionRequest.ProtoReflect.Descriptor instead.
 func (*RollbackSessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{25}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *RollbackSessionRequest) GetRef() string {
@@ -1675,7 +1887,7 @@ type RollbackSessionResponse struct {
 
 func (x *RollbackSessionResponse) Reset() {
 	*x = RollbackSessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[26]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1687,7 +1899,7 @@ func (x *RollbackSessionResponse) String() string {
 func (*RollbackSessionResponse) ProtoMessage() {}
 
 func (x *RollbackSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[26]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1700,7 +1912,7 @@ func (x *RollbackSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackSessionResponse.ProtoReflect.Descriptor instead.
 func (*RollbackSessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{26}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *RollbackSessionResponse) GetSession() *Session {
@@ -1722,7 +1934,7 @@ type GetSessionLogsRequest struct {
 
 func (x *GetSessionLogsRequest) Reset() {
 	*x = GetSessionLogsRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[27]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1734,7 +1946,7 @@ func (x *GetSessionLogsRequest) String() string {
 func (*GetSessionLogsRequest) ProtoMessage() {}
 
 func (x *GetSessionLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[27]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1747,7 +1959,7 @@ func (x *GetSessionLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionLogsRequest.ProtoReflect.Descriptor instead.
 func (*GetSessionLogsRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{27}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetSessionLogsRequest) GetRef() string {
@@ -1774,7 +1986,7 @@ type GetSessionLogsResponse struct {
 
 func (x *GetSessionLogsResponse) Reset() {
 	*x = GetSessionLogsResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[28]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1786,7 +1998,7 @@ func (x *GetSessionLogsResponse) String() string {
 func (*GetSessionLogsResponse) ProtoMessage() {}
 
 func (x *GetSessionLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[28]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1799,7 +2011,7 @@ func (x *GetSessionLogsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSessionLogsResponse.ProtoReflect.Descriptor instead.
 func (*GetSessionLogsResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{28}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *GetSessionLogsResponse) GetContent() string {
@@ -1825,7 +2037,7 @@ type StreamSessionLogsRequest struct {
 
 func (x *StreamSessionLogsRequest) Reset() {
 	*x = StreamSessionLogsRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[29]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1837,7 +2049,7 @@ func (x *StreamSessionLogsRequest) String() string {
 func (*StreamSessionLogsRequest) ProtoMessage() {}
 
 func (x *StreamSessionLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[29]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1850,7 +2062,7 @@ func (x *StreamSessionLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamSessionLogsRequest.ProtoReflect.Descriptor instead.
 func (*StreamSessionLogsRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{29}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *StreamSessionLogsRequest) GetRef() string {
@@ -1884,7 +2096,7 @@ type StreamSessionLogsResponse struct {
 
 func (x *StreamSessionLogsResponse) Reset() {
 	*x = StreamSessionLogsResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[30]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1896,7 +2108,7 @@ func (x *StreamSessionLogsResponse) String() string {
 func (*StreamSessionLogsResponse) ProtoMessage() {}
 
 func (x *StreamSessionLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[30]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1909,7 +2121,7 @@ func (x *StreamSessionLogsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamSessionLogsResponse.ProtoReflect.Descriptor instead.
 func (*StreamSessionLogsResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{30}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *StreamSessionLogsResponse) GetData() []byte {
@@ -1933,7 +2145,7 @@ type ShellSessionRequest struct {
 
 func (x *ShellSessionRequest) Reset() {
 	*x = ShellSessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[31]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1945,7 +2157,7 @@ func (x *ShellSessionRequest) String() string {
 func (*ShellSessionRequest) ProtoMessage() {}
 
 func (x *ShellSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[31]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1958,7 +2170,7 @@ func (x *ShellSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellSessionRequest.ProtoReflect.Descriptor instead.
 func (*ShellSessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{31}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ShellSessionRequest) GetMsg() isShellSessionRequest_Msg {
@@ -2051,7 +2263,7 @@ type ShellStart struct {
 
 func (x *ShellStart) Reset() {
 	*x = ShellStart{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[32]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2063,7 +2275,7 @@ func (x *ShellStart) String() string {
 func (*ShellStart) ProtoMessage() {}
 
 func (x *ShellStart) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[32]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2076,7 +2288,7 @@ func (x *ShellStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellStart.ProtoReflect.Descriptor instead.
 func (*ShellStart) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{32}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ShellStart) GetRef() string {
@@ -2138,7 +2350,7 @@ type ShellResize struct {
 
 func (x *ShellResize) Reset() {
 	*x = ShellResize{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[33]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2150,7 +2362,7 @@ func (x *ShellResize) String() string {
 func (*ShellResize) ProtoMessage() {}
 
 func (x *ShellResize) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[33]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2163,7 +2375,7 @@ func (x *ShellResize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellResize.ProtoReflect.Descriptor instead.
 func (*ShellResize) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{33}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ShellResize) GetCols() uint32 {
@@ -2193,7 +2405,7 @@ type ShellSessionResponse struct {
 
 func (x *ShellSessionResponse) Reset() {
 	*x = ShellSessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[34]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2205,7 +2417,7 @@ func (x *ShellSessionResponse) String() string {
 func (*ShellSessionResponse) ProtoMessage() {}
 
 func (x *ShellSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[34]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2218,7 +2430,7 @@ func (x *ShellSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellSessionResponse.ProtoReflect.Descriptor instead.
 func (*ShellSessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{34}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ShellSessionResponse) GetMsg() isShellSessionResponse_Msg {
@@ -2277,7 +2489,7 @@ type ProxySessionRequest struct {
 
 func (x *ProxySessionRequest) Reset() {
 	*x = ProxySessionRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[35]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2289,7 +2501,7 @@ func (x *ProxySessionRequest) String() string {
 func (*ProxySessionRequest) ProtoMessage() {}
 
 func (x *ProxySessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[35]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2302,7 +2514,7 @@ func (x *ProxySessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProxySessionRequest.ProtoReflect.Descriptor instead.
 func (*ProxySessionRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{35}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ProxySessionRequest) GetMsg() isProxySessionRequest_Msg {
@@ -2358,7 +2570,7 @@ type ProxyOpen struct {
 
 func (x *ProxyOpen) Reset() {
 	*x = ProxyOpen{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[36]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2370,7 +2582,7 @@ func (x *ProxyOpen) String() string {
 func (*ProxyOpen) ProtoMessage() {}
 
 func (x *ProxyOpen) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[36]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2383,7 +2595,7 @@ func (x *ProxyOpen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProxyOpen.ProtoReflect.Descriptor instead.
 func (*ProxyOpen) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{36}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ProxyOpen) GetRef() string {
@@ -2403,7 +2615,7 @@ type ProxySessionResponse struct {
 
 func (x *ProxySessionResponse) Reset() {
 	*x = ProxySessionResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[37]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2415,7 +2627,7 @@ func (x *ProxySessionResponse) String() string {
 func (*ProxySessionResponse) ProtoMessage() {}
 
 func (x *ProxySessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[37]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2428,7 +2640,7 @@ func (x *ProxySessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProxySessionResponse.ProtoReflect.Descriptor instead.
 func (*ProxySessionResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{37}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ProxySessionResponse) GetData() []byte {
@@ -2451,7 +2663,7 @@ type UploadFileRequest struct {
 
 func (x *UploadFileRequest) Reset() {
 	*x = UploadFileRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[38]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2463,7 +2675,7 @@ func (x *UploadFileRequest) String() string {
 func (*UploadFileRequest) ProtoMessage() {}
 
 func (x *UploadFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[38]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2476,7 +2688,7 @@ func (x *UploadFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadFileRequest.ProtoReflect.Descriptor instead.
 func (*UploadFileRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{38}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *UploadFileRequest) GetMsg() isUploadFileRequest_Msg {
@@ -2546,7 +2758,7 @@ type UploadStart struct {
 
 func (x *UploadStart) Reset() {
 	*x = UploadStart{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[39]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2558,7 +2770,7 @@ func (x *UploadStart) String() string {
 func (*UploadStart) ProtoMessage() {}
 
 func (x *UploadStart) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[39]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2571,7 +2783,7 @@ func (x *UploadStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadStart.ProtoReflect.Descriptor instead.
 func (*UploadStart) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{39}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *UploadStart) GetRef() string {
@@ -2622,7 +2834,7 @@ type UploadFileResponse struct {
 
 func (x *UploadFileResponse) Reset() {
 	*x = UploadFileResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[40]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2634,7 +2846,7 @@ func (x *UploadFileResponse) String() string {
 func (*UploadFileResponse) ProtoMessage() {}
 
 func (x *UploadFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[40]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2647,7 +2859,7 @@ func (x *UploadFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadFileResponse.ProtoReflect.Descriptor instead.
 func (*UploadFileResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{40}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *UploadFileResponse) GetBytesWritten() int64 {
@@ -2677,7 +2889,7 @@ type DownloadFileRequest struct {
 
 func (x *DownloadFileRequest) Reset() {
 	*x = DownloadFileRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[41]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2689,7 +2901,7 @@ func (x *DownloadFileRequest) String() string {
 func (*DownloadFileRequest) ProtoMessage() {}
 
 func (x *DownloadFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[41]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2702,7 +2914,7 @@ func (x *DownloadFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadFileRequest.ProtoReflect.Descriptor instead.
 func (*DownloadFileRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{41}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *DownloadFileRequest) GetRef() string {
@@ -2732,7 +2944,7 @@ type DownloadFileResponse struct {
 
 func (x *DownloadFileResponse) Reset() {
 	*x = DownloadFileResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[42]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2744,7 +2956,7 @@ func (x *DownloadFileResponse) String() string {
 func (*DownloadFileResponse) ProtoMessage() {}
 
 func (x *DownloadFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[42]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2757,7 +2969,7 @@ func (x *DownloadFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadFileResponse.ProtoReflect.Descriptor instead.
 func (*DownloadFileResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{42}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *DownloadFileResponse) GetMsg() isDownloadFileResponse_Msg {
@@ -2815,7 +3027,7 @@ type FileInfo struct {
 
 func (x *FileInfo) Reset() {
 	*x = FileInfo{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[43]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2827,7 +3039,7 @@ func (x *FileInfo) String() string {
 func (*FileInfo) ProtoMessage() {}
 
 func (x *FileInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[43]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2840,7 +3052,7 @@ func (x *FileInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileInfo.ProtoReflect.Descriptor instead.
 func (*FileInfo) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{43}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *FileInfo) GetSize() int64 {
@@ -2870,7 +3082,7 @@ type ListDirRequest struct {
 
 func (x *ListDirRequest) Reset() {
 	*x = ListDirRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[44]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2882,7 +3094,7 @@ func (x *ListDirRequest) String() string {
 func (*ListDirRequest) ProtoMessage() {}
 
 func (x *ListDirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[44]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2895,7 +3107,7 @@ func (x *ListDirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDirRequest.ProtoReflect.Descriptor instead.
 func (*ListDirRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{44}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *ListDirRequest) GetRef() string {
@@ -2927,7 +3139,7 @@ type ListDirResponse struct {
 
 func (x *ListDirResponse) Reset() {
 	*x = ListDirResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[45]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2939,7 +3151,7 @@ func (x *ListDirResponse) String() string {
 func (*ListDirResponse) ProtoMessage() {}
 
 func (x *ListDirResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[45]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2952,7 +3164,7 @@ func (x *ListDirResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListDirResponse.ProtoReflect.Descriptor instead.
 func (*ListDirResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{45}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *ListDirResponse) GetPath() string {
@@ -2996,7 +3208,7 @@ type FileOpRequest struct {
 
 func (x *FileOpRequest) Reset() {
 	*x = FileOpRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[46]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3008,7 +3220,7 @@ func (x *FileOpRequest) String() string {
 func (*FileOpRequest) ProtoMessage() {}
 
 func (x *FileOpRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[46]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3021,7 +3233,7 @@ func (x *FileOpRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileOpRequest.ProtoReflect.Descriptor instead.
 func (*FileOpRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{46}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *FileOpRequest) GetRef() string {
@@ -3067,7 +3279,7 @@ type FileOpResponse struct {
 
 func (x *FileOpResponse) Reset() {
 	*x = FileOpResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[47]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3079,7 +3291,7 @@ func (x *FileOpResponse) String() string {
 func (*FileOpResponse) ProtoMessage() {}
 
 func (x *FileOpResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[47]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3092,7 +3304,7 @@ func (x *FileOpResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileOpResponse.ProtoReflect.Descriptor instead.
 func (*FileOpResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{47}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{50}
 }
 
 type DirEntry struct {
@@ -3117,7 +3329,7 @@ type DirEntry struct {
 
 func (x *DirEntry) Reset() {
 	*x = DirEntry{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[48]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3129,7 +3341,7 @@ func (x *DirEntry) String() string {
 func (*DirEntry) ProtoMessage() {}
 
 func (x *DirEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[48]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3142,7 +3354,7 @@ func (x *DirEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DirEntry.ProtoReflect.Descriptor instead.
 func (*DirEntry) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{48}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *DirEntry) GetName() string {
@@ -3229,7 +3441,7 @@ type PublishedPort struct {
 
 func (x *PublishedPort) Reset() {
 	*x = PublishedPort{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[49]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3241,7 +3453,7 @@ func (x *PublishedPort) String() string {
 func (*PublishedPort) ProtoMessage() {}
 
 func (x *PublishedPort) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[49]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3254,7 +3466,7 @@ func (x *PublishedPort) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishedPort.ProtoReflect.Descriptor instead.
 func (*PublishedPort) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{49}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *PublishedPort) GetId() string {
@@ -3346,7 +3558,7 @@ type PublishPortRequest struct {
 
 func (x *PublishPortRequest) Reset() {
 	*x = PublishPortRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[50]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3358,7 +3570,7 @@ func (x *PublishPortRequest) String() string {
 func (*PublishPortRequest) ProtoMessage() {}
 
 func (x *PublishPortRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[50]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3371,7 +3583,7 @@ func (x *PublishPortRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishPortRequest.ProtoReflect.Descriptor instead.
 func (*PublishPortRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{50}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *PublishPortRequest) GetRef() string {
@@ -3422,7 +3634,7 @@ type PublishPortResponse struct {
 
 func (x *PublishPortResponse) Reset() {
 	*x = PublishPortResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[51]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3434,7 +3646,7 @@ func (x *PublishPortResponse) String() string {
 func (*PublishPortResponse) ProtoMessage() {}
 
 func (x *PublishPortResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[51]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3447,7 +3659,7 @@ func (x *PublishPortResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublishPortResponse.ProtoReflect.Descriptor instead.
 func (*PublishPortResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{51}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *PublishPortResponse) GetPort() *PublishedPort {
@@ -3474,7 +3686,7 @@ type UnpublishPortRequest struct {
 
 func (x *UnpublishPortRequest) Reset() {
 	*x = UnpublishPortRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[52]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3486,7 +3698,7 @@ func (x *UnpublishPortRequest) String() string {
 func (*UnpublishPortRequest) ProtoMessage() {}
 
 func (x *UnpublishPortRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[52]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3499,7 +3711,7 @@ func (x *UnpublishPortRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnpublishPortRequest.ProtoReflect.Descriptor instead.
 func (*UnpublishPortRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{52}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *UnpublishPortRequest) GetRef() string {
@@ -3524,7 +3736,7 @@ type UnpublishPortResponse struct {
 
 func (x *UnpublishPortResponse) Reset() {
 	*x = UnpublishPortResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[53]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3536,7 +3748,7 @@ func (x *UnpublishPortResponse) String() string {
 func (*UnpublishPortResponse) ProtoMessage() {}
 
 func (x *UnpublishPortResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[53]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3549,7 +3761,7 @@ func (x *UnpublishPortResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnpublishPortResponse.ProtoReflect.Descriptor instead.
 func (*UnpublishPortResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{53}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{56}
 }
 
 type ListPortsRequest struct {
@@ -3561,7 +3773,7 @@ type ListPortsRequest struct {
 
 func (x *ListPortsRequest) Reset() {
 	*x = ListPortsRequest{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[54]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3573,7 +3785,7 @@ func (x *ListPortsRequest) String() string {
 func (*ListPortsRequest) ProtoMessage() {}
 
 func (x *ListPortsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[54]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3586,7 +3798,7 @@ func (x *ListPortsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPortsRequest.ProtoReflect.Descriptor instead.
 func (*ListPortsRequest) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{54}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *ListPortsRequest) GetRef() string {
@@ -3608,7 +3820,7 @@ type ListPortsResponse struct {
 
 func (x *ListPortsResponse) Reset() {
 	*x = ListPortsResponse{}
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[55]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3620,7 +3832,7 @@ func (x *ListPortsResponse) String() string {
 func (*ListPortsResponse) ProtoMessage() {}
 
 func (x *ListPortsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fletcher_v1_sessions_proto_msgTypes[55]
+	mi := &file_fletcher_v1_sessions_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3633,7 +3845,7 @@ func (x *ListPortsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPortsResponse.ProtoReflect.Descriptor instead.
 func (*ListPortsResponse) Descriptor() ([]byte, []int) {
-	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{55}
+	return file_fletcher_v1_sessions_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *ListPortsResponse) GetPorts() []*PublishedPort {
@@ -3654,7 +3866,7 @@ var File_fletcher_v1_sessions_proto protoreflect.FileDescriptor
 
 const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\n" +
-	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\xfd\x03\n" +
+	"\x1afletcher/v1/sessions.proto\x12\vfletcher.v1\"\x89\x05\n" +
 	"\aSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -3675,8 +3887,20 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\x06deploy\x18\f \x01(\v2\x17.fletcher.v1.DeployInfoR\x06deploy\x12!\n" +
 	"\fhas_rollback\x18\r \x01(\bR\vhasRollback\x12\x16\n" +
 	"\x06volume\x18\x0e \x01(\tR\x06volume\x12.\n" +
-	"\benv_vars\x18\x0f \x03(\v2\x13.fletcher.v1.EnvVarR\aenvVarsB\x0f\n" +
-	"\r_last_used_at\"S\n" +
+	"\benv_vars\x18\x0f \x03(\v2\x13.fletcher.v1.EnvVarR\aenvVars\x12%\n" +
+	"\x0eexecution_kind\x18\x10 \x01(\tR\rexecutionKind\x12B\n" +
+	"\fhost_account\x18\x11 \x01(\v2\x1f.fletcher.v1.HostSessionAccountR\vhostAccount\x12\x1f\n" +
+	"\vworking_dir\x18\x12 \x01(\tR\n" +
+	"workingDirB\x0f\n" +
+	"\r_last_used_at\"N\n" +
+	"\x12HostSessionAccount\x12\x12\n" +
+	"\x04user\x18\x01 \x01(\tR\x04user\x12\x10\n" +
+	"\x03uid\x18\x02 \x01(\x03R\x03uid\x12\x12\n" +
+	"\x04home\x18\x03 \x01(\tR\x04home\"\x1e\n" +
+	"\x1cGetHostSessionAccountRequest\"t\n" +
+	"\x1dGetHostSessionAccountResponse\x129\n" +
+	"\aaccount\x18\x01 \x01(\v2\x1f.fletcher.v1.HostSessionAccountR\aaccount\x12\x18\n" +
+	"\amachine\x18\x02 \x01(\tR\amachine\"S\n" +
 	"\x06EnvVar\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x1f\n" +
@@ -3688,7 +3912,7 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"entrypoint\x18\x01 \x03(\tR\n" +
 	"entrypoint\x12!\n" +
 	"\fexposed_port\x18\x02 \x01(\rR\vexposedPort\x12#\n" +
-	"\rrestart_count\x18\x03 \x01(\rR\frestartCount\"\x82\x02\n" +
+	"\rrestart_count\x18\x03 \x01(\rR\frestartCount\"\x82\x03\n" +
 	"\x14CreateSessionRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\tR\x05image\x12\x18\n" +
@@ -3697,7 +3921,13 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\arun_app\x18\x05 \x01(\bR\x06runApp\x12\x16\n" +
 	"\x06volume\x18\x06 \x01(\tR\x06volume\x12 \n" +
 	"\vcredentials\x18\a \x03(\tR\vcredentials\x12.\n" +
-	"\benv_vars\x18\b \x03(\v2\x13.fletcher.v1.EnvVarR\aenvVars\"G\n" +
+	"\benv_vars\x18\b \x03(\v2\x13.fletcher.v1.EnvVarR\aenvVars\x12%\n" +
+	"\x0eexecution_kind\x18\t \x01(\tR\rexecutionKind\x12\x1b\n" +
+	"\thost_user\x18\n" +
+	" \x01(\tR\bhostUser\x12\x19\n" +
+	"\bhost_uid\x18\v \x01(\x03R\ahostUid\x12\x1f\n" +
+	"\vworking_dir\x18\f \x01(\tR\n" +
+	"workingDir\"G\n" +
 	"\x15CreateSessionResponse\x12.\n" +
 	"\asession\x18\x01 \x01(\v2\x14.fletcher.v1.SessionR\asession\"%\n" +
 	"\x11GetSessionRequest\x12\x10\n" +
@@ -3897,8 +4127,9 @@ const file_fletcher_v1_sessions_proto_rawDesc = "" +
 	"\x18FILE_OP_KIND_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13FILE_OP_KIND_DELETE\x10\x01\x12\x15\n" +
 	"\x11FILE_OP_KIND_MOVE\x10\x02\x12\x15\n" +
-	"\x11FILE_OP_KIND_COPY\x10\x032\xfb\x0f\n" +
-	"\x0eSessionService\x12X\n" +
+	"\x11FILE_OP_KIND_COPY\x10\x032\xed\x10\n" +
+	"\x0eSessionService\x12p\n" +
+	"\x15GetHostSessionAccount\x12).fletcher.v1.GetHostSessionAccountRequest\x1a*.fletcher.v1.GetHostSessionAccountResponse\"\x00\x12X\n" +
 	"\rCreateSession\x12!.fletcher.v1.CreateSessionRequest\x1a\".fletcher.v1.CreateSessionResponse\"\x00\x12O\n" +
 	"\n" +
 	"GetSession\x12\x1e.fletcher.v1.GetSessionRequest\x1a\x1f.fletcher.v1.GetSessionResponse\"\x00\x12U\n" +
@@ -3939,142 +4170,149 @@ func file_fletcher_v1_sessions_proto_rawDescGZIP() []byte {
 }
 
 var file_fletcher_v1_sessions_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_fletcher_v1_sessions_proto_msgTypes = make([]protoimpl.MessageInfo, 56)
+var file_fletcher_v1_sessions_proto_msgTypes = make([]protoimpl.MessageInfo, 59)
 var file_fletcher_v1_sessions_proto_goTypes = []any{
-	(SessionState)(0),                  // 0: fletcher.v1.SessionState
-	(FileOpKind)(0),                    // 1: fletcher.v1.FileOpKind
-	(*Session)(nil),                    // 2: fletcher.v1.Session
-	(*EnvVar)(nil),                     // 3: fletcher.v1.EnvVar
-	(*DeployInfo)(nil),                 // 4: fletcher.v1.DeployInfo
-	(*CreateSessionRequest)(nil),       // 5: fletcher.v1.CreateSessionRequest
-	(*CreateSessionResponse)(nil),      // 6: fletcher.v1.CreateSessionResponse
-	(*GetSessionRequest)(nil),          // 7: fletcher.v1.GetSessionRequest
-	(*GetSessionResponse)(nil),         // 8: fletcher.v1.GetSessionResponse
-	(*ListSessionsRequest)(nil),        // 9: fletcher.v1.ListSessionsRequest
-	(*ListSessionsResponse)(nil),       // 10: fletcher.v1.ListSessionsResponse
-	(*StartSessionRequest)(nil),        // 11: fletcher.v1.StartSessionRequest
-	(*StartSessionResponse)(nil),       // 12: fletcher.v1.StartSessionResponse
-	(*StopSessionRequest)(nil),         // 13: fletcher.v1.StopSessionRequest
-	(*StopSessionResponse)(nil),        // 14: fletcher.v1.StopSessionResponse
-	(*DeleteSessionRequest)(nil),       // 15: fletcher.v1.DeleteSessionRequest
-	(*DeleteSessionResponse)(nil),      // 16: fletcher.v1.DeleteSessionResponse
-	(*UpdateSessionRequest)(nil),       // 17: fletcher.v1.UpdateSessionRequest
-	(*UpdateSessionResponse)(nil),      // 18: fletcher.v1.UpdateSessionResponse
-	(*ExecSessionRequest)(nil),         // 19: fletcher.v1.ExecSessionRequest
-	(*ExecSessionResponse)(nil),        // 20: fletcher.v1.ExecSessionResponse
-	(*RestartSessionRequest)(nil),      // 21: fletcher.v1.RestartSessionRequest
-	(*RestartSessionResponse)(nil),     // 22: fletcher.v1.RestartSessionResponse
-	(*RedeploySessionRequest)(nil),     // 23: fletcher.v1.RedeploySessionRequest
-	(*RedeploySessionResponse)(nil),    // 24: fletcher.v1.RedeploySessionResponse
-	(*CommitSessionImageRequest)(nil),  // 25: fletcher.v1.CommitSessionImageRequest
-	(*CommitSessionImageResponse)(nil), // 26: fletcher.v1.CommitSessionImageResponse
-	(*RollbackSessionRequest)(nil),     // 27: fletcher.v1.RollbackSessionRequest
-	(*RollbackSessionResponse)(nil),    // 28: fletcher.v1.RollbackSessionResponse
-	(*GetSessionLogsRequest)(nil),      // 29: fletcher.v1.GetSessionLogsRequest
-	(*GetSessionLogsResponse)(nil),     // 30: fletcher.v1.GetSessionLogsResponse
-	(*StreamSessionLogsRequest)(nil),   // 31: fletcher.v1.StreamSessionLogsRequest
-	(*StreamSessionLogsResponse)(nil),  // 32: fletcher.v1.StreamSessionLogsResponse
-	(*ShellSessionRequest)(nil),        // 33: fletcher.v1.ShellSessionRequest
-	(*ShellStart)(nil),                 // 34: fletcher.v1.ShellStart
-	(*ShellResize)(nil),                // 35: fletcher.v1.ShellResize
-	(*ShellSessionResponse)(nil),       // 36: fletcher.v1.ShellSessionResponse
-	(*ProxySessionRequest)(nil),        // 37: fletcher.v1.ProxySessionRequest
-	(*ProxyOpen)(nil),                  // 38: fletcher.v1.ProxyOpen
-	(*ProxySessionResponse)(nil),       // 39: fletcher.v1.ProxySessionResponse
-	(*UploadFileRequest)(nil),          // 40: fletcher.v1.UploadFileRequest
-	(*UploadStart)(nil),                // 41: fletcher.v1.UploadStart
-	(*UploadFileResponse)(nil),         // 42: fletcher.v1.UploadFileResponse
-	(*DownloadFileRequest)(nil),        // 43: fletcher.v1.DownloadFileRequest
-	(*DownloadFileResponse)(nil),       // 44: fletcher.v1.DownloadFileResponse
-	(*FileInfo)(nil),                   // 45: fletcher.v1.FileInfo
-	(*ListDirRequest)(nil),             // 46: fletcher.v1.ListDirRequest
-	(*ListDirResponse)(nil),            // 47: fletcher.v1.ListDirResponse
-	(*FileOpRequest)(nil),              // 48: fletcher.v1.FileOpRequest
-	(*FileOpResponse)(nil),             // 49: fletcher.v1.FileOpResponse
-	(*DirEntry)(nil),                   // 50: fletcher.v1.DirEntry
-	(*PublishedPort)(nil),              // 51: fletcher.v1.PublishedPort
-	(*PublishPortRequest)(nil),         // 52: fletcher.v1.PublishPortRequest
-	(*PublishPortResponse)(nil),        // 53: fletcher.v1.PublishPortResponse
-	(*UnpublishPortRequest)(nil),       // 54: fletcher.v1.UnpublishPortRequest
-	(*UnpublishPortResponse)(nil),      // 55: fletcher.v1.UnpublishPortResponse
-	(*ListPortsRequest)(nil),           // 56: fletcher.v1.ListPortsRequest
-	(*ListPortsResponse)(nil),          // 57: fletcher.v1.ListPortsResponse
+	(SessionState)(0),                     // 0: fletcher.v1.SessionState
+	(FileOpKind)(0),                       // 1: fletcher.v1.FileOpKind
+	(*Session)(nil),                       // 2: fletcher.v1.Session
+	(*HostSessionAccount)(nil),            // 3: fletcher.v1.HostSessionAccount
+	(*GetHostSessionAccountRequest)(nil),  // 4: fletcher.v1.GetHostSessionAccountRequest
+	(*GetHostSessionAccountResponse)(nil), // 5: fletcher.v1.GetHostSessionAccountResponse
+	(*EnvVar)(nil),                        // 6: fletcher.v1.EnvVar
+	(*DeployInfo)(nil),                    // 7: fletcher.v1.DeployInfo
+	(*CreateSessionRequest)(nil),          // 8: fletcher.v1.CreateSessionRequest
+	(*CreateSessionResponse)(nil),         // 9: fletcher.v1.CreateSessionResponse
+	(*GetSessionRequest)(nil),             // 10: fletcher.v1.GetSessionRequest
+	(*GetSessionResponse)(nil),            // 11: fletcher.v1.GetSessionResponse
+	(*ListSessionsRequest)(nil),           // 12: fletcher.v1.ListSessionsRequest
+	(*ListSessionsResponse)(nil),          // 13: fletcher.v1.ListSessionsResponse
+	(*StartSessionRequest)(nil),           // 14: fletcher.v1.StartSessionRequest
+	(*StartSessionResponse)(nil),          // 15: fletcher.v1.StartSessionResponse
+	(*StopSessionRequest)(nil),            // 16: fletcher.v1.StopSessionRequest
+	(*StopSessionResponse)(nil),           // 17: fletcher.v1.StopSessionResponse
+	(*DeleteSessionRequest)(nil),          // 18: fletcher.v1.DeleteSessionRequest
+	(*DeleteSessionResponse)(nil),         // 19: fletcher.v1.DeleteSessionResponse
+	(*UpdateSessionRequest)(nil),          // 20: fletcher.v1.UpdateSessionRequest
+	(*UpdateSessionResponse)(nil),         // 21: fletcher.v1.UpdateSessionResponse
+	(*ExecSessionRequest)(nil),            // 22: fletcher.v1.ExecSessionRequest
+	(*ExecSessionResponse)(nil),           // 23: fletcher.v1.ExecSessionResponse
+	(*RestartSessionRequest)(nil),         // 24: fletcher.v1.RestartSessionRequest
+	(*RestartSessionResponse)(nil),        // 25: fletcher.v1.RestartSessionResponse
+	(*RedeploySessionRequest)(nil),        // 26: fletcher.v1.RedeploySessionRequest
+	(*RedeploySessionResponse)(nil),       // 27: fletcher.v1.RedeploySessionResponse
+	(*CommitSessionImageRequest)(nil),     // 28: fletcher.v1.CommitSessionImageRequest
+	(*CommitSessionImageResponse)(nil),    // 29: fletcher.v1.CommitSessionImageResponse
+	(*RollbackSessionRequest)(nil),        // 30: fletcher.v1.RollbackSessionRequest
+	(*RollbackSessionResponse)(nil),       // 31: fletcher.v1.RollbackSessionResponse
+	(*GetSessionLogsRequest)(nil),         // 32: fletcher.v1.GetSessionLogsRequest
+	(*GetSessionLogsResponse)(nil),        // 33: fletcher.v1.GetSessionLogsResponse
+	(*StreamSessionLogsRequest)(nil),      // 34: fletcher.v1.StreamSessionLogsRequest
+	(*StreamSessionLogsResponse)(nil),     // 35: fletcher.v1.StreamSessionLogsResponse
+	(*ShellSessionRequest)(nil),           // 36: fletcher.v1.ShellSessionRequest
+	(*ShellStart)(nil),                    // 37: fletcher.v1.ShellStart
+	(*ShellResize)(nil),                   // 38: fletcher.v1.ShellResize
+	(*ShellSessionResponse)(nil),          // 39: fletcher.v1.ShellSessionResponse
+	(*ProxySessionRequest)(nil),           // 40: fletcher.v1.ProxySessionRequest
+	(*ProxyOpen)(nil),                     // 41: fletcher.v1.ProxyOpen
+	(*ProxySessionResponse)(nil),          // 42: fletcher.v1.ProxySessionResponse
+	(*UploadFileRequest)(nil),             // 43: fletcher.v1.UploadFileRequest
+	(*UploadStart)(nil),                   // 44: fletcher.v1.UploadStart
+	(*UploadFileResponse)(nil),            // 45: fletcher.v1.UploadFileResponse
+	(*DownloadFileRequest)(nil),           // 46: fletcher.v1.DownloadFileRequest
+	(*DownloadFileResponse)(nil),          // 47: fletcher.v1.DownloadFileResponse
+	(*FileInfo)(nil),                      // 48: fletcher.v1.FileInfo
+	(*ListDirRequest)(nil),                // 49: fletcher.v1.ListDirRequest
+	(*ListDirResponse)(nil),               // 50: fletcher.v1.ListDirResponse
+	(*FileOpRequest)(nil),                 // 51: fletcher.v1.FileOpRequest
+	(*FileOpResponse)(nil),                // 52: fletcher.v1.FileOpResponse
+	(*DirEntry)(nil),                      // 53: fletcher.v1.DirEntry
+	(*PublishedPort)(nil),                 // 54: fletcher.v1.PublishedPort
+	(*PublishPortRequest)(nil),            // 55: fletcher.v1.PublishPortRequest
+	(*PublishPortResponse)(nil),           // 56: fletcher.v1.PublishPortResponse
+	(*UnpublishPortRequest)(nil),          // 57: fletcher.v1.UnpublishPortRequest
+	(*UnpublishPortResponse)(nil),         // 58: fletcher.v1.UnpublishPortResponse
+	(*ListPortsRequest)(nil),              // 59: fletcher.v1.ListPortsRequest
+	(*ListPortsResponse)(nil),             // 60: fletcher.v1.ListPortsResponse
 }
 var file_fletcher_v1_sessions_proto_depIdxs = []int32{
 	0,  // 0: fletcher.v1.Session.state:type_name -> fletcher.v1.SessionState
-	4,  // 1: fletcher.v1.Session.deploy:type_name -> fletcher.v1.DeployInfo
-	3,  // 2: fletcher.v1.Session.env_vars:type_name -> fletcher.v1.EnvVar
-	3,  // 3: fletcher.v1.CreateSessionRequest.env_vars:type_name -> fletcher.v1.EnvVar
-	2,  // 4: fletcher.v1.CreateSessionResponse.session:type_name -> fletcher.v1.Session
-	2,  // 5: fletcher.v1.GetSessionResponse.session:type_name -> fletcher.v1.Session
-	2,  // 6: fletcher.v1.ListSessionsResponse.sessions:type_name -> fletcher.v1.Session
-	2,  // 7: fletcher.v1.StartSessionResponse.session:type_name -> fletcher.v1.Session
-	2,  // 8: fletcher.v1.StopSessionResponse.session:type_name -> fletcher.v1.Session
-	3,  // 9: fletcher.v1.UpdateSessionRequest.env_vars:type_name -> fletcher.v1.EnvVar
-	2,  // 10: fletcher.v1.UpdateSessionResponse.session:type_name -> fletcher.v1.Session
-	2,  // 11: fletcher.v1.RestartSessionResponse.session:type_name -> fletcher.v1.Session
-	2,  // 12: fletcher.v1.RedeploySessionResponse.session:type_name -> fletcher.v1.Session
-	2,  // 13: fletcher.v1.RollbackSessionResponse.session:type_name -> fletcher.v1.Session
-	34, // 14: fletcher.v1.ShellSessionRequest.start:type_name -> fletcher.v1.ShellStart
-	35, // 15: fletcher.v1.ShellSessionRequest.resize:type_name -> fletcher.v1.ShellResize
-	38, // 16: fletcher.v1.ProxySessionRequest.open:type_name -> fletcher.v1.ProxyOpen
-	41, // 17: fletcher.v1.UploadFileRequest.start:type_name -> fletcher.v1.UploadStart
-	45, // 18: fletcher.v1.DownloadFileResponse.info:type_name -> fletcher.v1.FileInfo
-	50, // 19: fletcher.v1.ListDirResponse.entries:type_name -> fletcher.v1.DirEntry
-	1,  // 20: fletcher.v1.FileOpRequest.op:type_name -> fletcher.v1.FileOpKind
-	51, // 21: fletcher.v1.PublishPortResponse.port:type_name -> fletcher.v1.PublishedPort
-	51, // 22: fletcher.v1.ListPortsResponse.ports:type_name -> fletcher.v1.PublishedPort
-	5,  // 23: fletcher.v1.SessionService.CreateSession:input_type -> fletcher.v1.CreateSessionRequest
-	7,  // 24: fletcher.v1.SessionService.GetSession:input_type -> fletcher.v1.GetSessionRequest
-	9,  // 25: fletcher.v1.SessionService.ListSessions:input_type -> fletcher.v1.ListSessionsRequest
-	11, // 26: fletcher.v1.SessionService.StartSession:input_type -> fletcher.v1.StartSessionRequest
-	13, // 27: fletcher.v1.SessionService.StopSession:input_type -> fletcher.v1.StopSessionRequest
-	15, // 28: fletcher.v1.SessionService.DeleteSession:input_type -> fletcher.v1.DeleteSessionRequest
-	17, // 29: fletcher.v1.SessionService.UpdateSession:input_type -> fletcher.v1.UpdateSessionRequest
-	19, // 30: fletcher.v1.SessionService.ExecSession:input_type -> fletcher.v1.ExecSessionRequest
-	33, // 31: fletcher.v1.SessionService.ShellSession:input_type -> fletcher.v1.ShellSessionRequest
-	37, // 32: fletcher.v1.SessionService.ProxySession:input_type -> fletcher.v1.ProxySessionRequest
-	52, // 33: fletcher.v1.SessionService.PublishPort:input_type -> fletcher.v1.PublishPortRequest
-	54, // 34: fletcher.v1.SessionService.UnpublishPort:input_type -> fletcher.v1.UnpublishPortRequest
-	56, // 35: fletcher.v1.SessionService.ListPorts:input_type -> fletcher.v1.ListPortsRequest
-	21, // 36: fletcher.v1.SessionService.RestartSession:input_type -> fletcher.v1.RestartSessionRequest
-	23, // 37: fletcher.v1.SessionService.RedeploySession:input_type -> fletcher.v1.RedeploySessionRequest
-	29, // 38: fletcher.v1.SessionService.GetSessionLogs:input_type -> fletcher.v1.GetSessionLogsRequest
-	31, // 39: fletcher.v1.SessionService.StreamSessionLogs:input_type -> fletcher.v1.StreamSessionLogsRequest
-	25, // 40: fletcher.v1.SessionService.CommitSessionImage:input_type -> fletcher.v1.CommitSessionImageRequest
-	27, // 41: fletcher.v1.SessionService.RollbackSession:input_type -> fletcher.v1.RollbackSessionRequest
-	40, // 42: fletcher.v1.SessionService.UploadFile:input_type -> fletcher.v1.UploadFileRequest
-	43, // 43: fletcher.v1.SessionService.DownloadFile:input_type -> fletcher.v1.DownloadFileRequest
-	46, // 44: fletcher.v1.SessionService.ListDir:input_type -> fletcher.v1.ListDirRequest
-	48, // 45: fletcher.v1.SessionService.FileOp:input_type -> fletcher.v1.FileOpRequest
-	6,  // 46: fletcher.v1.SessionService.CreateSession:output_type -> fletcher.v1.CreateSessionResponse
-	8,  // 47: fletcher.v1.SessionService.GetSession:output_type -> fletcher.v1.GetSessionResponse
-	10, // 48: fletcher.v1.SessionService.ListSessions:output_type -> fletcher.v1.ListSessionsResponse
-	12, // 49: fletcher.v1.SessionService.StartSession:output_type -> fletcher.v1.StartSessionResponse
-	14, // 50: fletcher.v1.SessionService.StopSession:output_type -> fletcher.v1.StopSessionResponse
-	16, // 51: fletcher.v1.SessionService.DeleteSession:output_type -> fletcher.v1.DeleteSessionResponse
-	18, // 52: fletcher.v1.SessionService.UpdateSession:output_type -> fletcher.v1.UpdateSessionResponse
-	20, // 53: fletcher.v1.SessionService.ExecSession:output_type -> fletcher.v1.ExecSessionResponse
-	36, // 54: fletcher.v1.SessionService.ShellSession:output_type -> fletcher.v1.ShellSessionResponse
-	39, // 55: fletcher.v1.SessionService.ProxySession:output_type -> fletcher.v1.ProxySessionResponse
-	53, // 56: fletcher.v1.SessionService.PublishPort:output_type -> fletcher.v1.PublishPortResponse
-	55, // 57: fletcher.v1.SessionService.UnpublishPort:output_type -> fletcher.v1.UnpublishPortResponse
-	57, // 58: fletcher.v1.SessionService.ListPorts:output_type -> fletcher.v1.ListPortsResponse
-	22, // 59: fletcher.v1.SessionService.RestartSession:output_type -> fletcher.v1.RestartSessionResponse
-	24, // 60: fletcher.v1.SessionService.RedeploySession:output_type -> fletcher.v1.RedeploySessionResponse
-	30, // 61: fletcher.v1.SessionService.GetSessionLogs:output_type -> fletcher.v1.GetSessionLogsResponse
-	32, // 62: fletcher.v1.SessionService.StreamSessionLogs:output_type -> fletcher.v1.StreamSessionLogsResponse
-	26, // 63: fletcher.v1.SessionService.CommitSessionImage:output_type -> fletcher.v1.CommitSessionImageResponse
-	28, // 64: fletcher.v1.SessionService.RollbackSession:output_type -> fletcher.v1.RollbackSessionResponse
-	42, // 65: fletcher.v1.SessionService.UploadFile:output_type -> fletcher.v1.UploadFileResponse
-	44, // 66: fletcher.v1.SessionService.DownloadFile:output_type -> fletcher.v1.DownloadFileResponse
-	47, // 67: fletcher.v1.SessionService.ListDir:output_type -> fletcher.v1.ListDirResponse
-	49, // 68: fletcher.v1.SessionService.FileOp:output_type -> fletcher.v1.FileOpResponse
-	46, // [46:69] is the sub-list for method output_type
-	23, // [23:46] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	7,  // 1: fletcher.v1.Session.deploy:type_name -> fletcher.v1.DeployInfo
+	6,  // 2: fletcher.v1.Session.env_vars:type_name -> fletcher.v1.EnvVar
+	3,  // 3: fletcher.v1.Session.host_account:type_name -> fletcher.v1.HostSessionAccount
+	3,  // 4: fletcher.v1.GetHostSessionAccountResponse.account:type_name -> fletcher.v1.HostSessionAccount
+	6,  // 5: fletcher.v1.CreateSessionRequest.env_vars:type_name -> fletcher.v1.EnvVar
+	2,  // 6: fletcher.v1.CreateSessionResponse.session:type_name -> fletcher.v1.Session
+	2,  // 7: fletcher.v1.GetSessionResponse.session:type_name -> fletcher.v1.Session
+	2,  // 8: fletcher.v1.ListSessionsResponse.sessions:type_name -> fletcher.v1.Session
+	2,  // 9: fletcher.v1.StartSessionResponse.session:type_name -> fletcher.v1.Session
+	2,  // 10: fletcher.v1.StopSessionResponse.session:type_name -> fletcher.v1.Session
+	6,  // 11: fletcher.v1.UpdateSessionRequest.env_vars:type_name -> fletcher.v1.EnvVar
+	2,  // 12: fletcher.v1.UpdateSessionResponse.session:type_name -> fletcher.v1.Session
+	2,  // 13: fletcher.v1.RestartSessionResponse.session:type_name -> fletcher.v1.Session
+	2,  // 14: fletcher.v1.RedeploySessionResponse.session:type_name -> fletcher.v1.Session
+	2,  // 15: fletcher.v1.RollbackSessionResponse.session:type_name -> fletcher.v1.Session
+	37, // 16: fletcher.v1.ShellSessionRequest.start:type_name -> fletcher.v1.ShellStart
+	38, // 17: fletcher.v1.ShellSessionRequest.resize:type_name -> fletcher.v1.ShellResize
+	41, // 18: fletcher.v1.ProxySessionRequest.open:type_name -> fletcher.v1.ProxyOpen
+	44, // 19: fletcher.v1.UploadFileRequest.start:type_name -> fletcher.v1.UploadStart
+	48, // 20: fletcher.v1.DownloadFileResponse.info:type_name -> fletcher.v1.FileInfo
+	53, // 21: fletcher.v1.ListDirResponse.entries:type_name -> fletcher.v1.DirEntry
+	1,  // 22: fletcher.v1.FileOpRequest.op:type_name -> fletcher.v1.FileOpKind
+	54, // 23: fletcher.v1.PublishPortResponse.port:type_name -> fletcher.v1.PublishedPort
+	54, // 24: fletcher.v1.ListPortsResponse.ports:type_name -> fletcher.v1.PublishedPort
+	4,  // 25: fletcher.v1.SessionService.GetHostSessionAccount:input_type -> fletcher.v1.GetHostSessionAccountRequest
+	8,  // 26: fletcher.v1.SessionService.CreateSession:input_type -> fletcher.v1.CreateSessionRequest
+	10, // 27: fletcher.v1.SessionService.GetSession:input_type -> fletcher.v1.GetSessionRequest
+	12, // 28: fletcher.v1.SessionService.ListSessions:input_type -> fletcher.v1.ListSessionsRequest
+	14, // 29: fletcher.v1.SessionService.StartSession:input_type -> fletcher.v1.StartSessionRequest
+	16, // 30: fletcher.v1.SessionService.StopSession:input_type -> fletcher.v1.StopSessionRequest
+	18, // 31: fletcher.v1.SessionService.DeleteSession:input_type -> fletcher.v1.DeleteSessionRequest
+	20, // 32: fletcher.v1.SessionService.UpdateSession:input_type -> fletcher.v1.UpdateSessionRequest
+	22, // 33: fletcher.v1.SessionService.ExecSession:input_type -> fletcher.v1.ExecSessionRequest
+	36, // 34: fletcher.v1.SessionService.ShellSession:input_type -> fletcher.v1.ShellSessionRequest
+	40, // 35: fletcher.v1.SessionService.ProxySession:input_type -> fletcher.v1.ProxySessionRequest
+	55, // 36: fletcher.v1.SessionService.PublishPort:input_type -> fletcher.v1.PublishPortRequest
+	57, // 37: fletcher.v1.SessionService.UnpublishPort:input_type -> fletcher.v1.UnpublishPortRequest
+	59, // 38: fletcher.v1.SessionService.ListPorts:input_type -> fletcher.v1.ListPortsRequest
+	24, // 39: fletcher.v1.SessionService.RestartSession:input_type -> fletcher.v1.RestartSessionRequest
+	26, // 40: fletcher.v1.SessionService.RedeploySession:input_type -> fletcher.v1.RedeploySessionRequest
+	32, // 41: fletcher.v1.SessionService.GetSessionLogs:input_type -> fletcher.v1.GetSessionLogsRequest
+	34, // 42: fletcher.v1.SessionService.StreamSessionLogs:input_type -> fletcher.v1.StreamSessionLogsRequest
+	28, // 43: fletcher.v1.SessionService.CommitSessionImage:input_type -> fletcher.v1.CommitSessionImageRequest
+	30, // 44: fletcher.v1.SessionService.RollbackSession:input_type -> fletcher.v1.RollbackSessionRequest
+	43, // 45: fletcher.v1.SessionService.UploadFile:input_type -> fletcher.v1.UploadFileRequest
+	46, // 46: fletcher.v1.SessionService.DownloadFile:input_type -> fletcher.v1.DownloadFileRequest
+	49, // 47: fletcher.v1.SessionService.ListDir:input_type -> fletcher.v1.ListDirRequest
+	51, // 48: fletcher.v1.SessionService.FileOp:input_type -> fletcher.v1.FileOpRequest
+	5,  // 49: fletcher.v1.SessionService.GetHostSessionAccount:output_type -> fletcher.v1.GetHostSessionAccountResponse
+	9,  // 50: fletcher.v1.SessionService.CreateSession:output_type -> fletcher.v1.CreateSessionResponse
+	11, // 51: fletcher.v1.SessionService.GetSession:output_type -> fletcher.v1.GetSessionResponse
+	13, // 52: fletcher.v1.SessionService.ListSessions:output_type -> fletcher.v1.ListSessionsResponse
+	15, // 53: fletcher.v1.SessionService.StartSession:output_type -> fletcher.v1.StartSessionResponse
+	17, // 54: fletcher.v1.SessionService.StopSession:output_type -> fletcher.v1.StopSessionResponse
+	19, // 55: fletcher.v1.SessionService.DeleteSession:output_type -> fletcher.v1.DeleteSessionResponse
+	21, // 56: fletcher.v1.SessionService.UpdateSession:output_type -> fletcher.v1.UpdateSessionResponse
+	23, // 57: fletcher.v1.SessionService.ExecSession:output_type -> fletcher.v1.ExecSessionResponse
+	39, // 58: fletcher.v1.SessionService.ShellSession:output_type -> fletcher.v1.ShellSessionResponse
+	42, // 59: fletcher.v1.SessionService.ProxySession:output_type -> fletcher.v1.ProxySessionResponse
+	56, // 60: fletcher.v1.SessionService.PublishPort:output_type -> fletcher.v1.PublishPortResponse
+	58, // 61: fletcher.v1.SessionService.UnpublishPort:output_type -> fletcher.v1.UnpublishPortResponse
+	60, // 62: fletcher.v1.SessionService.ListPorts:output_type -> fletcher.v1.ListPortsResponse
+	25, // 63: fletcher.v1.SessionService.RestartSession:output_type -> fletcher.v1.RestartSessionResponse
+	27, // 64: fletcher.v1.SessionService.RedeploySession:output_type -> fletcher.v1.RedeploySessionResponse
+	33, // 65: fletcher.v1.SessionService.GetSessionLogs:output_type -> fletcher.v1.GetSessionLogsResponse
+	35, // 66: fletcher.v1.SessionService.StreamSessionLogs:output_type -> fletcher.v1.StreamSessionLogsResponse
+	29, // 67: fletcher.v1.SessionService.CommitSessionImage:output_type -> fletcher.v1.CommitSessionImageResponse
+	31, // 68: fletcher.v1.SessionService.RollbackSession:output_type -> fletcher.v1.RollbackSessionResponse
+	45, // 69: fletcher.v1.SessionService.UploadFile:output_type -> fletcher.v1.UploadFileResponse
+	47, // 70: fletcher.v1.SessionService.DownloadFile:output_type -> fletcher.v1.DownloadFileResponse
+	50, // 71: fletcher.v1.SessionService.ListDir:output_type -> fletcher.v1.ListDirResponse
+	52, // 72: fletcher.v1.SessionService.FileOp:output_type -> fletcher.v1.FileOpResponse
+	49, // [49:73] is the sub-list for method output_type
+	25, // [25:49] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_fletcher_v1_sessions_proto_init() }
@@ -4083,24 +4321,24 @@ func file_fletcher_v1_sessions_proto_init() {
 		return
 	}
 	file_fletcher_v1_sessions_proto_msgTypes[0].OneofWrappers = []any{}
-	file_fletcher_v1_sessions_proto_msgTypes[31].OneofWrappers = []any{
+	file_fletcher_v1_sessions_proto_msgTypes[34].OneofWrappers = []any{
 		(*ShellSessionRequest_Start)(nil),
 		(*ShellSessionRequest_Stdin)(nil),
 		(*ShellSessionRequest_Resize)(nil),
 	}
-	file_fletcher_v1_sessions_proto_msgTypes[34].OneofWrappers = []any{
+	file_fletcher_v1_sessions_proto_msgTypes[37].OneofWrappers = []any{
 		(*ShellSessionResponse_Data)(nil),
 		(*ShellSessionResponse_ExitCode)(nil),
 	}
-	file_fletcher_v1_sessions_proto_msgTypes[35].OneofWrappers = []any{
+	file_fletcher_v1_sessions_proto_msgTypes[38].OneofWrappers = []any{
 		(*ProxySessionRequest_Open)(nil),
 		(*ProxySessionRequest_Data)(nil),
 	}
-	file_fletcher_v1_sessions_proto_msgTypes[38].OneofWrappers = []any{
+	file_fletcher_v1_sessions_proto_msgTypes[41].OneofWrappers = []any{
 		(*UploadFileRequest_Start)(nil),
 		(*UploadFileRequest_Chunk)(nil),
 	}
-	file_fletcher_v1_sessions_proto_msgTypes[42].OneofWrappers = []any{
+	file_fletcher_v1_sessions_proto_msgTypes[45].OneofWrappers = []any{
 		(*DownloadFileResponse_Info)(nil),
 		(*DownloadFileResponse_Chunk)(nil),
 	}
@@ -4110,7 +4348,7 @@ func file_fletcher_v1_sessions_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fletcher_v1_sessions_proto_rawDesc), len(file_fletcher_v1_sessions_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   56,
+			NumMessages:   59,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

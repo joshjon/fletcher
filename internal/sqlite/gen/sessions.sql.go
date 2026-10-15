@@ -20,13 +20,78 @@ func (q *Queries) CountSessions(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const createHostSession = `-- name: CreateHostSession :one
+INSERT INTO sessions (
+    id, name, image, state, fork_id, fork_path, created_at, updated_at,
+    egress_policy, gateway, run_app, env_vars,
+    execution_kind, host_user, host_uid, host_home, working_dir
+) VALUES (
+    ?1, ?2, '', 'running', '', '', ?3, ?3,
+    'none', 'off', 0, '[]',
+    'host', ?4, ?5, ?6, ?7
+)
+RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at,
+    last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path,
+    volume_id, env_vars, execution_kind, host_user, host_uid, host_home, working_dir
+`
+
+type CreateHostSessionParams struct {
+	ID         string
+	Name       string
+	Now        int64
+	HostUser   string
+	HostUid    int64
+	HostHome   string
+	WorkingDir string
+}
+
+// Legacy policy columns retain valid placeholders; host responses expose no VM policy.
+func (q *Queries) CreateHostSession(ctx context.Context, arg CreateHostSessionParams) (Session, error) {
+	row := q.db.QueryRowContext(ctx, createHostSession,
+		arg.ID,
+		arg.Name,
+		arg.Now,
+		arg.HostUser,
+		arg.HostUid,
+		arg.HostHome,
+		arg.WorkingDir,
+	)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Image,
+		&i.State,
+		&i.ForkID,
+		&i.ForkPath,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastUsedAt,
+		&i.EgressPolicy,
+		&i.Gateway,
+		&i.RunApp,
+		&i.PrevForkID,
+		&i.PrevForkPath,
+		&i.VolumeID,
+		&i.EnvVars,
+		&i.ExecutionKind,
+		&i.HostUser,
+		&i.HostUid,
+		&i.HostHome,
+		&i.WorkingDir,
+	)
+	return i, err
+}
+
 const createSession = `-- name: CreateSession :one
 INSERT INTO sessions (
     id, name, image, state, fork_id, fork_path, created_at, updated_at, egress_policy, gateway, run_app, volume_id, env_vars
 ) VALUES (
     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 )
-RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id, env_vars
+RETURNING id, name, image, state, fork_id, fork_path, created_at, updated_at,
+    last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path,
+    volume_id, env_vars, execution_kind, host_user, host_uid, host_home, working_dir
 `
 
 type CreateSessionParams struct {
@@ -79,6 +144,11 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (S
 		&i.PrevForkPath,
 		&i.VolumeID,
 		&i.EnvVars,
+		&i.ExecutionKind,
+		&i.HostUser,
+		&i.HostUid,
+		&i.HostHome,
+		&i.WorkingDir,
 	)
 	return i, err
 }
@@ -96,13 +166,17 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) (int64, error) {
 }
 
 const getSessionByRef = `-- name: GetSessionByRef :one
-SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id, env_vars FROM sessions
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at,
+    last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path,
+    volume_id, env_vars, execution_kind, host_user, host_uid, host_home, working_dir
+FROM sessions
 WHERE id = ?1 OR name = ?1
+ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END
 LIMIT 1
 `
 
-func (q *Queries) GetSessionByRef(ctx context.Context, ref string) (Session, error) {
-	row := q.db.QueryRowContext(ctx, getSessionByRef, ref)
+func (q *Queries) GetSessionByRef(ctx context.Context, id string) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getSessionByRef, id)
 	var i Session
 	err := row.Scan(
 		&i.ID,
@@ -121,12 +195,20 @@ func (q *Queries) GetSessionByRef(ctx context.Context, ref string) (Session, err
 		&i.PrevForkPath,
 		&i.VolumeID,
 		&i.EnvVars,
+		&i.ExecutionKind,
+		&i.HostUser,
+		&i.HostUid,
+		&i.HostHome,
+		&i.WorkingDir,
 	)
 	return i, err
 }
 
 const listSessions = `-- name: ListSessions :many
-SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at, last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path, volume_id, env_vars FROM sessions
+SELECT id, name, image, state, fork_id, fork_path, created_at, updated_at,
+    last_used_at, egress_policy, gateway, run_app, prev_fork_id, prev_fork_path,
+    volume_id, env_vars, execution_kind, host_user, host_uid, host_home, working_dir
+FROM sessions
 ORDER BY created_at DESC
 `
 
@@ -156,6 +238,11 @@ func (q *Queries) ListSessions(ctx context.Context) ([]Session, error) {
 			&i.PrevForkPath,
 			&i.VolumeID,
 			&i.EnvVars,
+			&i.ExecutionKind,
+			&i.HostUser,
+			&i.HostUid,
+			&i.HostHome,
+			&i.WorkingDir,
 		); err != nil {
 			return nil, err
 		}

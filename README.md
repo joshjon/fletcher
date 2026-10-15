@@ -21,10 +21,12 @@ Pre-v0.1.0. The daemon supports durable Firecracker sessions, image deployment,
 hibernation, SSH access and port publishing. Native iOS and macOS clients are
 developed in a separate repository.
 
-The daemon and CLI also support [saved projects](docs/PROJECTS.md): reopen an
-existing development VM and guest directory with named terminals. The native
-workspace refinement adds a guest folder picker and in-place terminal tabs;
-Apple builds and device verification for those changes are still pending.
+[Saved projects](docs/PROJECTS.md) reopen an existing development environment
+and directory in a terminal workspace. Optional [Linux host sessions](docs/HOST_SESSIONS.md)
+reuse an explicitly authorized login account's files and tools without an image.
+Host execution is disabled by default and does not provide VM isolation. The
+host-session client changes and cross-account service setup still need Apple
+builds and real-runtime verification.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for implementation, verification and
 release status. Until a release is published, [build from source](#building-from-source).

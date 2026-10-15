@@ -1,7 +1,8 @@
 # Saved projects
 
-A saved project records a name, an existing development VM, and an absolute
-working directory inside that VM. It is a shortcut to durable compute, not a new
+A saved project records a name, an existing development session, and an absolute
+working directory in that environment. It can reference a VM or an explicitly
+authorized Linux host session. It is a shortcut to durable compute, not a new
 execution mode or a directory-level security boundary (DESIGN sections 4 and 5).
 
 ## Register and open
@@ -15,13 +16,13 @@ fletcher project open app --terminal build
 ```
 
 Registration does not boot a VM, copy files, run setup, or contact a model
-provider. The default directory is `/workspace`. App deployments are not valid
-project targets.
+provider. The default directory is `/workspace` for VMs or the recorded initial
+directory for host sessions. App deployments are not valid project targets.
 
-Open starts the recorded VM if needed, verifies that the directory exists, and
+Open starts the recorded environment if needed, verifies that the directory exists, and
 attaches a named tmux terminal. Repeating `open app` reattaches that project's
 `main` terminal. A different label, such as `build`, opens another terminal in
-the same VM. It does not create another VM or fork, rerun setup, or restart a
+the same session. It does not create another VM or fork, rerun setup, or restart a
 program that is already running in that terminal.
 
 A terminal label is stable across project renames. Its working directory is an
@@ -38,7 +39,7 @@ fletcher project update app --name api --workdir /workspace/api
 fletcher project delete api --yes
 ```
 
-Deleting a registration leaves its VM, files and processes untouched. Deleting
+Deleting a registration leaves its environment, files and processes untouched. Deleting
 the underlying session removes its registrations. A missing directory causes
 Open to fail; Fletcher does not silently create it or switch to another path.
 
@@ -74,7 +75,7 @@ redeploy or replace a development disk merely to update terminal support.
 
 The daemon, persistence schema, Connect API and CLI support saved projects and
 named terminals. The native client uses a shared session/project terminal
-workspace with in-place tabs, a guest folder picker and a trailing Mac inspector.
+workspace with in-place tabs and splits, an environment folder picker and a trailing Mac inspector.
 New tabs query the active pane's actual current directory, not the bookmark's
 startup directory. Closing a tab detaches it; local tab metadata supports
 reopening. Tabs do not create another VM or fork. Browsing a stopped VM explicitly
@@ -95,7 +96,8 @@ Follow-on work:
   bundle live login credentials. Rootfs images and separately mounted volumes
   have distinct lifetimes; image preparation must make that scope visible.
 
-Host execution and live host-directory mounts are not part of these flows.
-Optional direct host sessions are approved future work in DESIGN section 10.1,
-with execution location, platform scope and account authorization to be settled
-before implementation. They will not inherit the VM sandbox promise.
+Optional [Linux host sessions](HOST_SESSIONS.md) use the same bookmark and terminal
+workflow after explicit local account authorization. They run on the Linux daemon
+host, not the client Mac, and do not inherit VM isolation, egress, snapshots or
+rollback guarantees. Host session deletion preserves host files. Live directory
+mounts, folder import and prepared-image reuse remain separate, paused work.

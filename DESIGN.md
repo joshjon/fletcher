@@ -8,7 +8,8 @@ create persistent VMs, deploy container images and manage their lifecycle.
 Agents are one possible use inside a VM, not the organising purpose of the
 product. The core experience must work without an agent or model account.
 
-Optional direct host sessions are an approved future extension (section 10.1).
+Optional direct host sessions are in progress (section 10.1), with runtime and
+native verification still pending.
 They let a user work with an existing host account and its tools without first
 building an image. VMs remain the default isolated environment; host execution
 is an explicit choice, never a fallback when VM creation fails.
@@ -59,8 +60,8 @@ is an explicit choice, never a fallback when VM creation fails.
 
 **Non-Goals (for now)**
 - **The macOS VM-hosting runtime is deferred** (see section 10). The native
-  macOS client is in scope. Direct host sessions are a distinct future feature,
-  with supported execution platforms to be settled before implementation.
+  macOS client is in scope. Direct host sessions initially target the Linux
+  daemon host, not client-local execution on the Mac.
 - No multi-box mesh. Single box only; multiple *client devices* are fine.
 - No hosted control plane / coordination SaaS.
 - No built-in metering or billing.
@@ -173,7 +174,7 @@ an agent on every invocation is an optional choice when each run needs one.
 
 This section describes the optional agent execution model inside an isolated
 environment, not a prerequisite for VM creation or app deployment. Its sandbox
-and credential-isolation claims do not apply to future direct host sessions
+and credential-isolation claims do not apply to direct host sessions
 (section 10.1). **Agent actions are not orchestrated tasks.**
 An agent runs natively as a subprocess inside its fork and does its own bash,
 edits and tests with zero daemon mediation.
@@ -422,7 +423,7 @@ virtualization/kernel-isolation primitives, which Linux and macOS share nothing 
 
 **The deferral is cheap *if* the seams stay honest.** Keep all KVM/Firecracker
 calls behind the runtime interface and all btrfs calls behind the snapshot
-interface. Do **not** scatter `exec("btrfs …")` or `/dev/kvm` checks through the
+interface. Do **not** scatter `exec("btrfs ...")` or `/dev/kvm` checks through the
 job/agent/gateway code. Linux-only in *implementation*, platform-agnostic at the
 *interface seam* - you want that regardless.
 
@@ -450,15 +451,24 @@ appliance (which needs M3+/macOS 15 and adds overhead).
 
 ---
 
-## 10.1. Optional Direct Host Sessions - Planned
+## 10.1. Optional Direct Host Sessions - In Progress
 
-Host execution is permitted by the product direction, but is not implemented.
-It complements VMs and apps rather than replacing them: select a machine and
-account, open a terminal, and use tools and files already present without
-managing Docker or a VM image. Ordinary development must remain useful without
-an agent or model account.
+The initial execution location is the Linux daemon host, not the client Mac.
+Host execution complements VMs and apps rather than replacing them: explicitly
+select an authorized account on that host, open a terminal, and use existing
+tools and files without managing Docker or a VM image. Ordinary development must
+remain useful without an agent or model account.
 
-Requirements before implementation:
+An account-scoped executor now exists behind the runtime interface.
+It uses the same binary under a separately authorized non-root systemd service,
+with a daemon-only Unix socket and peer-UID checks. It does not relax the daemon's
+service hardening. Persistent session identity and explicit API/CLI creation are
+implemented, disabled by default. Native integration is implemented in source;
+Apple build/runtime and cross-account systemd verification remain pending. See
+[docs/HOST_SESSIONS.md](docs/HOST_SESSIONS.md) for the account boundary, dependency
+exception, cleanup limits, implementation status and verification requirements.
+
+Requirements before shipping:
 
 - Explicit opt-in at environment creation and a persistent Host label showing
   the execution machine and account. Never silently substitute host execution
@@ -478,10 +488,11 @@ Requirements before implementation:
 - Keep the native interaction consistent: terminal tabs, cwd inheritance, folder
   selection, and configuration in the inspector. Distinguish the daemon host
   from the device running the client; neither should be assumed implicitly.
-- Settle the initial platform scope (Linux daemon host, client-local Mac, or
-  both) and remote-access contract before implementation. Direct execution on a
-  Mac is not the deferred macOS VM-hosting driver. No hosted control plane,
-  metering or automatic credential copying is introduced by this direction.
+- Initial remote access stays through the existing daemon API and paired-client
+  authorization. Account selection requires local administrator consent, not a
+  remote settings change. Client-local Mac execution is not in this slice and
+  remains distinct from the deferred macOS VM-hosting driver. No hosted control
+  plane, metering or automatic credential copying is introduced.
 
 VMs remain the default when isolation is wanted. The host option is for users
 who deliberately prefer their existing account environment and accept its

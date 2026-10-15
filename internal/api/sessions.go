@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -143,19 +145,46 @@ func NewSessionsService(backend SessionsBackend, deps SessionsDeps) *SessionsSer
 // (e.g. a duplicate name) map to the wire code via the ErrorInterceptor.
 func (s *SessionsService) CreateSession(ctx context.Context, req *connect.Request[fletcherv1.CreateSessionRequest]) (*connect.Response[fletcherv1.CreateSessionResponse], error) {
 	sess, err := s.backend.Create(ctx, session.CreateParams{
-		Name:         req.Msg.GetName(),
-		Image:        req.Msg.GetImage(),
-		EgressPolicy: req.Msg.GetEgressPolicy(),
-		Gateway:      req.Msg.GetGateway(),
-		RunApp:       req.Msg.GetRunApp(),
-		VolumeRef:    req.Msg.GetVolume(),
-		Credentials:  req.Msg.GetCredentials(),
-		EnvVars:      envVarsFromProto(req.Msg.GetEnvVars()),
+		ExecutionKind: req.Msg.GetExecutionKind(),
+		HostUser:      req.Msg.GetHostUser(),
+		HostUID:       req.Msg.GetHostUid(),
+		WorkingDir:    req.Msg.GetWorkingDir(),
+		Name:          req.Msg.GetName(),
+		Image:         req.Msg.GetImage(),
+		EgressPolicy:  req.Msg.GetEgressPolicy(),
+		Gateway:       req.Msg.GetGateway(),
+		RunApp:        req.Msg.GetRunApp(),
+		VolumeRef:     req.Msg.GetVolume(),
+		Credentials:   req.Msg.GetCredentials(),
+		EnvVars:       envVarsFromProto(req.Msg.GetEnvVars()),
 	})
 	if err != nil {
 		return nil, err
 	}
 	return connect.NewResponse(&fletcherv1.CreateSessionResponse{Session: sessionToProto(sess)}), nil
+}
+
+// GetHostSessionAccount reports the locally authorized account without creating a session.
+func (s *SessionsService) GetHostSessionAccount(ctx context.Context, _ *connect.Request[fletcherv1.GetHostSessionAccountRequest]) (*connect.Response[fletcherv1.GetHostSessionAccountResponse], error) {
+	provider, ok := s.backend.(interface {
+		HostAccount(context.Context) (runtime.HostAccount, error)
+	})
+	if !ok {
+		return nil, errs.New(errs.CategoryFailedPrecondition, "host sessions are disabled on this daemon")
+	}
+	account, err := provider.HostAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	machine, err := os.Hostname()
+	if err != nil {
+		return nil, fmt.Errorf("read daemon hostname: %w", err)
+	}
+	return connect.NewResponse(&fletcherv1.GetHostSessionAccountResponse{Account: hostAccountToProto(account), Machine: machine}), nil
+}
+
+func hostAccountToProto(a runtime.HostAccount) *fletcherv1.HostSessionAccount {
+	return &fletcherv1.HostSessionAccount{User: a.User, Uid: a.UID, Home: a.Home}
 }
 
 // GetSession fetches a session by id or name.
@@ -262,6 +291,13 @@ func (s *SessionsService) RestartSession(ctx context.Context, req *connect.Reque
 // restarts it.
 func (s *SessionsService) RedeploySession(ctx context.Context, req *connect.Request[fletcherv1.RedeploySessionRequest]) (*connect.Response[fletcherv1.RedeploySessionResponse], error) {
 	ref := req.Msg.GetRef()
+	current, err := s.backend.Get(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if current.ExecutionKind == session.ExecutionHost {
+		return nil, errs.New(errs.CategoryFailedPrecondition, "host sessions cannot be redeployed")
+	}
 	target := strings.TrimSpace(req.Msg.GetImage())
 
 	var refreshed bool
@@ -707,19 +743,24 @@ func clampUint16(v uint32) uint16 {
 
 func sessionToProto(s session.Session) *fletcherv1.Session {
 	p := &fletcherv1.Session{
-		Id:           s.ID,
-		Name:         s.Name,
-		Image:        s.Image,
-		State:        stateToProto(s.State),
-		CreatedAt:    s.CreatedAt.Unix(),
-		UpdatedAt:    s.UpdatedAt.Unix(),
-		DiskBytes:    s.DiskBytes,
-		EgressPolicy: s.EgressPolicy,
-		Gateway:      s.Gateway,
-		RunApp:       s.RunApp,
-		HasRollback:  s.HasRollback,
-		Volume:       s.VolumeName,
-		EnvVars:      envVarsToProto(s.EnvVars),
+		ExecutionKind: s.ExecutionKind,
+		WorkingDir:    s.WorkingDir,
+		Id:            s.ID,
+		Name:          s.Name,
+		Image:         s.Image,
+		State:         stateToProto(s.State),
+		CreatedAt:     s.CreatedAt.Unix(),
+		UpdatedAt:     s.UpdatedAt.Unix(),
+		DiskBytes:     s.DiskBytes,
+		EgressPolicy:  s.EgressPolicy,
+		Gateway:       s.Gateway,
+		RunApp:        s.RunApp,
+		HasRollback:   s.HasRollback,
+		Volume:        s.VolumeName,
+		EnvVars:       envVarsToProto(s.EnvVars),
+	}
+	if s.ExecutionKind == session.ExecutionHost {
+		p.HostAccount = hostAccountToProto(s.HostAccount)
 	}
 	if p.Volume == "" {
 		// Name lookup is best-effort; the id is still actionable.

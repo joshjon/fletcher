@@ -1,0 +1,15 @@
+# Optional direct host execution. Never enabled by the default installer.
+[Unit]
+Description=Fletcher host executor socket for %i
+
+[Socket]
+ListenStream=/run/fletcher-host/%i.sock
+SocketUser=fletcher
+SocketGroup=fletcher
+SocketMode=0600
+DirectoryMode=0755
+RemoveOnStop=true
+Service=fletcher-host@%i.service
+
+[Install]
+WantedBy=sockets.target

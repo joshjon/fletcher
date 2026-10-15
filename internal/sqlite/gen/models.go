@@ -114,22 +114,27 @@ type Secret struct {
 }
 
 type Session struct {
-	ID           string
-	Name         string
-	Image        string
-	State        string
-	ForkID       string
-	ForkPath     string
-	CreatedAt    int64
-	UpdatedAt    int64
-	LastUsedAt   *int64
-	EgressPolicy string
-	Gateway      string
-	RunApp       int64
-	PrevForkID   *string
-	PrevForkPath *string
-	VolumeID     *string
-	EnvVars      string
+	ID            string
+	Name          string
+	Image         string
+	State         string
+	ForkID        string
+	ForkPath      string
+	CreatedAt     int64
+	UpdatedAt     int64
+	LastUsedAt    *int64
+	EgressPolicy  string
+	Gateway       string
+	RunApp        int64
+	PrevForkID    *string
+	PrevForkPath  *string
+	VolumeID      *string
+	EnvVars       string
+	ExecutionKind string
+	HostUser      string
+	HostUid       int64
+	HostHome      string
+	WorkingDir    string
 }
 
 type Setting struct {

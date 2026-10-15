@@ -21,6 +21,8 @@ type Querier interface {
 	CountSessions(ctx context.Context) (int64, error)
 	CreateApproval(ctx context.Context, arg CreateApprovalParams) (PendingApproval, error)
 	CreateEgressOperation(ctx context.Context, arg CreateEgressOperationParams) error
+	// Legacy policy columns retain valid placeholders; host responses expose no VM policy.
+	CreateHostSession(ctx context.Context, arg CreateHostSessionParams) (Session, error)
 	CreateImageImport(ctx context.Context, arg CreateImageImportParams) error
 	CreateJob(ctx context.Context, arg CreateJobParams) (Job, error)
 	CreatePeer(ctx context.Context, arg CreatePeerParams) (Peer, error)
@@ -52,7 +54,7 @@ type Querier interface {
 	GetPublishedPublicPortByHost(ctx context.Context, host *string) (PublishedPort, error)
 	GetReport(ctx context.Context, id string) (Report, error)
 	GetSecret(ctx context.Context, name string) ([]byte, error)
-	GetSessionByRef(ctx context.Context, ref string) (Session, error)
+	GetSessionByRef(ctx context.Context, id string) (Session, error)
 	GetVolumeByRef(ctx context.Context, ref string) (Volume, error)
 	InterruptEgressOperations(ctx context.Context, updatedAt int64) error
 	InterruptImageImports(ctx context.Context, updatedAt int64) error
