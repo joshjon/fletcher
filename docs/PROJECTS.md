@@ -94,8 +94,15 @@ removal without terminal termination, Stop/Open hibernation resume, cold Restart
 with retained files, missing-directory rejection and session-deletion cascade.
 This exercises the API and runtime contract, not the native UI. See the
 [live workspace smoke test](TESTING.md#live-project-and-terminal-workspace-smoke-test)
-for the opt-in command. Older-guest rejection remains covered by protocol tests;
-a live upgrade from an older guest was not exercised in this run.
+for the opt-in command.
+
+The separate [historical guest upgrade test](TESTING.md#historical-guest-upgrade-on-a-retained-disk)
+also passed three race-enabled hardware repetitions. A guest built from
+`6241dbc` rejected named requests without changing its legacy shell. The current
+driver invalidated that guest's real memory snapshot and refreshed its init on
+the retained disk; files survived, named reattachment worked, and subsequent
+hibernation preserved the upgraded shell. This does not replace Apple runtime
+verification.
 
 Follow-on work:
 

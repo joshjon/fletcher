@@ -1984,6 +1984,11 @@ Implemented:
   bookmark-only deletion, Stop/Open hibernation resume, cold Restart retaining
   files, missing-directory rejection and session-deletion cascade. See
   [PROJECTS.md](PROJECTS.md).
+- Historical guest upgrade passed three race-enabled Firecracker repetitions:
+  a pre-named-terminal guest rejected targets without fallback; the current
+  driver invalidated its real memory snapshot, refreshed init on the retained
+  rootfs, preserved files and supported named reconnect and subsequent resume.
+  See [TESTING.md](TESTING.md#historical-guest-upgrade-on-a-retained-disk).
 
 Remaining:
 - The original native implementation passed 74 core tests and unsigned iOS/macOS
@@ -1991,9 +1996,6 @@ Remaining:
   terminal-workspace refinement; Swift/Xcode are unavailable on the Linux
   implementation host. Verify tab switching, cwd inheritance, the folder picker,
   inspector stability, keyboard navigation and accessibility on devices.
-- Verify named-terminal support when upgrading a real older guest. Protocol
-  rejection tests are not an upgrade check. Disk durability does not promise
-  cold-boot process continuity.
 - Safe host-folder import (paused behind host execution): copy selected data into the guest, preserve the host
   source, bound transfers, reject unsafe paths/symlinks, support cancellation,
   and return changes through explicit review/export. No live mounts.

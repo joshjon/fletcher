@@ -449,8 +449,8 @@ on detach/reattach, live cwd inheritance, captured output, bookmark-only deletio
 Stop/Open reuse and explicit cold Restart with retained rootfs files. When
 hibernation is available it also verifies restored pane/process identity. Missing
 folders must fail rather than fall back, and deleting the test session must
-remove its registrations. An old-guest upgrade and native tab/split interaction
-still need separate verification.
+remove its registrations. Native tab/split interaction still needs separate
+verification. The historical-guest upgrade has its own test below.
 
 For host executor socket-loss/replacement and interrupted-stream regressions:
 
@@ -463,6 +463,42 @@ service. Distinct-account systemd lifecycle, revocation and manual process-crash
 results are recorded in [HOST_SESSIONS.md](HOST_SESSIONS.md). Actual host reboot
 and Apple build/runtime verification remain pending. Never reboot a host solely
 accessible through the connection carrying the test session.
+
+### Historical guest upgrade on a retained disk
+
+This test boots a real pre-named-terminal guest, checks that an unsupported named
+request leaves its legacy shell untouched, then hibernates it. The current
+driver must reject the old-guest memory snapshot, cold-boot the same rootfs,
+refresh its init, preserve test files and support named reconnect and subsequent
+hibernation resume. The historical boot bypasses init refresh only in test code;
+there is no production bypass flag.
+
+Build the historical guest from `6241dbc`, before named shell targets existed:
+
+```sh
+work=$(mktemp -d)
+mkdir "$work/source"
+git archive 6241dbc | tar -x -C "$work/source"
+(cd "$work/source" && CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' \
+  -o "$work/old-guest" ./cmd/fletcher-guest)
+go test -race -tags=integration -c -o "$work/guest-upgrade.test" \
+  ./internal/runtime/firecrackerdriver
+sudo env FLETCHER_TEST_ROOTFS=/var/lib/fletcher/snapshots/images/fletcher-base.ext4 \
+  FLETCHER_TEST_OLD_GUEST="$work/old-guest" \
+  "$work/guest-upgrade.test" -test.run '^TestFirecrackerOlderGuestUpgrade$' \
+  -test.count=3 -test.v -test.timeout=4m
+rm -rf -- "$work"
+```
+
+Use only trusted guest fixtures. The test requires KVM, `/dev/vhost-vsock`,
+bundled VMM/guest assets and e2fsprogs. The privileged invocation accommodates
+hosts whose vsock device is root-only. It copies the template to a disposable
+rootfs before writing anything; the imported image, installed daemon and existing
+sessions are untouched. Both environment variables are required to opt in.
+
+Three race-enabled repetitions passed with historical guest `6241dbc`,
+Firecracker 1.16.0, kernel 5.10.225 and tmux 3.5a. This is an in-place driver/guest
+upgrade check, not an Apple build or device check.
 
 ### 3. Real runtime - runc + btrfs (the no-KVM fallback)
 
