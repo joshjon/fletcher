@@ -295,19 +295,36 @@ func (s *executor) stop(ctx context.Context, id string) (err error) {
 	//nolint:gosec // locally resolved tmux binary and validated per-session socket, without a shell
 	cmd := exec.CommandContext(ctx, s.tmux, "-S", socket, "kill-server")
 	cmd.Env = s.env("")
-	if err := cmd.Run(); err != nil {
-		// A stale socket after a crashed server is not a live terminal.
-		dialer := net.Dialer{Timeout: time.Second}
-		c, dialErr := dialer.DialContext(ctx, "unix", socket)
-		if errors.Is(dialErr, unix.ECONNREFUSED) || errors.Is(dialErr, os.ErrNotExist) {
-			return nil
-		}
-		if c != nil {
-			_ = c.Close()
-		}
-		return fmt.Errorf("stop host terminals: %w", err)
+	commandErr := cmd.Run()
+	// tmux can acknowledge kill-server before closing its listener. A second
+	// Stop can then see an exiting server that still accepts connections but
+	// rejects commands. Confirm listener teardown before forgetting the namespace.
+	if err := waitHostSocketClosed(ctx, socket); err != nil {
+		return fmt.Errorf("stop host terminals: %w", errors.Join(commandErr, err))
 	}
 	return nil
+}
+
+func waitHostSocketClosed(ctx context.Context, socket string) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	dialer := net.Dialer{Timeout: time.Second}
+	for {
+		conn, err := dialer.DialContext(ctx, "unix", socket)
+		// A stale socket after a crashed or exiting server is not a live terminal.
+		if errors.Is(err, unix.ECONNREFUSED) || errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("confirm terminal socket shutdown: %w", err)
+		}
+		_ = conn.Close()
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for terminal socket shutdown: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (s *executor) socket(id string) string { return filepath.Join(s.dir, id+".sock") }

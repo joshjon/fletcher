@@ -244,6 +244,19 @@ frames, bounded stream cleanup and explicit namespace recovery. Their private
 executor has no systemd supervisor, so they explicitly clean up its tmux server;
 they do not substitute for the distinct-account live SIGKILL checks above.
 
+Follow-up stress testing exposed two terminal-client teardown races, now fixed:
+normal stdin EOF detaches successfully even if the cancelled tmux attachment
+reports a forced-exit status; unexpected terminal exits still retain their
+status. Stop also waits for the dedicated tmux listener to close before dropping
+the namespace, so an immediate repeated Stop does not mistake an exiting server
+for failed cleanup. The wait is bounded by the existing stop deadline, and an
+unconfirmed shutdown retains its namespace. Deterministic tests fail against the
+previous implementation; the complete host driver suite passed 100 race-enabled
+repetitions after the fixes. The rebuilt daemon also passed 100 live CLI stdin-EOF
+detaches, 10 immediate repeated Stops, explicit recovery and file-preserving
+deletion. The executor/daemon SIGKILL and unavailable-socket checks above passed
+again after installation.
+
 These checks do not establish actual host reboot, power-loss durability, every
 login-profile/tool combination, or signed native-app behavior. No VM restart or
 guest update is required merely to enable host sessions.

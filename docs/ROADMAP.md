@@ -2022,6 +2022,9 @@ Implemented backend, disabled by default:
   bounded read-only directory browsing. No VM image or snapshot involvement.
 - Tests for account/peer validation, packet bounds, cancellation, terminal I/O,
   detach persistence, per-session server cleanup and preservation of host files.
+  Stress testing also exposed and fixed explicit-detach exit-status and repeated
+  Stop/listener-teardown races. Deterministic regressions and 100 race-enabled
+  host driver suite repetitions passed after the fixes.
 - Optional unit templates, not installed or enabled automatically. After explicit
   local consent, distinct-account systemd activation, terminal I/O/control mode,
   cwd inheritance, cleanup and revocation passed live checks. The socket follows

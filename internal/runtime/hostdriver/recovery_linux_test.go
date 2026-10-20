@@ -4,6 +4,7 @@ package hostdriver
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -133,6 +134,80 @@ func TestDriverExecutorReplacementRequiresExplicitRecovery(t *testing.T) {
 	data, err := os.ReadFile(keep)
 	require.NoError(t, err)
 	require.Equal(t, "retained", string(data))
+}
+
+func TestDriverExplicitDetachDoesNotReportAttachmentExit(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		detach bool
+		exit   int32
+		want   int32
+	}{
+		{name: "detach cancels attachment", detach: true, exit: -1},
+		{name: "detach ends attachment", detach: true, exit: 1},
+		{name: "terminal failure", exit: 7, want: 7},
+		{name: "unexpected attachment kill", exit: -1, want: -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir, err := os.MkdirTemp("", "fhd-")
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, os.RemoveAll(dir)) })
+			path := filepath.Join(dir, "executor.sock")
+			listener, err := net.Listen("unix", path)
+			require.NoError(t, err)
+			defer listener.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			background.GoNamed(ctx, "test.host.detach-exit", func(context.Context) {
+				conn, err := listener.Accept()
+				if err != nil {
+					done <- err
+					return
+				}
+				defer conn.Close()
+				_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+				var req request
+				if err := readPacket(conn, &req); err != nil {
+					done <- err
+					return
+				}
+				if err := writePacket(conn, packet{Kind: "ready"}); err != nil {
+					done <- err
+					return
+				}
+				if test.detach {
+					var closeRequest packet
+					if err := readPacket(conn, &closeRequest); err != nil {
+						done <- err
+						return
+					}
+					if closeRequest.Kind != "close" {
+						done <- fmt.Errorf("expected explicit detach, got %q", closeRequest.Kind)
+						return
+					}
+				}
+				done <- writePacket(conn, packet{Kind: "exit", Exit: test.exit})
+			})
+			input, writer := io.Pipe()
+			defer input.Close()
+			defer writer.Close()
+			var stdin io.Reader = input
+			if test.detach {
+				stdin = strings.NewReader("")
+			}
+			h := &handle{driver: &Driver{socket: path}}
+			code, err := h.Shell(ctx, runtime.ShellSpec{}, stdin, io.Discard, nil)
+			require.NoError(t, err)
+			require.Equal(t, test.want, code)
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-ctx.Done():
+				t.Fatal("detach response did not complete")
+			}
+		})
+	}
 }
 
 func TestDriverInterruptedTerminalFrameIsNotSuccessfulExit(t *testing.T) {

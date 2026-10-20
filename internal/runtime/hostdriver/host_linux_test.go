@@ -180,6 +180,60 @@ func TestHostTerminalsDetachAndStopOnlyTheirOwnServer(t *testing.T) {
 	require.Error(t, s.ensureTerminal(t.Context(), stopped, "later", spec.WorkDir, shell))
 }
 
+func TestHostStopConfirmsListenerShutdown(t *testing.T) {
+	for _, command := range []string{"true", "false"} {
+		t.Run(command, func(t *testing.T) {
+			s, spec := testExecutor(t)
+			var err error
+			s.tmux, err = exec.LookPath(command)
+			require.NoError(t, err)
+			require.NoError(t, s.start(t.Context(), spec))
+			listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: s.socket(spec.SessionID), Net: "unix"})
+			require.NoError(t, err)
+			defer listener.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			background.GoNamed(ctx, "test.host.stop-listener", func(ctx context.Context) {
+				done <- s.stop(ctx, spec.SessionID)
+			})
+			require.NoError(t, listener.SetDeadline(time.Now().Add(time.Second)))
+			probe, err := listener.Accept()
+			require.NoError(t, err, "Stop must confirm socket shutdown even when kill-server succeeds")
+			require.NoError(t, probe.Close())
+			select {
+			case err := <-done:
+				t.Fatalf("Stop returned while the terminal socket was still live: %v", err)
+			default:
+			}
+			require.NoError(t, listener.Close())
+			select {
+			case err := <-done:
+				require.NoError(t, err, "an exiting server is stopped even if a repeated kill-server returned an error")
+			case <-ctx.Done():
+				t.Fatal("Stop did not observe terminal socket shutdown")
+			}
+			require.NotContains(t, s.sessions, spec.SessionID)
+		})
+	}
+}
+
+func TestHostStopRetainsNamespaceWhenListenerSurvives(t *testing.T) {
+	s, spec := testExecutor(t)
+	var err error
+	s.tmux, err = exec.LookPath("false")
+	require.NoError(t, err)
+	require.NoError(t, s.start(t.Context(), spec))
+	listener, err := net.Listen("unix", s.socket(spec.SessionID))
+	require.NoError(t, err)
+	defer listener.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	err = s.stop(ctx, spec.SessionID)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Contains(t, s.sessions, spec.SessionID, "unconfirmed cleanup must retain its namespace")
+}
+
 func tmuxOutput(t *testing.T, s *executor, id string, args ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)

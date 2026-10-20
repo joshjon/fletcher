@@ -135,7 +135,14 @@ func (h *handle) Shell(ctx context.Context, spec runtime.ShellSpec, stdin io.Rea
 				return 0, err
 			}
 		case "exit":
-			return p.Exit, nil
+			// EOF explicitly detaches this client. The executor cancels its tmux
+			// attachment, whose forced-exit status is not the shell's status.
+			select {
+			case <-inputEnded:
+				return 0, nil
+			default:
+				return p.Exit, nil
+			}
 		default:
 			return 0, unavailable("invalid host terminal response")
 		}
