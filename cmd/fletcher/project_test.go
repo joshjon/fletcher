@@ -53,7 +53,7 @@ func (f cliProjectShell) Shell(_ context.Context, ref string, spec runtime.Shell
 	return 0, err
 }
 
-func TestProjectCLIRegistersAndOpensAnExistingVM(t *testing.T) {
+func TestProjectCLIRegistersAndOpensAnExistingSession(t *testing.T) {
 	p := cliProjects{
 		p:       project.Project{ID: "project_test", Name: "app", SessionID: "session_test", WorkingDir: "/workspace/app"},
 		created: make(chan project.CreateParams, 1), opened: make(chan string, 2), deleted: make(chan string, 1),
@@ -79,6 +79,13 @@ func TestProjectCLIRegistersAndOpensAnExistingVM(t *testing.T) {
 	out := run("create", "--name", "app", "--session", "dev", "--workdir", "/workspace/app", "-o", "json")
 	require.Contains(t, out, "project_test")
 	require.Equal(t, project.CreateParams{Name: "app", SessionRef: "dev", WorkingDir: "/workspace/app"}, <-p.created)
+
+	// Leave an omitted path to the daemon so each environment uses its own
+	// default; a CLI-level /workspace default would override host directories.
+	for _, ref := range []string{"dev", "host"} {
+		run("create", "--name", "app", "--session", ref, "-o", "json")
+		require.Equal(t, project.CreateParams{Name: "app", SessionRef: ref}, <-p.created)
+	}
 
 	// A non-interactive input lets the bidi shell finish without reading the
 	// test runner's terminal; the real PTY remains a runtime responsibility.

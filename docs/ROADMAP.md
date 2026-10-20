@@ -2014,8 +2014,11 @@ Implemented backend, disabled by default:
   bounded read-only directory browsing. No VM image or snapshot involvement.
 - Tests for account/peer validation, packet bounds, cancellation, terminal I/O,
   detach persistence, per-session server cleanup and preservation of host files.
-- Optional unit templates, not installed or enabled automatically. Local operator
-  account authorization and actual cross-account systemd verification are pending.
+- Optional unit templates, not installed or enabled automatically. After explicit
+  local consent, distinct-account systemd activation, terminal I/O/control mode,
+  cwd inheritance, cleanup and revocation passed live checks. The socket follows
+  the daemon service rather than the early boot socket target, and daemon drain
+  leaves host process teardown to the account service without reactivation.
 
 - Persistent execution kind and account/directory identity, preserving VM defaults.
   Host lifecycle never allocates, commits or deletes VM disks. VM-only operations
@@ -2024,13 +2027,15 @@ Implemented backend, disabled by default:
   with confirmed username/UID, and CLI `session create --host`. Project bookmarks
   reuse host sessions without owning or deleting their files.
 
-Remaining before enabling host sessions:
+Remaining verification:
 - Verify the implemented native Host creation and session/project/tab/split flow:
   explicit account confirmation, browsable paths, persistent Host/account/daemon
   labels, hidden VM-only controls, and host-file-preserving deletion messaging.
   Swift package tests and both Apple builds remain pending.
-- Test lifecycle failure paths, restart/reconciliation, service supervision and
-  revocation under systemd, then run both Apple builds and native runtime checks.
+- Actual host reboot and abrupt-crash recovery remain open. Ordinary service
+  Stop/Start/Restart, unavailable-executor failure, local authorization removal,
+  metadata preservation and host-file-preserving deletion passed live checks.
+  See [HOST_SESSIONS.md](HOST_SESSIONS.md) for scope and remaining checks.
 - Keep one job model if host background work is added. No separate scheduler,
   agent harness, hosted control plane, metering or automatic credential copying.
 

@@ -1,6 +1,15 @@
 # Optional direct host execution. Never enabled by the default installer.
 [Unit]
 Description=Fletcher host executor socket for %i
+# Close activation before daemon cleanup so it cannot restart a stopping daemon.
+# This service-scoped socket starts after the daemon, not before sockets.target.
+DefaultDependencies=no
+Requires=sysinit.target
+After=sysinit.target fletcher.service
+BindsTo=fletcher.service
+PartOf=fletcher.service
+Before=shutdown.target
+Conflicts=shutdown.target
 
 [Socket]
 ListenStream=/run/fletcher-host/%i.sock
@@ -12,4 +21,4 @@ RemoveOnStop=true
 Service=fletcher-host@%i.service
 
 [Install]
-WantedBy=sockets.target
+WantedBy=fletcher.service

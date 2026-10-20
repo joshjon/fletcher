@@ -163,8 +163,10 @@ func TestHostSessionShutdown(t *testing.T) {
 	m, r, _, _, _ := hostFixture(t)
 	s, err := m.Create(t.Context(), hostParams(r, "host"))
 	require.NoError(t, err)
+	r.unavailable = true
+	r.handles[0].stopErr = errors.New("executor already stopped by its supervisor")
 	require.NoError(t, m.Shutdown(t.Context()))
-	require.Equal(t, 1, r.handles[0].stopped)
+	require.Zero(t, r.handles[0].stopped, "systemd owns executor shutdown; daemon drain must not reactivate it")
 	require.Empty(t, r.handles[0].execs, "shutdown must not invoke guest sync on a host")
 	stopped, err := m.Get(t.Context(), s.ID)
 	require.NoError(t, err)

@@ -43,7 +43,7 @@ func stopHandle(ctx context.Context, handle runtime.SessionHandle) error {
 	return handle.Stop(ctx)
 }
 
-// Shutdown rejects new work, drains operations and builds, syncs VM disks and stops managed environments before SQLite closes.
+// Shutdown drains operations, syncs and stops VMs, and records externally supervised host sessions as stopped before SQLite closes.
 func (m *Manager) Shutdown(ctx context.Context) error {
 	m.lifecycleMu.Lock()
 	m.closing = true
@@ -73,7 +73,17 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 			lock := m.startLock(id)
 			lock.Lock()
 			defer lock.Unlock()
-			_, err := m.stopLocked(ctx, id)
+			row, err := m.lookup(ctx, id)
+			if err != nil {
+				return err
+			}
+			if row.ExecutionKind == ExecutionHost {
+				// The account service owns host process teardown and is stopped
+				// before the daemon by systemd. Never reactivate it during drain.
+				m.takeHandle(id)
+				return m.setState(ctx, id, StateStopped)
+			}
+			_, err = m.stopLocked(ctx, id)
 			return err
 		})
 	}

@@ -8,10 +8,11 @@ priority over folder import and prepared-image reuse.
 
 The account executor, persistent session lifecycle, account-discovery API and
 explicit CLI creation are implemented. The native create flow and existing
-session/project workspaces also support the host contract. Apple build/runtime
-checks and real cross-account systemd verification remain pending below.
-Host execution is disabled by default. The optional systemd templates are not installed or
-enabled by the default installer, and existing VM sessions are unchanged.
+session/project workspaces also support the host contract. Distinct-account
+systemd checks have passed after explicit local authorization, as detailed below.
+Apple build/runtime and actual reboot checks remain pending. Host execution is
+disabled by default. The optional systemd templates are not installed or enabled
+by the default installer, and existing VM sessions are unchanged.
 
 VMs remain the isolated default. Host mode must be selected explicitly, with the
 machine and authorized account visible throughout the workspace. It must never
@@ -95,9 +96,12 @@ introduced. Hosts that do not enable this mode do not need this prerequisite.
   working directory. Detached or independently managed programs can outlive a
   terminal; session Stop is not VM shutdown.
 - Stopping the account executor uses systemd `KillMode=control-group` to terminate
-  processes still in that service. The executor is bound to the daemon service,
-  so it does not intentionally survive a daemon service stop. Process continuity
-  across service restart or reboot is not promised.
+  processes still in that service. Both the executor and its activation socket
+  are bound to the daemon service. Shutdown closes account activation before
+  daemon drain, preventing cleanup from reactivating a stopping daemon. Daemon
+  drain records host sessions as stopped without contacting the executor; the
+  account service owns their process teardown. Process continuity across service
+  restart or reboot is not promised.
 - Host programs are not sandboxed. A program can delegate work to an existing
   user service or another reachable service. Neither closing a terminal nor
   stopping the executor guarantees termination of that independently managed
@@ -127,8 +131,12 @@ silently during installation or upgrade.
    `Environment=FLETCHER_HOST_USER=<account>` to the explicitly selected account.
    This boot setting cannot be changed through the remote settings API.
 4. Reload systemd, enable `fletcher-host@<account>.socket`, and restart the daemon
-   during an agreed maintenance window. The socket starts its account service on
-   demand. The executor and daemon must use the same binary/protocol version.
+   during an agreed maintenance window. The socket is wanted by `fletcher.service`,
+   not `sockets.target`; it follows daemon start/restart and closes on daemon stop.
+   It starts its account service on demand. The executor and daemon must use the
+   same binary/protocol version. When upgrading older optional templates, disable
+   the socket before replacing and re-enabling it to remove its old boot-target
+   link.
 5. Upgrade paired clients before creating host sessions. Older clients do not
    understand the host-specific identity, capabilities or deletion explanation.
 
@@ -158,15 +166,17 @@ and independently managed services remain the operator's responsibility.
    cover no snapshot/runtime fallback, account mismatch, stop/delete failures,
    duplicate-create cleanup, persistence and project deletion semantics.
 2. Implemented: local `--host-user` authorization, `GetHostSessionAccount`, explicit
-   API/CLI host creation and VM-only capability guards. Service-bound lifetime,
-   actual cross-account revocation and reboot recovery still need runtime checks.
+   API/CLI host creation and VM-only capability guards. Service-bound lifetime
+   and local account revocation have passed live checks; actual reboot and abrupt
+   crash recovery remain open.
 3. Implemented in the native source: explicit Host creation with account discovery
    and confirmation, visible account/daemon labels, host-specific deletion text,
    browsable project folders, and hidden VM-only controls. Existing tab, split,
    pane-discovery, live-cwd and transport recovery logic is unchanged.
-4. Verify root-owned socket activation and distinct daemon/executor UIDs under
-   systemd, account permissions, service restart, revocation, process cleanup and
-   unavailable/mismatched helpers on a deliberately authorized test account.
+4. Verified under systemd with distinct daemon/executor UIDs: root-managed socket
+   activation, peer-UID checks, account permissions, service restart, revocation,
+   process cleanup and unavailable-executor failures. Identity mismatch is covered
+   by automated tests, not by changing a live account's UID or home.
 5. Run native package tests and both Apple builds, then signed-app terminal,
    reconnection, browsing and configuration checks. Local Swift syntax checks
    do not replace compiler, package-test or signed-runtime verification.
@@ -177,3 +187,33 @@ I/O and cwd queries, cancellation, detach persistence, server-specific shutdown,
 and preservation of working-directory files. The tmux tests use private temporary
 sockets and directories; they do not enable the account service or exercise a
 real cross-account systemd deployment.
+
+## Live Linux verification
+
+After explicit local consent, manual checks against the installed service passed:
+
+- The daemon retained its service identity and hardening; the executor ran as the
+  selected non-root login account with no effective capabilities and
+  `NoNewPrivileges=1`. Account shells could not access standard daemon state.
+- The account could not open the daemon-only executor socket directly. A connected
+  client with the wrong peer UID was rejected, including a root client.
+- Host creation used the confirmed account and existing directory without a VM
+  image. Read-only browsing resolved symlinks and rejected protected directories.
+- Interactive shell input, real cwd inheritance, detach/reattach state and tmux
+  control-mode pane discovery worked. Separate terminal names had distinct panes
+  in the account service's cgroup.
+- Bookmark creation with an omitted CLI directory used the host session's recorded
+  initial path. Bookmark/session removal preserved host files.
+- Session Stop/Start/Restart and daemon Stop/Start cleaned up managed shells,
+  preserved unrelated tmux servers, reconciled metadata and permitted explicit
+  recovery. Daemon stop did not reactivate either account unit.
+- Restarting the executor made the old namespace visibly unavailable until explicit
+  session Restart. No operation fell back to a VM or another account.
+- Disabling the socket, stopping the executor and removing local daemon authorization
+  rejected discovery and creation. Restoring explicit authorization recovered
+  access. Existing VM/session and project records were preserved; temporary test
+  registrations were removed.
+
+These checks do not establish actual host reboot, abrupt-crash recovery, every
+login-profile/tool combination, or signed native-app behavior. No VM restart or
+guest update is required merely to enable host sessions.

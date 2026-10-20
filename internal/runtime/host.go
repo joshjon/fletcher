@@ -16,7 +16,7 @@ type HostSessionSpec struct {
 	WorkDir   string
 }
 
-// HostSessionRuntime provides explicit host sessions independently of VM and snapshot drivers.
+// HostSessionRuntime provides explicit host sessions with process teardown externally supervised alongside the daemon, independently of VM and snapshot drivers.
 type HostSessionRuntime interface {
 	HostAccount(context.Context) (HostAccount, error)
 	StartHostSession(context.Context, HostSessionSpec) (SessionHandle, error)

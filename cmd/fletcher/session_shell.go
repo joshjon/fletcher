@@ -30,7 +30,7 @@ func sessionShellCmd() *cli.Command {
 		Flags: []cli.Flag{
 			socketFlag(),
 			&cli.StringFlag{Name: "terminal", Usage: "durable terminal name (empty reattaches the default terminal)"},
-			&cli.StringFlag{Name: "workdir", Usage: "initial absolute guest directory for a new named terminal; requires --terminal"},
+			&cli.StringFlag{Name: "workdir", Usage: "initial absolute environment directory for a new named terminal; requires --terminal"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ref := cmd.Args().First()
@@ -42,7 +42,7 @@ func sessionShellCmd() *cli.Command {
 	}
 }
 
-// runSessionShellTarget wires the local terminal to a PTY in the session VM: it puts
+// runSessionShellTarget wires the local terminal to a PTY in the recorded environment: it puts
 // stdin in raw mode, streams keystrokes up and terminal output down, and
 // forwards window resizes, restoring the terminal when the shell ends.
 func runSessionShellTarget(ctx context.Context, cmd *cli.Command, ref, dir, terminalName string) error {

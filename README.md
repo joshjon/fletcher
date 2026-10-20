@@ -25,8 +25,8 @@ developed in a separate repository.
 and directory in a terminal workspace. Optional [Linux host sessions](docs/HOST_SESSIONS.md)
 reuse an explicitly authorized login account's files and tools without an image.
 Host execution is disabled by default and does not provide VM isolation. The
-host-session client changes and cross-account service setup still need Apple
-builds and real-runtime verification.
+Linux account-service lifecycle and revocation have passed live checks. The
+host-session client changes still need Apple builds and signed-app verification.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for implementation, verification and
 release status. Until a release is published, [build from source](#building-from-source).

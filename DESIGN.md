@@ -464,7 +464,8 @@ It uses the same binary under a separately authorized non-root systemd service,
 with a daemon-only Unix socket and peer-UID checks. It does not relax the daemon's
 service hardening. Persistent session identity and explicit API/CLI creation are
 implemented, disabled by default. Native integration is implemented in source;
-Apple build/runtime and cross-account systemd verification remain pending. See
+Distinct-account systemd lifecycle and revocation checks have passed; actual
+reboot, abrupt-crash and Apple build/runtime verification remain pending. See
 [docs/HOST_SESSIONS.md](docs/HOST_SESSIONS.md) for the account boundary, dependency
 exception, cleanup limits, implementation status and verification requirements.
 

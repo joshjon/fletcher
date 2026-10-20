@@ -17,7 +17,7 @@ import (
 
 func projectCmd() *cli.Command {
 	return &cli.Command{
-		Name: "project", Usage: "save and reopen project directories in existing development VMs",
+		Name: "project", Usage: "save and reopen project directories in existing development sessions",
 		Commands: []*cli.Command{projectCreateCmd(), projectGetCmd(), projectListCmd(), projectUpdateCmd(), projectDeleteCmd(), projectOpenCmd()},
 	}
 }
@@ -29,12 +29,12 @@ func newProjectsClient(cmd *cli.Command) fletcherv1connect.ProjectServiceClient 
 
 func projectCreateCmd() *cli.Command {
 	return &cli.Command{
-		Name: "create", Usage: "register a guest directory without creating a VM or changing files",
+		Name: "create", Usage: "register an environment directory without creating compute or changing files",
 		Flags: []cli.Flag{
 			socketFlag(), outputFlag(),
 			&cli.StringFlag{Name: "name", Usage: "unique project name", Required: true},
 			&cli.StringFlag{Name: "session", Usage: "existing development session (id or name)", Required: true},
-			&cli.StringFlag{Name: "workdir", Usage: "absolute directory inside the guest", Value: "/workspace"},
+			&cli.StringFlag{Name: "workdir", Usage: "absolute environment directory (default: /workspace for VMs, recorded initial directory for host sessions)"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			resp, err := newProjectsClient(cmd).CreateProject(ctx, connect.NewRequest(&fletcherv1.CreateProjectRequest{
@@ -50,7 +50,7 @@ func projectCreateCmd() *cli.Command {
 
 func projectGetCmd() *cli.Command {
 	return &cli.Command{
-		Name: "get", Usage: "show a saved project without waking its VM", ArgsUsage: "<ref>",
+		Name: "get", Usage: "show a saved project without starting its session", ArgsUsage: "<ref>",
 		Flags: []cli.Flag{socketFlag(), outputFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ref, err := projectRef(cmd)
@@ -68,7 +68,7 @@ func projectGetCmd() *cli.Command {
 
 func projectListCmd() *cli.Command {
 	return &cli.Command{
-		Name: "list", Usage: "list saved projects without waking their VMs",
+		Name: "list", Usage: "list saved projects without starting their sessions",
 		Flags: []cli.Flag{socketFlag(), outputFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			resp, err := newProjectsClient(cmd).ListProjects(ctx, connect.NewRequest(&fletcherv1.ListProjectsRequest{}))
@@ -79,7 +79,7 @@ func projectListCmd() *cli.Command {
 				return writeProtoJSON(os.Stdout, resp.Msg)
 			}
 			tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "ID\tNAME\tSESSION\tGUEST DIRECTORY")
+			fmt.Fprintln(tw, "ID\tNAME\tSESSION\tDIRECTORY")
 			for _, p := range resp.Msg.GetProjects() {
 				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", p.GetId(), p.GetName(), p.GetSessionId(), p.GetWorkingDir())
 			}
@@ -94,7 +94,7 @@ func projectUpdateCmd() *cli.Command {
 		Flags: []cli.Flag{
 			socketFlag(), outputFlag(),
 			&cli.StringFlag{Name: "name", Usage: "new project name"},
-			&cli.StringFlag{Name: "workdir", Usage: "new absolute guest directory for newly created terminals"},
+			&cli.StringFlag{Name: "workdir", Usage: "new absolute environment directory for newly created terminals"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ref, err := projectRef(cmd)
@@ -114,14 +114,14 @@ func projectUpdateCmd() *cli.Command {
 
 func projectDeleteCmd() *cli.Command {
 	return &cli.Command{
-		Name: "delete", Usage: "remove only a saved registration (VM, files and terminals are untouched)", ArgsUsage: "<ref>",
+		Name: "delete", Usage: "remove only a saved registration (environment, files and terminals are untouched)", ArgsUsage: "<ref>",
 		Flags: []cli.Flag{socketFlag(), yesFlag()},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ref, err := projectRef(cmd)
 			if err != nil {
 				return err
 			}
-			if err := confirmManagement(cmd, "Remove the project registration? The VM, files and terminals will stay unchanged."); err != nil {
+			if err := confirmManagement(cmd, "Remove the project registration? The environment, files and terminals will stay unchanged."); err != nil {
 				return err
 			}
 			if _, err := newProjectsClient(cmd).DeleteProject(ctx, connect.NewRequest(&fletcherv1.DeleteProjectRequest{Ref: ref})); err != nil {
@@ -135,10 +135,10 @@ func projectDeleteCmd() *cli.Command {
 
 func projectOpenCmd() *cli.Command {
 	return &cli.Command{
-		Name: "open", Usage: "wake the existing VM and open or reattach a durable project terminal", ArgsUsage: "<ref>",
+		Name: "open", Usage: "start the recorded environment and open or reattach a durable project terminal", ArgsUsage: "<ref>",
 		Flags: []cli.Flag{
 			socketFlag(),
-			&cli.StringFlag{Name: "terminal", Usage: "terminal label (same label reattaches; another label starts independent work in this VM)", Value: "main"},
+			&cli.StringFlag{Name: "terminal", Usage: "terminal label (same label reattaches; another label starts independent work in this session)", Value: "main"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			ref, err := projectRef(cmd)
@@ -174,7 +174,7 @@ func renderProject(format string, p *fletcherv1.Project) error {
 		return writeProtoJSON(os.Stdout, p)
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "id:\t%s\nname:\t%s\nsession:\t%s\nguest directory:\t%s\n",
+	fmt.Fprintf(tw, "id:\t%s\nname:\t%s\nsession:\t%s\ndirectory:\t%s\n",
 		p.GetId(), p.GetName(), p.GetSessionId(), p.GetWorkingDir())
 	return tw.Flush()
 }
