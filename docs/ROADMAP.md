@@ -1979,15 +1979,21 @@ Implemented:
   No new daemon RPC is required. Capture, input, output and cwd use the discovered
   pane rather than assuming `%0`.
 
+- Live Firecracker reuse and named-terminal reconnect passed three race-enabled
+  smoke-test repetitions: pane/shell identity, live cwd, output capture,
+  bookmark-only deletion, Stop/Open hibernation resume, cold Restart retaining
+  files, missing-directory rejection and session-deletion cascade. See
+  [PROJECTS.md](PROJECTS.md).
+
 Remaining:
 - The original native implementation passed 74 core tests and unsigned iOS/macOS
   builds on the operator's Mac. Rerun core/UI tests and both builds for the
   terminal-workspace refinement; Swift/Xcode are unavailable on the Linux
   implementation host. Verify tab switching, cwd inheritance, the folder picker,
   inspector stability, keyboard navigation and accessibility on devices.
-- Verify reuse and named-terminal reconnect on real microVMs, including guest
-  upgrades and stop/start. Disk durability does not promise cold-boot process
-  continuity.
+- Verify named-terminal support when upgrading a real older guest. Protocol
+  rejection tests are not an upgrade check. Disk durability does not promise
+  cold-boot process continuity.
 - Safe host-folder import (paused behind host execution): copy selected data into the guest, preserve the host
   source, bound transfers, reject unsafe paths/symlinks, support cancellation,
   and return changes through explicit review/export. No live mounts.
@@ -2032,10 +2038,13 @@ Remaining verification:
   explicit account confirmation, browsable paths, persistent Host/account/daemon
   labels, hidden VM-only controls, and host-file-preserving deletion messaging.
   Swift package tests and both Apple builds remain pending.
-- Actual host reboot and abrupt-crash recovery remain open. Ordinary service
-  Stop/Start/Restart, unavailable-executor failure, local authorization removal,
-  metadata preservation and host-file-preserving deletion passed live checks.
-  See [HOST_SESSIONS.md](HOST_SESSIONS.md) for scope and remaining checks.
+- Actual host reboot remains open. Abrupt executor and daemon SIGKILL checks
+  passed: active-stream disconnection, systemd process cleanup, explicit session
+  recovery, retained identity/bookmarks/files and preservation of an unrelated
+  tmux server. Missing account sockets rejected Start/Delete without removing
+  metadata. Isolated driver recovery tests passed 20 race-enabled repetitions.
+  Ordinary service Stop/Start/Restart and local authorization removal had already
+  passed. See [HOST_SESSIONS.md](HOST_SESSIONS.md) for scope and remaining checks.
 - Keep one job model if host background work is added. No separate scheduler,
   agent harness, hosted control plane, metering or automatic credential copying.
 

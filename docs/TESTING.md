@@ -424,6 +424,46 @@ FLETCHER_TEST_ROOTFS=/tmp/rootfs.ext4 \
   go test -tags integration -run TestFirecracker -v ./internal/runtime/firecrackerdriver/
 ```
 
+### Live project and terminal workspace smoke test
+
+This opt-in test contacts an already running Linux daemon. Select a Firecracker
+host and an imported development image containing tmux. It creates a uniquely
+named disposable session and project registrations, then removes them. It never
+restarts services, alters networking, or operates on existing sessions. Allow
+space for a cloned rootfs and hibernation state. Do not run it against a host
+without the operator's consent.
+
+```sh
+FLETCHER_TEST_SOCKET=/run/fletcher/fletcher.sock \
+FLETCHER_TEST_IMAGE=fletcher-base \
+  go test -race -tags=integration -count=3 -v \
+  -run '^TestLiveVMProjectWorkspace$' ./internal/api
+```
+
+Both variables are required; ordinary tests skip this live-daemon check. Use an
+image name already listed by `fletcher image list`. The test uses the local Unix
+socket, not stored remote credentials, and does not require a model account.
+
+It verifies project/session identity, independent named panes, shell preservation
+on detach/reattach, live cwd inheritance, captured output, bookmark-only deletion,
+Stop/Open reuse and explicit cold Restart with retained rootfs files. When
+hibernation is available it also verifies restored pane/process identity. Missing
+folders must fail rather than fall back, and deleting the test session must
+remove its registrations. An old-guest upgrade and native tab/split interaction
+still need separate verification.
+
+For host executor socket-loss/replacement and interrupted-stream regressions:
+
+```sh
+go test -race -count=20 ./internal/runtime/hostdriver
+```
+
+These use private temporary sockets and tmux servers, not the installed account
+service. Distinct-account systemd lifecycle, revocation and manual process-crash
+results are recorded in [HOST_SESSIONS.md](HOST_SESSIONS.md). Actual host reboot
+and Apple build/runtime verification remain pending. Never reboot a host solely
+accessible through the connection carrying the test session.
+
 ### 3. Real runtime - runc + btrfs (the no-KVM fallback)
 
 **What this proves:** jobs run inside a real OCI container (runc) against

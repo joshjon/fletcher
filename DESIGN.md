@@ -463,10 +463,10 @@ An account-scoped executor now exists behind the runtime interface.
 It uses the same binary under a separately authorized non-root systemd service,
 with a daemon-only Unix socket and peer-UID checks. It does not relax the daemon's
 service hardening. Persistent session identity and explicit API/CLI creation are
-implemented, disabled by default. Native integration is implemented in source;
-Distinct-account systemd lifecycle and revocation checks have passed; actual
-reboot, abrupt-crash and Apple build/runtime verification remain pending. See
-[docs/HOST_SESSIONS.md](docs/HOST_SESSIONS.md) for the account boundary, dependency
+implemented, disabled by default. Native integration is implemented in source.
+Distinct-account systemd lifecycle, revocation and abrupt executor/daemon crash
+checks have passed; actual reboot and Apple build/runtime verification remain
+pending. See [docs/HOST_SESSIONS.md](docs/HOST_SESSIONS.md) for the account boundary, dependency
 exception, cleanup limits, implementation status and verification requirements.
 
 Requirements before shipping:

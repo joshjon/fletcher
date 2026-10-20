@@ -60,9 +60,10 @@ network policy and security boundary. Separate terminal labels are not separate
 sandboxes. Use separate VMs for independent isolation, and separate working
 trees when concurrent edits should not share a checkout.
 
-Closing a client leaves a tmux terminal running while the VM is running. A VM
-stop or reboot interrupts processes; the durable disk survives, but tmux and
-agent process state is not promised across a cold boot.
+Closing a client leaves a tmux terminal running while the VM is running.
+Stop/Open can resume the hibernated process tree. An explicit Restart cold-boots
+the retained disk; tmux and agent process state is not promised across a cold
+boot.
 
 Named terminals require an updated guest and tmux. An older guest rejects the
 request without falling back to another terminal. A cold restart with the
@@ -85,6 +86,16 @@ The original native implementation passed 74 core tests and unsigned iOS/macOS
 builds on the operator's Mac. The workspace refinement needs fresh Swift tests,
 Apple builds and device verification. Syntax and local tmux checks on the Linux
 implementation host are not equivalent to those checks.
+
+The live daemon workspace smoke test passed three race-enabled repetitions on
+Firecracker 1.16.0, guest kernel 5.10.225 and guest tmux 3.5a. It verified named
+pane/shell reuse after detach, live cwd inheritance, output capture, bookmark
+removal without terminal termination, Stop/Open hibernation resume, cold Restart
+with retained files, missing-directory rejection and session-deletion cascade.
+This exercises the API and runtime contract, not the native UI. See the
+[live workspace smoke test](TESTING.md#live-project-and-terminal-workspace-smoke-test)
+for the opt-in command. Older-guest rejection remains covered by protocol tests;
+a live upgrade from an older guest was not exercised in this run.
 
 Follow-on work:
 

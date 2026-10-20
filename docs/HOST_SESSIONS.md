@@ -167,8 +167,8 @@ and independently managed services remain the operator's responsibility.
    duplicate-create cleanup, persistence and project deletion semantics.
 2. Implemented: local `--host-user` authorization, `GetHostSessionAccount`, explicit
    API/CLI host creation and VM-only capability guards. Service-bound lifetime
-   and local account revocation have passed live checks; actual reboot and abrupt
-   crash recovery remain open.
+   and local account revocation have passed live checks. Abrupt executor and
+   daemon crash recovery also passed; actual host reboot remains open.
 3. Implemented in the native source: explicit Host creation with account discovery
    and confirmation, visible account/daemon labels, host-specific deletion text,
    browsable project folders, and hidden VM-only controls. Existing tab, split,
@@ -214,6 +214,36 @@ After explicit local consent, manual checks against the installed service passed
   access. Existing VM/session and project records were preserved; temporary test
   registrations were removed.
 
-These checks do not establish actual host reboot, abrupt-crash recovery, every
+Additional crash checks against daemon `4d7b1fb` passed with Go 1.26.3,
+systemd 245 and host tmux 3.0a:
+
+- Sending SIGKILL to only the account executor's main process disconnected its
+  active terminal stream. systemd cleaned up the managed shell, while test files
+  and an unrelated private tmux server survived. Socket activation recovered
+  account discovery, but stale session handles rejected directory browsing until
+  an explicit session Restart recovered terminal access.
+- Stopping the account socket and service rejected discovery, Start and Delete.
+  Failed deletion retained the session registration. Restoring socket activation
+  and explicitly restarting the session recovered terminal access.
+- Sending SIGKILL to only the daemon's main process stopped its bound executor
+  and managed shell. Automatic daemon restart reconciled the host session to
+  stopped, preserving its account, directory, project registration and files.
+  Explicit Start recovered access. This is a process crash, not a host reboot.
+- Deleting the disposable session preserved host files and removed its bookmark.
+  Existing registrations were retained, and original stopped VM states were
+  restored after the daemon's normal app autostart.
+
+The isolated, race-enabled driver recovery tests also passed 20 repetitions:
+
+```sh
+go test -race -count=20 ./internal/runtime/hostdriver
+```
+
+Those automated tests exercise socket loss/replacement, interrupted terminal
+frames, bounded stream cleanup and explicit namespace recovery. Their private
+executor has no systemd supervisor, so they explicitly clean up its tmux server;
+they do not substitute for the distinct-account live SIGKILL checks above.
+
+These checks do not establish actual host reboot, power-loss durability, every
 login-profile/tool combination, or signed native-app behavior. No VM restart or
 guest update is required merely to enable host sessions.
